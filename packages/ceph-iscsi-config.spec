@@ -26,7 +26,7 @@ and may also be used independently to manage the configuration once the environm
 is installed.
 
 %prep
-%setup -q 
+%setup -q
 
 %build
 %{__python2} setup.py build
