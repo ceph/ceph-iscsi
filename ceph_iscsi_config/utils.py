@@ -6,6 +6,8 @@ import netaddr
 import netifaces
 import struct
 import subprocess
+import rados
+
 
 class Defaults(object):
 
@@ -158,3 +160,27 @@ def convert_2_bytes(disk_size):
     return _bytes
 
 
+def get_pool_id(conf=Defaults.ceph_conf, pool_name='rbd'):
+    """
+    Query Rados to get the pool id of a given pool name
+    :param conf: ceph configuration file
+    :param pool_name: pool name (str)
+    :return: pool id (int)
+    """
+    with rados.Rados(conffile=conf) as cluster:
+        pool_id = cluster.pool_lookup(pool_name)
+
+    return pool_id
+
+
+def get_pool_name(conf=Defaults.ceph_conf, pool_id=0):
+    """
+    Query Rados to get the pool name of a given pool_id
+    :param conf: ceph configuration file
+    :param pool_name: pool id number (int)
+    :return: pool name (str)
+    """
+    with rados.Rados(conffile=conf) as cluster:
+        pool_name = cluster.pool_reverse_lookup(pool_id)
+
+    return pool_name
