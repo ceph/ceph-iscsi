@@ -2,7 +2,7 @@
 __author__ = 'paul'
 
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.utils import convert_2_bytes, shellcommand, Defaults
+from ceph_iscsi_config.utils import convert_2_bytes, shellcommand, Defaults, get_pool_id
 
 from rtslib_fb import BlockStorageObject, root
 from rtslib_fb.utils import RTSLibError, fwrite, fread
@@ -24,7 +24,7 @@ class RBDDev(object):
         self.image = image
         self.size = size
         self.pool = pool
-        self.pool_id = RBDDev.get_pool_id(pool_name=self.pool)
+        self.pool_id = get_pool_id(pool_name=self.pool)
         self.error = False
         self.error_msg = ''
         self.device_map = None
@@ -144,19 +144,6 @@ class RBDDev(object):
                 rbd_names = rbd_inst.list(ioctx)
         return rbd_names
 
-    @staticmethod
-    def get_pool_id(conf=Defaults.ceph_conf, pool_name='rbd'):
-        """
-        Query Rados to get the pool name of a given pool_id
-        :param conf: ceph configuration file
-        :param pool_name: pool name (str)
-        :return: pool id (int)
-        """
-        with rados.Rados(conffile=conf) as cluster:
-            pool_id = cluster.pool_lookup(pool_name)
-
-        return pool_id
-
 
 class LUN(object):
 
@@ -164,7 +151,9 @@ class LUN(object):
         self.logger = logger
         self.image = image
         self.pool = pool
+        self.pool_id = 0
         self.size = size
+        self.config_key = '{}/{}'.format(self.pool, self.image)
         self.allocating_host = allocating_host
         self.owner = ''                             # gateway host that owns the preferred path for this LUN
         self.error = False
@@ -192,11 +181,12 @@ class LUN(object):
     def allocate(self):
         self.logger.debug("LUN.allocate starting, getting a list of rbd devices")
         disk_list = RBDDev.rbd_list(pool=self.pool)
-        self.logger.debug("rbd pool contains the following - {}".format(disk_list))
+        self.logger.debug("rados pool '{}' contains the following - {}".format(self.pool, disk_list))
         this_host = gethostname().split('.')[0]
-        self.logger.debug("Hostname Check - this host is {}, target host for allocations is {}".format(this_host,
-                                                                                                       self.owner))
+        self.logger.debug("Hostname Check - this host is {}, target host for "
+                          "allocations is {}".format(this_host, self.allocating_host))
         rbd_image = RBDDev(self.image, self.size, self.pool)
+        self.pool_id = rbd_image.pool_id
 
         # if the image required isn't defined, create it!
         if self.image not in disk_list:
@@ -206,7 +196,7 @@ class LUN(object):
                 rbd_image.create()
 
                 if not rbd_image.error:
-                    self.config.add_item('disks', self.image)
+                    self.config.add_item('disks', self.config_key)
                     self.logger.info("(LUN.allocate) created {}/{} successfully".format(self.image, self.pool))
                     self.num_changes += 1
                 else:
@@ -228,8 +218,8 @@ class LUN(object):
                         return
         else:
             # requested image is defined to ceph, so ensure it's in the config
-            if self.image not in self.config.config['disks']:
-                self.config.add_item('disks', self.image)
+            if self.config_key not in self.config.config['disks']:
+                self.config.add_item('disks', self.config_key)
 
         self.logger.debug("Check the rbd image size matches the request")
 
@@ -268,8 +258,6 @@ class LUN(object):
             self.logger.debug('(LUN.allocate) Entry added to /etc/ceph/rbdmap for {}/{}'.format(self.pool, self.image))
             self.num_changes += 1
 
-        # Todo - Remove this line .... dm_device_name = os.path.basename(dm_device)
-
         # now see if we need to add this rbd image to LIO
         lun = self.lun_in_lio()
         if not lun:
@@ -279,7 +267,7 @@ class LUN(object):
             if this_host == self.allocating_host:
                 # first check to see if the device needs adding
                 try:
-                    wwn = self.config.config['disks'][self.image]['wwn']
+                    wwn = self.config.config['disks'][self.config_key]['wwn']
                 except KeyError:
                     wwn = ''
 
@@ -295,8 +283,14 @@ class LUN(object):
                     self.owner = LUN.set_owner(self.config.config['gateways'])
                     self.logger.debug("Owner for {} will be {}".format(self.image, self.owner))
 
-                    disk_attr = {"wwn": wwn, "owner": self.owner}
-                    self.config.update_item('disks', self.image, disk_attr)
+                    disk_attr = {"wwn": wwn,
+                                 "image": self.image,
+                                 "owner": self.owner,
+                                 "pool": self.pool,
+                                 "pool_id": rbd_image.pool_id,
+                                 "dm_device": self.dm_device}
+
+                    self.config.update_item('disks', self.config_key, disk_attr)
 
                     gateway_dict = self.config.config['gateways'][self.owner]
                     gateway_dict['active_luns'] += 1
@@ -324,10 +318,10 @@ class LUN(object):
                 waiting = 0
                 while waiting < Defaults.time_out:
                     self.config.refresh()
-                    if self.image in self.config.config['disks']:
-                        if 'wwn' in self.config.config['disks'][self.image]:
-                            if self.config.config['disks'][self.image]['wwn']:
-                                wwn = self.config.config['disks'][self.image]['wwn']
+                    if self.config_key in self.config.config['disks']:
+                        if 'wwn' in self.config.config['disks'][self.config_key]:
+                            if self.config.config['disks'][self.config_key]['wwn']:
+                                wwn = self.config.config['disks'][self.config_key]['wwn']
                                 break
                     sleep(Defaults.loop_delay)
                     waiting += Defaults.loop_delay
@@ -352,10 +346,11 @@ class LUN(object):
 
                 self.num_changes += 1
 
-        self.logger.info("Checking ALUA state for this rbd image")
+        self.logger.info("Checking ALUA state")
         # At this point we have a lun object(lun) so set/unset preferred bit for
         # active/passive multipathing
-        if self.config.config['disks'][self.image]["owner"] == this_host:
+        self.logger.debug("config meta data for this disk is {}".format(self.config.config['disks'][self.config_key]))
+        if self.config.config['disks'][self.config_key]["owner"] == this_host:
             # get LUN object for this image
             self.logger.debug("Setting alua preferred bit for image '{}'".format(self.image))
             self.set_alua(lun, '1')
@@ -389,7 +384,7 @@ class LUN(object):
 
                 # udev_path shows something like '/dev/mapper/0-8fd91515f007c' - the first component is the
                 # pool id
-                pool_id = int(stg_object.udev_path.split('-')[0])
+                pool_id = int(os.path.basename(stg_object.udev_path).split('-')[0])
                 if pool_id == self.pool_id:
                     found_it = True
                     break
