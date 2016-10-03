@@ -47,6 +47,8 @@ class GWTarget(object):
         self.logger.debug("tpg's will be defined in this order - {}".format(self.gateway_ip_list))
 
         self.changes_made = False
+        self.config_updated = False
+
         # self.portal = None
         self.target = None
         self.tpg = None
@@ -193,7 +195,11 @@ class GWTarget(object):
             # this action could be carried out by multiple nodes concurrently, but since the value
             # is the same (i.e all gateway nodes use the same iqn) it's not worth worrying about!
             if "iqn" not in gateway_group:
+                self.config_updated = True
                 config.add_item("gateways", "iqn", initial_value=self.iqn)
+            if "ip_list" not in gateway_group:
+                self.config_updated = True
+                config.add_item("gateways", "ip_list", initial_value=self.gateway_ip_list)
 
             if this_host not in gateway_group:
                 inactive_portal_ip = list(self.gateway_ip_list)
@@ -207,7 +213,11 @@ class GWTarget(object):
 
                 config.add_item("gateways", this_host)
                 config.update_item("gateways", this_host, gateway_metadata)
+                self.config_updated = True
+
+            if self.config_updated:
                 config.commit()
+
 
         elif mode == 'map':
 
