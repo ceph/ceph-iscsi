@@ -2,13 +2,15 @@
 
 __author__ = 'pcuzner@redhat.com'
 
-from socket import gethostname
-
+import os
 import rtslib_fb.root as lio_root
+
+from socket import gethostname
 from rtslib_fb.target import NodeACL, TPG
 from rtslib_fb.utils import RTSLibError
 
 from ceph_iscsi_config.common import Config, ansible_control
+from ceph_iscsi_config.utils import get_pool_name
 
 
 class GWClient(object):
@@ -22,14 +24,14 @@ class GWClient(object):
         """
         Instantiate an instance of an LIO client
         :param client_iqn: iscsi iqn string
-        :param image_list: list of rbd images to attach to this client
+        :param image_list: list of rbd images (pool/image) to attach to this client
         :param auth_type: authentication type - null or chap
         :param credentials: chap credentials in the format 'user/password'
         :return:
         """
 
         self.iqn = client_iqn
-        self.requested_images = image_list
+        self.requested_images = image_list      # images are in comma separated pool/image_name format
         self.auth_type = auth_type              # auth ... '' or chap
         self.credentials = credentials          # parameters for auth
         self.acl = None
@@ -103,7 +105,6 @@ class GWClient(object):
             if tpg.enable:
                 self.tpg = tpg
 
-
         try:
             self.acl = NodeACL(self.tpg, self.iqn)
         except RTSLibError as err:
@@ -140,7 +141,7 @@ class GWClient(object):
     def _add_lun(self, image, lun):
         """
         Add a given image to the client ACL
-        :param image: rbd image name (str)
+        :param image: rbd image name of the form pool/image (str)
         :param lun: rtslib lun object
         :return:
         """
@@ -215,7 +216,7 @@ class GWClient(object):
 
         config.add_item("clients", self.iqn)
         config.update_item("clients", self.iqn, client_metadata)
-        # persist the config update, and leave the connection to ceph open
+        # persist the config update, and leave the connection to the ceph object open
         config.commit("retain")
 
     def manage(self, rqst_type):
@@ -226,8 +227,10 @@ class GWClient(object):
         config = Config(self.logger)
 
         running_under_ansible = ansible_control()
+        self.logger.debug("(GWClient.manage) running under ansible? {}".format(running_under_ansible))
         if running_under_ansible:
             update_host = GWClient.get_update_host(config.config)
+            self.logger.debug("GWClient.manage) update host to handle any config update is {}".format(update_host))
         else:
             update_host = None
 
@@ -240,8 +243,6 @@ class GWClient(object):
             self.define_client()
             if self.error:
                 return
-
-            # only one of the
 
             if self.iqn not in config.config["clients"].keys():
                 if running_under_ansible:
@@ -279,13 +280,14 @@ class GWClient(object):
                 if running_under_ansible:
                     if update_host == gethostname().split('.')[0]:
                         # update the config object with this clients settings
-
                         config.update_item("clients", self.iqn, client_metadata)
-                        # persist the config update, and leave the connection to ceph open
+
+                        # persist the config update
                         config.commit()
                 else:
+                    # this was a removal request directly (over API?)
                     config.update_item("clients", self.iqn, client_metadata)
-                    # persist the config update, and leave the connection to ceph open
+                    # persist the config update
                     config.commit()
 
         else:
@@ -294,13 +296,15 @@ class GWClient(object):
             ###############################################################################
             if self.exists():
                 self.define_client()          # grab the client and parent tpg objects
-                self.delete()                   # deletes from the local LIO instance
+                self.delete()                 # deletes from the local LIO instance
                 if self.error:
                     return
                 else:
                     # remove this client from the config
                     if running_under_ansible:
+
                         if update_host == gethostname().split('.')[0]:
+                            self.logger.debug("Removing {} from the config object".format(self.iqn))
                             config.del_item("clients", self.iqn)
                             config.commit()
                     else:
@@ -310,7 +314,6 @@ class GWClient(object):
                 # desired state is absent, but the client does not exist in LIO - Nothing to do!
                 self.logger.info("(main) client {} removal request, but the client is not "
                             "defined to LIO...skipping".format(self.iqn))
-
 
     def validate_images(self):
         """
@@ -357,15 +360,21 @@ class GWClient(object):
             # return a dict of images assigned to this client
             for m_lun in rts_object.mapped_luns:
                 image_name = m_lun.tpg_lun.storage_object.name
-                luns_mapped[image_name] = {"lun_id": m_lun.mapped_lun,
-                                           "mapped_lun": m_lun,
-                                           "tpg_lun": m_lun.tpg_lun}
+                pool_id = int(os.path.basename(m_lun.tpg_lun.storage_object.udev_path).split('-')[0])
+                pool_name = get_pool_name(pool_id=pool_id)
+                key = "{}/{}".format(pool_name, image_name)
+                luns_mapped[key] = {"lun_id": m_lun.mapped_lun,
+                                    "mapped_lun": m_lun,
+                                    "tpg_lun": m_lun.tpg_lun}
 
         elif isinstance(rts_object, TPG):
             # return a dict of *all* images available to this tpg
             for m_lun in rts_object.luns:
                 image_name = m_lun.storage_object.name
-                luns_mapped[image_name] = {"lun_id": m_lun.lun,
-                                           "mapped_lun": None,
-                                           "tpg_lun": m_lun}
+                pool_id = int(os.path.basename(m_lun.storage_object.udev_path).split('-')[0])
+                pool_name = get_pool_name(pool_id=pool_id)
+                key = "{}/{}".format(pool_name, image_name)
+                luns_mapped[key] = {"lun_id": m_lun.lun,
+                                    "mapped_lun": None,
+                                    "tpg_lun": m_lun}
         return luns_mapped

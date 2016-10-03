@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        0.5
+Version:        0.6
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -40,6 +40,11 @@ is installed.
 %{python2_sitelib}/*
 
 %changelog
+* Mon Oct 03 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6.1
+- update LUN module to use a pool/image key, and include more meta data on the disk object
+- moved generic rados query functions to the common.utils module
+- updated the client module to handle rbd names in pool/image format
+
 * Tue Sep 27 2016 Paul Cuzner <pcuzner@redhat.com> - 0.5-1
 - initial rpm build
 
