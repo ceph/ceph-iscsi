@@ -265,7 +265,9 @@ class Config(object):
     def get_platform(cls):
 
         """
-        :return: rbd or gluster
+        determine whether we have the rbd command in the current path to denote whether the
+        envrionment is rbd or gluster based
+        :return: rbd (future...gluster?)
         """
         if (any(os.access(os.path.join(path, 'rbd'), os.X_OK)
                 for path in os.environ["PATH"].split(os.pathsep))):
@@ -277,11 +279,13 @@ class Config(object):
 def ansible_control():
     """
     establish whether ansible modules are in the current path to determine whether the code is called
-    through ansible, or directly through a module import
+    through ansible, or directly through a module import. This is done by looking at the call stack, and
+    relies on the main method in the ansible custom module being prefixed by 'ansible' e.g. ansible_main()
     :return: Boolean
     """
 
-    return "ansible.module_utils.basic" in sys.modules
+    return True if sys._getframe(2).f_code.co_name.startswith('ansible') else False
+
 
 
 def main():
