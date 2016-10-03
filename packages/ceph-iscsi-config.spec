@@ -2,7 +2,6 @@ Name:           ceph-iscsi-config
 Version:        0.5
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
-Group:          System/Tools
 
 License:        GPLv3
 URL:            https://github.com/pcuzner/ceph-iscsi-config
@@ -26,7 +25,7 @@ and may also be used independently to manage the configuration once the environm
 is installed.
 
 %prep
-%setup -q 
+%setup -q
 
 %build
 %{__python2} setup.py build
