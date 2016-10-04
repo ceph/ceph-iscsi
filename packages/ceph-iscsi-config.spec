@@ -41,7 +41,7 @@ is installed.
 
 %changelog
 * Tue Oct 04 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6.2
-- modified the way that lunid's get assigned within the lio definition in the gateway module
+- more meta data added to the gateway dict
 
 * Mon Oct 03 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6.1
 - update LUN module to use a pool/image key, and include more meta data on the disk object
