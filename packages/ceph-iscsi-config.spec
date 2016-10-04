@@ -1,6 +1,6 @@
 Name:           ceph-iscsi-config
 Version:        0.6
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
 License:        GPLv3
@@ -40,6 +40,9 @@ is installed.
 %{python2_sitelib}/*
 
 %changelog
+* Tue Oct 04 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6.2
+- modified the way that lunid's get assigned within the lio definition in the gateway module
+
 * Mon Oct 03 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6.1
 - update LUN module to use a pool/image key, and include more meta data on the disk object
 - moved generic rados query functions to the common.utils module
