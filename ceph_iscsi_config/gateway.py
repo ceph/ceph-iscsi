@@ -131,8 +131,6 @@ class GWTarget(object):
 
         lio_root = root.RTSRoot()
 
-        lun_id = 0
-
         # process each storage object added to the gateway, and map to the tpg
         for stg_object in lio_root.storage_objects:
 
@@ -142,7 +140,7 @@ class GWTarget(object):
 
                     # use the iblock number for the lun id - /sys/kernel/config/target/core/iblock_1/ansible4
                     #                                                                              ^
-                    # lun_id = int(stg_object._path.split('/')[-2].split('_')[1])
+                    lun_id = int(stg_object._path.split('/')[-2].split('_')[1])
 
                     try:
                         mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
@@ -152,7 +150,6 @@ class GWTarget(object):
                         self.error_msg = err
                         break
 
-            lun_id += 1
 
     def lun_mapped(self, tpg, storage_object):
         """
