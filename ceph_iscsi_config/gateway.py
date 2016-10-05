@@ -63,6 +63,58 @@ class GWTarget(object):
 
         return os.path.exists('/sys/kernel/config/target/iscsi/{}'.format(self.iqn))
 
+    def _get_portals(self, tpg):
+        """
+        return a list of network portal IPs allocated to a specfic tpg
+        :param tpg: tpg to check (object)
+        :return: list of IP's this tpg has (list)
+        """
+        return [portal.ip_address for portal in tpg.network_portals]
+
+    def check_tpgs(self):
+
+        # process the portal IP's in order to preserve the tpg sequence across gateways
+        requested_tpg_ips = list(self.gateway_ip_list)
+        current_tpgs = list(self.tpg_list)
+        for portal_ip in self.gateway_ip_list:
+
+            for tpg in current_tpgs:
+                if portal_ip in self._get_portals(tpg):
+                    # portal requested is defined, so remove from the list
+                    requested_tpg_ips.remove(portal_ip)
+                    current_tpgs.remove(tpg)
+                    break
+
+        # if the requested_tpg_ips list has entries, we need to add new tpg's
+        if requested_tpg_ips:
+            self.logger.info("An additional {} tpg's are required".format(len(requested_tpg_ips)))
+            for ip in requested_tpg_ips:
+                self.create_tpg(ip)
+
+    def create_tpg(self, ip):
+
+        try:
+            tpg = TPG(self.target)
+            NetworkPortal(tpg, ip)
+            self.logger.debug("(Gateway.create_target) Added tpg for portal ip {}".format(ip))
+            if ip == self.active_portal_ip:
+                tpg.enable = True
+                self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} is enabled".format(ip))
+            else:
+                tpg.enable = False
+                self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} is disabled".format(ip))
+
+            self.tpg_list.append(tpg)
+
+        except RTSLibError as err:
+            self.error_msg = err
+            self.error = True
+
+        else:
+
+            self.changes_made = True
+            self.logger.info("(Gateway.create_target) created an iscsi target with iqn of '{}'".format(self.iqn))
+
     def create_target(self):
         """
         Add an iSCSI target to LIO with this objects iqn name, and bind to the IP that
@@ -80,26 +132,20 @@ class GWTarget(object):
             # inquiry only to one of the gateways - so that gateway must provide details for the whole configuration
             self.logger.debug("Creating tpgs")
             for ip in self.gateway_ip_list:
-
-                tpg = TPG(self.target)
-                NetworkPortal(tpg, ip)
-                self.logger.debug("(Gateway.create_target) Added tpg for portal ip {}".format(ip))
-                if ip == self.active_portal_ip:
-                    tpg.enable = True
-                    self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} is enabled".format(ip))
-                else:
-                    tpg.enable = False
-                    self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} is disabled".format(ip))
-
-                self.tpg_list.append(tpg)
+                self.create_tpg(ip)
+                if self.error:
+                    self.logger.critical("Unable to create the TPG for {} - {}".format(ip, self.error_msg))
 
         except RTSLibError as err:
             self.error_msg = err
+            self.logger.critical("Unable to create the Target definition - {}".format(self.error_msg))
             self.error = True
-            self.delete()
 
-        self.changes_made = True
-        self.logger.info("(Gateway.create_target) created an iscsi target with iqn of '{}'".format(self.iqn))
+        if self.error:
+            self.delete()
+        else:
+            self.changes_made = True
+            self.logger.info("(Gateway.create_target) created an iscsi target with iqn of '{}'".format(self.iqn))
 
     def load_config(self):
         """
@@ -186,8 +232,13 @@ class GWTarget(object):
 
             if self.exists():
                 self.load_config()
+                self.check_tpgs()
             else:
                 self.create_target()
+
+            if self.error:
+                # return to caller, with error state set
+                return
 
             # ensure that the config object has an entry for this gateway
             this_host = socket.gethostname().split('.')[0]
@@ -216,10 +267,21 @@ class GWTarget(object):
                 config.add_item("gateways", this_host)
                 config.update_item("gateways", this_host, gateway_metadata)
                 self.config_updated = True
+            else:
+                # gateway already defined, so check that the IP list it has matches the
+                # current request
+                gw_details = config.config['gateways'][this_host]
+                if cmp(gw_details['gateway_ip_list'], self.gateway_ip_list) != 0:
+                    inactive_portal_ip = list(self.gateway_ip_list)
+                    inactive_portal_ip.remove(self.active_portal_ip)
+                    gw_details['tpgs'] = len(self.tpg_list)
+                    gw_details['gateway_ip_list'] = self.gateway_ip_list
+                    gw_details['inactive_portal_ips'] = inactive_portal_ip
+                    config.update_item('gateways', this_host, gw_details)
+                    self.config_updated = True
 
             if self.config_updated:
                 config.commit()
-
 
         elif mode == 'map':
 
