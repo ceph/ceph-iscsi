@@ -1,7 +1,8 @@
 [Unit]
 Description=Setup system to export rbd images through LIO
 
-After=network-online.target multipathd.service
+Requires=sys-kernel-config.mount
+After=sys-kernel-config.mount network-online.target multipathd.service
 Wants=network-online.target multipathd.service
 
 [Service]
