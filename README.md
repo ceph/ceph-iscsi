@@ -1,21 +1,34 @@
 #ceph-iscsi-config  
-This project provides common logic for creating and managing LIO gateways for ceph. In addition to   
-configuration logic, the package also provides a "Config" class that provides a common interface to  
-a configuration object stored in rados, which describes the iscsi gateway state; it's gateway members,  
-the rbd images exposed through the gateways, and the client definitions that link a client iqn to a  
-set of rbd images.  
+This project provides the common logic for creating and managing LIO gateways for ceph, together with a startup daemon  
+called rbd-target-gw which is responsible for restoring the state of LIO following a gateway reboot/outage.
 
 ##Usage
-This package should be installed on each node that is intended to be an iSCSI gateway, providing a common  
-interface for LUN, Gateway and client management. The modules themselves are typically called by the  
-Ansible modules defined in ceph-iscsi-ansible project (https://github.com/pcuzner/ceph-iscsi-ansible).
+This package should be installed on each node that is intended to be an iSCSI gateway. The config modules are used by    
+the rbd-target-gw daemon to restore LIO state at boot time, and also by the Ansible modules defined in the ceph-iscsi-ansible  
+project at https://github.com/pcuzner/ceph-iscsi-ansible
 
 ##Installation
-The repo provides setup.py to install natively from python, or an rpm to simplify installation (in the  
-archive's packages directory). 
+###Via RPM
+Simply install the provided rpm with  
+```rpm -ivh ceph-iscsi-config-<ver>.el7.noarch.rpm```  
+
+###Manually
+
+To install the python package that provides the application logic, run the provided setup.py script  
+i.e. ```> python setup.py install```   
+
+For the management daemon (rbd-target-gw), simply copy the following files into their equivalent places on each gateway  
+- <archive_root>/lib/systemd/system/rbd-target-gw.service  --> /lib/systemd/system  
+- <archive_root>/usr/bin/rbd-target-gw --> /usr/bin  
+
+Once the daemon is in place, reload the configuration with  
+```  
+systemctl daemon-reload
+systemctl enable rbd-target-gw 
+```
 
 ##Features
-The functionality provided by each module is summarised below;
+The functionality provided by each module in the python package is summarised below;
 
 | module | Description |
 | --- | --- |
@@ -25,7 +38,15 @@ The functionality provided by each module is summarised below;
 | **lun** | rbd image management (create/resize), combined with mapping to the OS and LIO instance |
 | **utils** | common code called by multiple modules |
   
-  
+The rbd-target-gw daemon performs the following tasks;  
+  1. At start up remove any osd blacklist entry that may apply to the running host  
+  2. Read the configuration object from Rados  
+  3. Process the configuration  
+  3.1 map rbd's to the host  
+  3.2 add rbd's to LIO  
+  3.3 Create the iscsi target, TPG's and port IP's  
+  3.4 Define clients (NodeACL's)  
+  3.5 add the required rbd images to clients  
 
 
 

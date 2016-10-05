@@ -1,0 +1,16 @@
+[Unit]
+Description=Setup system to export rbd images through LIO
+
+After=network-online.target multipathd.service
+Wants=network-online.target multipathd.service
+
+[Service]
+EnvironmentFile=-/etc/sysconfig/ceph
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/rbd-target-gw
+ExecReload=/usr/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target

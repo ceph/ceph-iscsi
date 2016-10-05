@@ -1,6 +1,6 @@
 Name:           ceph-iscsi-config
-Version:        0.6
-Release:        2%{?dist}
+Version:        0.7
+Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
 License:        GPLv3
@@ -32,14 +32,26 @@ is installed.
 
 %install
 %{__python2} setup.py install -O1 --skip-build --root %{buildroot}
+mkdir -p %{buildroot}/lib/systemd/system
+mkdir -p %{buildroot}/usr/bin
+install -m 0644 lib/systemd/system/rbd-target-gw.service %{buildroot}/lib/systemd/system
+install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 
+%post
+/bin/systemctl --system daemon-reload &> /dev/null || :
+/bin/systemctl --system enable rbd-target-gw &> /dev/null || :
 
 %files
 %doc LICENSE
 %doc README
 %{python2_sitelib}/*
+%{_bindir}/rbd-target-gw
+/lib/systemd/system/rbd-target-gw.service
 
 %changelog
+* Wed Oct 05 2016 Paul Cuzner <pcuzner@redhat.com> - 0.7.1
+- added rbd-target-gw daemon (started at boot)
+
 * Tue Oct 04 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6.2
 - more meta data added to the gateway dict
 
