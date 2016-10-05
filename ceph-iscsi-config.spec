@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        0.7
+Version:        0.8
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -49,6 +49,10 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 /lib/systemd/system/rbd-target-gw.service
 
 %changelog
+* Thu Oct 06 2016 Paul Cuzner <pcuzner@redhat.com> - 0.8.1
+- fixed tpg creation on existing gateways when a new gateway(s) is added to the configuration
+- removed rpm packages from the source archive
+
 * Wed Oct 05 2016 Paul Cuzner <pcuzner@redhat.com> - 0.7.1
 - added rbd-target-gw daemon (started at boot)
 
