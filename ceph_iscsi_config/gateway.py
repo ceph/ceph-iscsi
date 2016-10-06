@@ -260,7 +260,7 @@ class GWTarget(object):
                 gateway_metadata = {"portal_ip_address": self.active_portal_ip,
                                     "iqn": self.iqn,
                                     "active_luns": 0,
-                                    "tpgs:": len(self.tpg_list),
+                                    "tpgs": len(self.tpg_list),
                                     "inactive_portal_ips": inactive_portal_ip,
                                     "gateway_ip_list": self.gateway_ip_list}
 
