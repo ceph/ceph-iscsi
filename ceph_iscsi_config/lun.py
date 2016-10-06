@@ -125,8 +125,14 @@ class RBDDev(object):
 
         # At this point the rbd image is not in showmap output, so map it
         self.map_needed = True
-        map_cmd = 'rbd map -o noshare {}/{}'.format(self.pool, self.image)
+        # lock_on_read was not merged until RHCS 2.1. We temporarily
+        # support it on/off to make the transition during devel easier
+        map_cmd = 'rbd map -o noshare,lock_on_read {}/{}'.format(self.pool, self.image)
         response = shellcommand(map_cmd)
+        if response is None:
+            map_cmd = 'rbd map -o noshare {}/{}'.format(self.pool, self.image)
+            response = shellcommand(map_cmd)
+
         if response:
             self.device_map = response.rstrip()
 
