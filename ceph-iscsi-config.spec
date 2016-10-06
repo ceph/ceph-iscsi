@@ -19,10 +19,10 @@ BuildRequires:  python-devel
 BuildRequires:  python-setuptools
 
 %description
-Python package providing the modules used to handle the configuration of an iSCSI
-gateway, backed by ceph/kRBD. The modules are consumed by custom Ansible modules
-and may also be used independently to manage the configuration once the environment
-is installed.
+Python package providing the modules used to handle the configuration of an
+iSCSI gateway, backed by ceph/kRBD. The modules are consumed by custom Ansible
+modules and may also be used independently to manage the configuration once the
+environment is installed.
 
 %prep
 %setup -q
