@@ -49,17 +49,17 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 /lib/systemd/system/rbd-target-gw.service
 
 %changelog
-* Thu Oct 06 2016 Paul Cuzner <pcuzner@redhat.com> - 0.8.1
+* Thu Oct 06 2016 Paul Cuzner <pcuzner@redhat.com> - 0.8-1
 - fixed tpg creation on existing gateways when a new gateway(s) is added to the configuration
 - removed rpm packages from the source archive
 
-* Wed Oct 05 2016 Paul Cuzner <pcuzner@redhat.com> - 0.7.1
+* Wed Oct 05 2016 Paul Cuzner <pcuzner@redhat.com> - 0.7-1
 - added rbd-target-gw daemon (started at boot)
 
-* Tue Oct 04 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6.2
+* Tue Oct 04 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6-2
 - more meta data added to the gateway dict
 
-* Mon Oct 03 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6.1
+* Mon Oct 03 2016 Paul Cuzner <pcuzner@redhat.com> - 0.6-1
 - update LUN module to use a pool/image key, and include more meta data on the disk object
 - moved generic rados query functions to the common.utils module
 - updated the client module to handle rbd names in pool/image format
