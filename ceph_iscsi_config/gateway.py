@@ -101,8 +101,12 @@ class GWTarget(object):
                 tpg.enable = True
                 self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} is enabled".format(ip))
             else:
+                # disable the tpg on this host
                 tpg.enable = False
-                self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} is disabled".format(ip))
+                # by disabling tpg_enabled_sendtargets, discovery to just one node will return all portals
+                # default is 1
+                tpg.set_attribute('tpg_enabled_sendtargets', 0)
+                self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} as disabled".format(ip))
 
             self.tpg_list.append(tpg)
 
