@@ -9,7 +9,7 @@ from socket import gethostname
 from rtslib_fb.target import NodeACL, TPG
 from rtslib_fb.utils import RTSLibError
 
-from ceph_iscsi_config.common import Config, ansible_control
+from ceph_iscsi_config.common import Config, ansible_control, stack_list
 from ceph_iscsi_config.utils import get_pool_name
 
 
@@ -42,6 +42,7 @@ class GWClient(object):
         self.tpg_luns = {}
         self.lun_id_list = range(256)           # available LUN ids 0..255
         self.change_count = 0
+        self.commit_enabled = True              # enable commit to the config for changes by default
         self.logger = logger
 
     def setup_luns(self):
@@ -113,30 +114,34 @@ class GWClient(object):
             self.error = True
             self.error_msg = err
         else:
-            self.change_count += 1
             self.logger.info("(Client.define_client) {} added successfully".format(self.iqn))
+            self.change_count += 1
+
 
     def configure_auth(self):
         """
-        Attempt to configure authentication for the client, given the credentials provided
+        Attempt to configure authentication for the client
         :return:
         """
+        client_username, client_password = self.credentials.split('/')
 
         try:
-            client_username, client_password = self.credentials.split('/')
+            # if the credential I have are already in the config then disable updates
 
             if self.acl.chap_userid == '' or self.acl.chap_userid != client_username:
                 self.acl.chap_userid = client_username
                 self.logger.info("(Client.configure_auth) chap user name changed for {}".format(self.iqn))
                 self.change_count += 1
+
             if self.acl.chap_password == '' or self.acl.chap_password != client_password:
                 self.acl.chap_password = client_password
                 self.logger.info("(Client.configure_auth) chap password changed for {}".format(self.iqn))
+                self.change_count += 1
 
         except RTSLibError as err:
             self.error = True
-            self.error_msg = "Unable to (re)configure chap - ".format(err)
-            self.logger.error("Client.configure_auth) failed to set credentials on node")
+            self.error_msg = "Unable to (re)configure authentication for {} - ".format(self.iqn, err)
+            self.logger.error("Client.configure_auth) failed to set credentials for {}".format(self.iqn))
 
     def _add_lun(self, image, lun):
         """
@@ -222,12 +227,14 @@ class GWClient(object):
     def manage(self, rqst_type):
         """
         Manage the allocation or removal of this client
+        :param rqst_type is either present (try and create the nodeACL), or absent - delete the nodeACL
         """
         # Build a local object representing the rados configuration object
         config = Config(self.logger)
 
         running_under_ansible = ansible_control()
         self.logger.debug("(GWClient.manage) running under ansible? {}".format(running_under_ansible))
+
         if running_under_ansible:
             update_host = GWClient.get_update_host(config.config)
             self.logger.debug("GWClient.manage) update host to handle any config update is {}".format(update_host))
@@ -239,6 +246,17 @@ class GWClient(object):
             ###############################################################################
             # Ensure the client exists in LIO                                             #
             ###############################################################################
+
+            # first look at the request to see if it matches the settings already in the config
+            # object - if so this is just a rerun, or a reboot so config object updates are not
+            # needed when we change the LIO environment
+            if self.iqn in config.config['clients'].keys():
+                meta_data = config.config['clients'][self.iqn]
+                if self.credentials == meta_data['credentials'] and \
+                   self.requested_images == meta_data['image_list']:
+                    self.commit_enabled = False
+
+            self.logger.debug("(manage) changes made will commit to the config : {}".format(self.commit_enabled))
 
             self.define_client()
             if self.error:
@@ -259,7 +277,9 @@ class GWClient(object):
                 if self.error:
                     return
 
-                if self.auth_type in GWClient.supported_access_types:
+                if self.auth_type in GWClient.supported_access_types and \
+                   '/' in self.credentials:
+
                     self.configure_auth()
                     if self.error:
                         return
@@ -272,23 +292,26 @@ class GWClient(object):
                 self.error_msg = "Non-existent images {} requested for {}".format(bad_images, self.iqn)
                 return
 
-            # check the client object's change count, and update the config object is this is the updating host
+            # check the client object's change count, and update the config object if this is the updating host
             if self.change_count > 0:
                 client_metadata = {"image_list": self.requested_images,
                                    "credentials": self.credentials}
 
-                if running_under_ansible:
-                    if update_host == gethostname().split('.')[0]:
-                        # update the config object with this clients settings
-                        config.update_item("clients", self.iqn, client_metadata)
+                if self.commit_enabled:
 
+                    if running_under_ansible:
+                        if update_host == gethostname().split('.')[0]:
+                            # update the config object with this clients settings
+                            config.update_item("clients", self.iqn, client_metadata)
+
+                            # persist the config update
+                            config.commit()
+                    else:
+
+                        # this was a request directly (over API?)
+                        config.update_item("clients", self.iqn, client_metadata)
                         # persist the config update
                         config.commit()
-                else:
-                    # this was a removal request directly (over API?)
-                    config.update_item("clients", self.iqn, client_metadata)
-                    # persist the config update
-                    config.commit()
 
         else:
             ###############################################################################
