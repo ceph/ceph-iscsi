@@ -284,7 +284,7 @@ def ansible_control():
     :return: Boolean
     """
 
-    return True if sys._getframe(2).f_code.co_name.startswith('ansible') else False
+    return sys._getframe(2).f_code.co_name.startswith('ansible')
 
 
 
