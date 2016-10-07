@@ -9,7 +9,7 @@ from socket import gethostname
 from rtslib_fb.target import NodeACL, TPG
 from rtslib_fb.utils import RTSLibError
 
-from ceph_iscsi_config.common import Config, ansible_control, stack_list
+from ceph_iscsi_config.common import Config, ansible_control
 from ceph_iscsi_config.utils import get_pool_name
 
 
