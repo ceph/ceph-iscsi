@@ -357,17 +357,7 @@ class LUN(object):
 
                 self.num_changes += 1
 
-        self.logger.info("Checking ALUA state")
-        # At this point we have a lun object(lun) so set/unset preferred bit for
-        # active/passive multipathing
         self.logger.debug("config meta data for this disk is {}".format(self.config.config['disks'][self.config_key]))
-        if self.config.config['disks'][self.config_key]["owner"] == this_host:
-            # get LUN object for this image
-            self.logger.debug("Setting alua preferred bit for image '{}'".format(self.image))
-            self.set_alua(lun, '1')
-        else:
-            self.set_alua(lun, '0')
-            self.logger.debug("Clearing alua preferred bit for image '{}'".format(self.image))
 
         # the owning host for an image is the only host that commits to the config
         if this_host == self.allocating_host and self.config.changed:
@@ -419,43 +409,6 @@ class LUN(object):
             self.error_msg = "failed to add {} to LIO - error({})".format(self.image, str(err))
 
         return new_lun
-
-    def set_alua(self, lun_object, pref):
-        """
-        Sets the ALUA state of a LUN to active. All LUNS are exposed as active, but their preferred bit
-        is modified to allow the active path to be balanced across the gateway nodes
-        :param lun_object: LIO LUN object
-        :param pref: 1 = preferred, 0 = non preferred (str)
-        :return: None
-        """
-
-        configfs_path = lun_object.path
-        lun_name = lun_object.name
-        alua_access_state = 'alua/default_tg_pt_gp/alua_access_state'
-        alua_access_type = 'alua/default_tg_pt_gp/alua_access_type'
-        alua_preferred = 'alua/default_tg_pt_gp/preferred'
-
-        type_fullpath = os.path.join(configfs_path, alua_access_type)
-        if fread(type_fullpath) != 'Implicit':
-            self.logger.info("(set_alua) Switching device alua access type to Implicit - "
-                             "i.e. active path set by gateways")
-            fwrite(type_fullpath, '1')
-        else:
-            self.logger.debug("(set_alua) alua_access_type for {} is correct, no change needed".format(lun_name))
-
-        state_fullpath = os.path.join(configfs_path, alua_access_state)
-        if fread(state_fullpath) != "0":
-            self.logger.debug("(set_alua) Updating alua_access_state for {} to active".format(lun_name))
-            fwrite(state_fullpath, "0")
-        else:
-            self.logger.debug("(set_alua) alua_access_state for {} is correct, no change needed".format(lun_name))
-
-        pref_fullpath = os.path.join(configfs_path, alua_preferred)
-        if fread(pref_fullpath) != pref:
-            self.logger.debug("(set_alua) Updating alua_preferred state to {} for {}".format(pref, lun_name))
-            fwrite(pref_fullpath, pref)
-        else:
-            self.logger.debug("(set_alua) alua preferred state for {} is correct, no change needed".format(lun_name))
 
     @staticmethod
     def set_owner(gateways):

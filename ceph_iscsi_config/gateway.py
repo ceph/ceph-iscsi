@@ -9,6 +9,7 @@ from rtslib_fb.fabric import ISCSIFabricModule
 from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError
 
+from ceph_iscsi_config.alua import ALUATargetPortGroup
 from ceph_iscsi_config.utils import ipv4_addresses
 from ceph_iscsi_config.common import Config
 
@@ -172,14 +173,77 @@ class GWTarget(object):
             self.error = True
 
         self.logger.info("(Gateway.load_config) successfully loaded existing target definition")
+    def bind_alua_group_to_lun(self, config, stg_object, tpg, lun):
+        """
+        bind lun to one of the groups made above. If the current
+        iSCSI tpg's ip address matches the ipaddress of the host
+        that owns the disk/lun, then set the alua group to AO.
+        If not, then set it to ANO.
 
-    def map_luns(self):
+        param config: Config object
+        param stg_object: Storage object
+        param tpg: target port group LUN is attached to.
+        """
+
+        # TODO ask paul if there is a faster way to lookup like
+        # finding the pool name so we can just lookup based on pool/name
+        for disk in config.config["disks"].keys():
+
+            dm_dev = config.config["disks"][disk]["dm_device"]
+            if dm_dev == stg_object.udev_path:
+                owner = config.config["disks"][disk]["owner"]
+                for ip in tpg.network_portals:
+
+                    if config.config["gateways"][owner]["portal_ip_address"] == ip.ip_address:
+                        alua_tpg = ALUATargetPortGroup(stg_object, "ao")
+                        alua_tpg.bind_to_lun(lun)
+                        break
+                else:
+                        alua_tpg = ALUATargetPortGroup(stg_object, "ano")
+                        alua_tpg.bind_to_lun(lun)
+                break
+
+
+
+    def map_luns(self, config):
         """
         LIO will have blockstorage objects already defined by the igw_lun module, so this
         method, brings those objects into the gateways TPG
         """
 
         lio_root = root.RTSRoot()
+
+        # setup a ALUA group for local and remote tpgs for each backstore
+        # device we are going to map a lun to.
+        for stg_object in lio_root.storage_objects:
+
+            # TODO: We need to create a lun group per for the luns
+            # owned by each host or each lun's alua group should have
+            # different group id values. OSs do not care, but to be
+            # compliant with the SCSI spec we should one day one or the other.
+            i = 1;
+            for tpg in self.tpg_list:
+                try:
+                    if i == 1:
+                        alua_tpg = ALUATargetPortGroup(stg_object, "ao", i)
+                        alua_tpg.alua_access_state = 0
+                        alua_tpg.alua_access_type = 1
+                        alua_tpg.alua_support_offline = 0
+                        alua_tpg.alua_support_unavailable = 0
+                        alua_tpg.alua_support_standby = 0
+                    else:
+                        alua_tpg = ALUATargetPortGroup(stg_object, "ano", i)
+                        alua_tpg.alua_access_state = 1
+                        alua_tpg.alua_access_type = 1
+                        alua_tpg.alua_support_offline = 0
+                        alua_tpg.alua_support_unavailable = 0
+                        alua_tpg.alua_support_standby = 0
+                    i = i + 1
+                except RTSLibError as err:
+                    # ignore. Group could have been created already if this
+                    # was an update. Will find out below if it was a hard
+                    # error
+                    continue
 
         # process each storage object added to the gateway, and map to the tpg
         for stg_object in lio_root.storage_objects:
@@ -200,6 +264,7 @@ class GWTarget(object):
                         self.error_msg = err
                         break
 
+                    self.bind_alua_group_to_lun(config, stg_object, tpg, mapped_lun)
 
     def lun_mapped(self, tpg, storage_object):
         """
@@ -293,7 +358,7 @@ class GWTarget(object):
 
                 self.load_config()
 
-                self.map_luns()
+                self.map_luns(config)
 
             else:
                 self.error = True
