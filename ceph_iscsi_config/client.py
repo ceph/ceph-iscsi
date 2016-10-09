@@ -231,6 +231,10 @@ class GWClient(object):
         """
         # Build a local object representing the rados configuration object
         config = Config(self.logger)
+        if config.error:
+            self.error = True
+            self.error_msg = config.error_msg
+            return
 
         running_under_ansible = ansible_control()
         self.logger.debug("(GWClient.manage) running under ansible? {}".format(running_under_ansible))

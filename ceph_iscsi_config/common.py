@@ -27,10 +27,16 @@ class CephCluster(object):
     def __init__(self,
                  conf_file='/etc/ceph/ceph.conf',
                  conf_keyring='/etc/ceph/ceph.client.admin.keyring'):
-
+        self.error = False
+        self.error_msg = ''
         self.cluster = rados.Rados(conffile=conf_file,
                                    conf=dict(keyring=conf_keyring))
-        self.cluster.connect()
+        try:
+            self.cluster.connect()
+        except rados.Error as err:
+            self.error = True
+            self.error_msg = "Unable to connect to the cluster (keyring missing?) - {}".format(err)
+
 
     def shutdown(self):
         self.cluster.shutdown()
@@ -63,8 +69,14 @@ class Config(object):
 
         if self.platform == 'rbd':
             self.ceph = CephCluster()
-            self.get_config = self._get_rbd_config
-            self.commit_config = self._commit_rbd
+            if self.ceph.error:
+                self.error = True
+                self.error_msg = self.ceph.error_msg
+                return
+            else:
+                # connection to the ceph cluster is OK to use
+                self.get_config = self._get_rbd_config
+                self.commit_config = self._commit_rbd
         else:
             self.error = True
             self.error_msg = "Unsupported platform - rbd only (for now!)"
