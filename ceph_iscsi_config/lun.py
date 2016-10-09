@@ -166,7 +166,12 @@ class LUN(object):
         self.error_msg = ''
         self.num_changes = 0
         self.dm_device = ''                         # e.g. /dev/mapper/0-58f8b515f007c
+
         self.config = Config(logger)
+        if self.config.error:
+            self.error = self.config.error
+            self.error_msg = self.config.error_msg
+            return
 
         self._validate_request()
 
