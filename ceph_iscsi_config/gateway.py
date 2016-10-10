@@ -106,7 +106,7 @@ class GWTarget(object):
                 tpg.enable = False
                 # by disabling tpg_enabled_sendtargets, discovery to just one node will return all portals
                 # default is 1
-                tpg.set_attribute('tpg_enabled_sendtargets', 0)
+                tpg.set_attribute('tpg_enabled_sendtargets', '0')
                 self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} as disabled".format(ip))
 
             self.tpg_list.append(tpg)
@@ -221,7 +221,7 @@ class GWTarget(object):
             # owned by each host or each lun's alua group should have
             # different group id values. OSs do not care, but to be
             # compliant with the SCSI spec we should one day one or the other.
-            i = 1;
+            i = 1
             for tpg in self.tpg_list:
                 try:
                     if i == 1:
@@ -238,7 +238,7 @@ class GWTarget(object):
                         alua_tpg.alua_support_offline = 0
                         alua_tpg.alua_support_unavailable = 0
                         alua_tpg.alua_support_standby = 0
-                    i = i + 1
+                    i += 1
                 except RTSLibError as err:
                     # ignore. Group could have been created already if this
                     # was an update. Will find out below if it was a hard
