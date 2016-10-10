@@ -127,7 +127,7 @@ def osd_blacklist_cleanup():
             # We have entries to look for, so first build a list of ipv4 addresses on this node
             ipv4_list = []
             for iface in netifaces.interfaces():
-                dev_info = netifaces.ifaddresses(iface)[netifaces.AF_INET]
+                dev_info = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
                 ipv4_list += [dev['addr'] for dev in dev_info]
 
             # process the entries (first entry just says "Listed X entries, last entry is just null)
