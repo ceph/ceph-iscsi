@@ -135,7 +135,7 @@ def osd_blacklist_cleanup():
 
                 # valid entries to process look like -
                 # 192.168.122.101:0/3258528596 2016-09-28 18:23:15.307227
-                blacklisted_ip = blacklist_entry.split(':')[0]
+                blacklisted_ip = blacklist_entry.split(' ')[0]
                 # Look for this hosts ipv4 address in the blacklist
 
                 if blacklisted_ip in ipv4_list:
