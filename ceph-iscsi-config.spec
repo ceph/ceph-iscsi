@@ -1,6 +1,6 @@
 Name:           ceph-iscsi-config
 Version:        1.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
 License:        GPLv3
@@ -49,7 +49,10 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 /lib/systemd/system/rbd-target-gw.service
 
 %changelog
-* Mon Oct 10 2016 Paul Cuzner <pcuzner@redhat.com> - 1.0-1
+* Tue Oct 11 2016 Paul Cuzner <pcuzner@redhat.com> - 1.0-2
+- Minor patches to the rbd-target-gw script from Mike Christie
+
+* Mon Oct 10 2016 Paul Cuzner <pcuzner@redhat.com> - 1.0-2
 - Included initial patch from Mike Christie for alua portal group support
 
 * Thu Oct 06 2016 Paul Cuzner <pcuzner@redhat.com> - 0.8-1
