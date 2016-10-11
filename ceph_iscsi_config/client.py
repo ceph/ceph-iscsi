@@ -108,6 +108,11 @@ class GWClient(object):
 
         try:
             self.acl = NodeACL(self.tpg, self.iqn)
+            # Set safest timeouts for ERL0 use, and rely on the
+            # initiator's multipath layer to drive detection and
+            # recovery, because we currently cannot do anything
+            self.acl.set_attribute('dataout_timeout', '30')
+            self.acl.set_attribute('nopin_timeout', '30')
         except RTSLibError as err:
             self.logger.error("(Client.define_client) FAILED to define {}".format(self.iqn))
             self.logger.debug("(Client.define_client) failure msg {}".format(err))
