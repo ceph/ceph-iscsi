@@ -10,16 +10,16 @@ from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError
 
 from ceph_iscsi_config.alua import ALUATargetPortGroup
-from ceph_iscsi_config.utils import ipv4_addresses
+from ceph_iscsi_config.utils import ipv4_addresses, get_pool_name
 from ceph_iscsi_config.common import Config
-
+from socket import gethostname
 
 class GWTarget(object):
     """
     Class representing the state of the local LIO environment
     """
 
-    def __init__(self, logger, iqn, gateway_ip_list):
+    def __init__(self, logger, iqn, gateway_ip_list, enable_portal=True):
         """
         Instantiate the class
         :param iqn: iscsi iqn name for the gateway
@@ -29,6 +29,8 @@ class GWTarget(object):
 
         self.error = False
         self.error_msg = ''
+
+        self.enable_portal = enable_portal      # boolean to trigger portal IP creation
 
         self.logger = logger                # logger object
 
@@ -92,16 +94,36 @@ class GWTarget(object):
             for ip in requested_tpg_ips:
                 self.create_tpg(ip)
 
+    def enable_active_tpg(self):
+        """
+        Add the relevant ip to the active/enabled tpg within the target
+        :return: None
+        """
+
+        for tpg in self.tpg_list:
+            if tpg._get_enable():
+
+                try:
+                    NetworkPortal(tpg, self.active_portal_ip)
+                except RTSLibError as e:
+                    self.error = True
+                    self.error_msg = e
+                else:
+                    break
+
     def create_tpg(self, ip):
 
         try:
             tpg = TPG(self.target)
-            NetworkPortal(tpg, ip)
+
             self.logger.debug("(Gateway.create_target) Added tpg for portal ip {}".format(ip))
             if ip == self.active_portal_ip:
+                if self.enable_portal:
+                    NetworkPortal(tpg, ip)
                 tpg.enable = True
                 self.logger.debug("(Gateway.create_target) Added tpg for portal ip {} is enabled".format(ip))
             else:
+                NetworkPortal(tpg, ip)
                 # disable the tpg on this host
                 tpg.enable = False
                 # by disabling tpg_enabled_sendtargets, discovery to just one node will return all portals
@@ -173,37 +195,37 @@ class GWTarget(object):
             self.error = True
 
         self.logger.info("(Gateway.load_config) successfully loaded existing target definition")
-    def bind_alua_group_to_lun(self, config, stg_object, tpg, lun):
+
+    def bind_alua_group_to_lun(self, config, stg_object, lun):
         """
-        bind lun to one of the groups made above. If the current
-        iSCSI tpg's ip address matches the ipaddress of the host
-        that owns the disk/lun, then set the alua group to AO.
-        If not, then set it to ANO.
+        bind lun to one of the alua groups. Query the config to see who
+        'owns' the primary path for this LUN. Then either bind the LUN
+        to the ALUA 'AO' group if the host matches, or default to the
+        'ANO' alua group
 
         param config: Config object
         param stg_object: Storage object
-        param tpg: target port group LUN is attached to.
+        param lun: lun object on the tpg
         """
 
-        # TODO ask paul if there is a faster way to lookup like
-        # finding the pool name so we can just lookup based on pool/name
-        for disk in config.config["disks"].keys():
+        # turn the stg_object into the key of the disks dict
+        pool_number = int(os.path.basename(stg_object.udev_path).split('-')[0])
+        pool_name = get_pool_name(pool_id=pool_number)
+        disk_key = "{}/{}".format(pool_name,
+                                  stg_object.name)
 
-            dm_dev = config.config["disks"][disk]["dm_device"]
-            if dm_dev == stg_object.udev_path:
-                owner = config.config["disks"][disk]["owner"]
-                for ip in tpg.network_portals:
+        owning_gw = config.config['disks'][disk_key]['owner']
 
-                    if config.config["gateways"][owner]["portal_ip_address"] == ip.ip_address:
-                        alua_tpg = ALUATargetPortGroup(stg_object, "ao")
-                        alua_tpg.bind_to_lun(lun)
-                        break
-                else:
-                        alua_tpg = ALUATargetPortGroup(stg_object, "ano")
-                        alua_tpg.bind_to_lun(lun)
-                break
+        this_host = gethostname().split('.')[0]
 
-
+        if this_host == owning_gw:
+            self.logger.info("setting {} to ALUA/ActiveOptimised".format(stg_object.name))
+            alua_tpg = ALUATargetPortGroup(stg_object, "ao")
+            alua_tpg.bind_to_lun(lun)
+        else:
+            self.logger.info("setting {} to ALUA/ActiveNONOptimised".format(stg_object.name))
+            alua_tpg = ALUATargetPortGroup(stg_object, "ano")
+            alua_tpg.bind_to_lun(lun)
 
     def map_luns(self, config):
         """
@@ -221,24 +243,24 @@ class GWTarget(object):
             # owned by each host or each lun's alua group should have
             # different group id values. OSs do not care, but to be
             # compliant with the SCSI spec we should one day one or the other.
-            i = 1
+
             for tpg in self.tpg_list:
                 try:
-                    if i == 1:
-                        alua_tpg = ALUATargetPortGroup(stg_object, "ao", i)
+                    if tpg.tag == 1:
+                        alua_tpg = ALUATargetPortGroup(stg_object, "ao", tpg.tag)
                         alua_tpg.alua_access_state = 0
                         alua_tpg.alua_access_type = 1
                         alua_tpg.alua_support_offline = 0
                         alua_tpg.alua_support_unavailable = 0
                         alua_tpg.alua_support_standby = 0
                     else:
-                        alua_tpg = ALUATargetPortGroup(stg_object, "ano", i)
+                        alua_tpg = ALUATargetPortGroup(stg_object, "ano", tpg.tag)
                         alua_tpg.alua_access_state = 1
                         alua_tpg.alua_access_type = 1
                         alua_tpg.alua_support_offline = 0
                         alua_tpg.alua_support_unavailable = 0
                         alua_tpg.alua_support_standby = 0
-                    i += 1
+
                 except RTSLibError as err:
                     # ignore. Group could have been created already if this
                     # was an update. Will find out below if it was a hard
@@ -264,7 +286,7 @@ class GWTarget(object):
                         self.error_msg = err
                         break
 
-                    self.bind_alua_group_to_lun(config, stg_object, tpg, mapped_lun)
+                    self.bind_alua_group_to_lun(config, stg_object, mapped_lun)
 
     def lun_mapped(self, tpg, storage_object):
         """
