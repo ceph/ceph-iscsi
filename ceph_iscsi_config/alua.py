@@ -177,6 +177,19 @@ class ALUATargetPortGroup(CFSNode):
         path = "%s/tg_pt_gp_id" % self.path
         return int(fread(path))
 
+    def _get_nonop_delay_msecs(self):
+        self._check_self()
+        path = "%s/nonop_delay_msecs" % self.path
+        return int(fread(path))
+
+    def _set_nonop_delay_msecs(self, delay):
+        self._check_self()
+        path = "%s/nonop_delay_msecs" % self.path
+        try:
+            fwrite(path, str(int(delay)))
+        except IOError as e:
+            raise RTSLibError("Cannot set nonop_delay_msecs: %s" % e)
+
     alua_access_state = property(_get_alua_access_state, _set_alua_access_state,
                                  doc="Get or set ALUA state. "
                                      "0 = Active/optimized, "
@@ -218,3 +231,7 @@ class ALUATargetPortGroup(CFSNode):
                                     _set_alua_support_standby,
                                     doc="enable (1) or disable (0) "
                                         "standby support")
+
+    nonop_delay_msecs = property(_get_nonop_delay_msecs, _set_nonop_delay_msecs,
+                                 doc="msecs to delay IO when non-optimized")
+

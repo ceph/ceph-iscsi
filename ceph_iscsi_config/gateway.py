@@ -249,17 +249,15 @@ class GWTarget(object):
                     if tpg.tag == 1:
                         alua_tpg = ALUATargetPortGroup(stg_object, "ao", tpg.tag)
                         alua_tpg.alua_access_state = 0
-                        alua_tpg.alua_access_type = 1
-                        alua_tpg.alua_support_offline = 0
-                        alua_tpg.alua_support_unavailable = 0
-                        alua_tpg.alua_support_standby = 0
                     else:
                         alua_tpg = ALUATargetPortGroup(stg_object, "ano", tpg.tag)
                         alua_tpg.alua_access_state = 1
-                        alua_tpg.alua_access_type = 1
-                        alua_tpg.alua_support_offline = 0
-                        alua_tpg.alua_support_unavailable = 0
-                        alua_tpg.alua_support_standby = 0
+
+                    alua_tpg.alua_access_type = 1
+                    alua_tpg.alua_support_offline = 0
+                    alua_tpg.alua_support_unavailable = 0
+                    alua_tpg.alua_support_standby = 0
+                    alua_tpg.nonop_delay_msecs = 0
 
                 except RTSLibError as err:
                     # ignore. Group could have been created already if this
