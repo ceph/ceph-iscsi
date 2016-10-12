@@ -1,5 +1,5 @@
 #!/usr/bin/python -u
-# NB the python environment is using unbuffered mode, so any "print" statements will appear in the
+# NB the python environment is using unbuffered mode (-u), so any "print" statements will appear in the
 # syslog 'immediately'
 
 import signal
@@ -13,11 +13,12 @@ import os
 
 from socket import gethostname
 
+# from rtslib_fb.utils import RTSLibError
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.utils import Defaults
+# from ceph_iscsi_config.utils import Defaults
 
 
 def ceph_rm_blacklist(blacklisted_ip):
@@ -148,6 +149,7 @@ def osd_blacklist_cleanup():
 
     return cleanup_state
 
+
 def abort(message):
 
     logger.error(message)
@@ -182,7 +184,11 @@ def apply_config():
     gw_nodes = [key for key in config.config['gateways'] if isinstance(config.config['gateways'][key], dict)]
 
     # Gateway Definition : Handle the creation of the Target/TPG(s) and Portals
-    gateway = GWTarget(logger, gw_iqn, gw_ip_list)
+    # Although we create the tpgs, we flick the enable_portal flag off so the
+    # enabled tpg will not have an outside IP address. This prevents clients from
+    # logging in too early, failing and giving up because the nodeACL
+    # hasn't been defined yet (yes Windows I'm looking at you!)
+    gateway = GWTarget(logger, gw_iqn, gw_ip_list, enable_portal=False)
     gateway.manage('target')
     if gateway.error:
         abort("Error creating the iSCSI target (target, TPGs, Portals)")
@@ -219,6 +225,13 @@ def apply_config():
         client = GWClient(logger, client_iqn, client_metadata['image_list'], 'chap',
                           client_metadata['credentials'])
         client.manage('present')    # ensure the client exists
+
+    # The tpgs, luns and clients are all defined, but the active tpg doesn't have an IP
+    # bound to it yet (due to the enable_portals=False setting above)
+    logger.info("Adding the IP to the enabled tpg, allowing iSCSI logins")
+    gateway.enable_active_tpg()
+    if gateway.error:
+        abort("Error enabling the IP with the active TPG")
 
     config_loading = False
 
@@ -268,4 +281,3 @@ if __name__ == '__main__':
     config_loading = False
 
     main()
-
