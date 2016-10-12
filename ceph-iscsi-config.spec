@@ -1,6 +1,6 @@
 Name:           ceph-iscsi-config
-Version:        1.0
-Release:        3%{?dist}
+Version:        1.1
+Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
 License:        GPLv3
@@ -50,6 +50,13 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Wed Oct 12 2016 Paul Cuzner <pcuzner@redhat.com> - 1.1-1
+- spec file updated - patch from ktdreyer
+- alua module reformatting in line with PEP 8
+- gateway object can now defer adding portal IP to the active TPG
+- rbd-target-gw now defers port IP allocation until nodeACLs are applied
+- deferring IP allocation at boot time, prevents windows connectivity issues
+
 * Tue Oct 11 2016 Paul Cuzner <pcuzner@redhat.com> - 1.0-3
 - Minor patches to the rbd-target-gw script from Mike Christie
 
