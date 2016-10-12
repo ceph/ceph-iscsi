@@ -17,6 +17,7 @@ Requires:  python-rtslib
 
 BuildRequires:  python-devel
 BuildRequires:  python-setuptools
+BuildRequires:  systemd
 
 %description
 Python package providing the modules used to handle the configuration of an
@@ -32,9 +33,9 @@ environment is installed.
 
 %install
 %{__python2} setup.py install -O1 --skip-build --root %{buildroot}
-mkdir -p %{buildroot}/lib/systemd/system
+mkdir -p %{buildroot}%{_unitdir}
 mkdir -p %{buildroot}/usr/bin
-install -m 0644 lib/systemd/system/rbd-target-gw.service %{buildroot}/lib/systemd/system
+install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 
 %post
@@ -46,7 +47,7 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 %doc README
 %{python2_sitelib}/*
 %{_bindir}/rbd-target-gw
-/lib/systemd/system/rbd-target-gw.service
+%{_unitdir}/rbd-target-gw.service
 
 %changelog
 * Tue Oct 11 2016 Paul Cuzner <pcuzner@redhat.com> - 1.0-3
