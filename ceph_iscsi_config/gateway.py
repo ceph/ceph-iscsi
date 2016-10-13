@@ -94,14 +94,17 @@ class GWTarget(object):
             for ip in requested_tpg_ips:
                 self.create_tpg(ip)
 
-    def enable_active_tpg(self):
+    def enable_active_tpg(self, config):
         """
         Add the relevant ip to the active/enabled tpg within the target
+        and bind the tpg's luns to an ALUA group.
         :return: None
         """
 
         for tpg in self.tpg_list:
             if tpg._get_enable():
+                for lun in tpg.luns:
+                    self.bind_alua_group_to_lun(config, lun, tpg_ip_address=self.active_portal_ip)
 
                 try:
                     NetworkPortal(tpg, self.active_portal_ip)
@@ -196,7 +199,7 @@ class GWTarget(object):
 
         self.logger.info("(Gateway.load_config) successfully loaded existing target definition")
 
-    def bind_alua_group_to_lun(self, config, stg_object, lun):
+    def bind_alua_group_to_lun(self, config, lun, tpg_ip_address=None):
         """
         bind lun to one of the alua groups. Query the config to see who
         'owns' the primary path for this LUN. Then either bind the LUN
@@ -206,8 +209,10 @@ class GWTarget(object):
         param config: Config object
         param stg_object: Storage object
         param lun: lun object on the tpg
+        param tpg_ip: IP of Network Portal for the lun's tpg.
         """
 
+        stg_object = lun.storage_object
         # turn the stg_object into the key of the disks dict
         pool_number = int(os.path.basename(stg_object.udev_path).split('-')[0])
         pool_name = get_pool_name(pool_id=pool_number)
@@ -216,9 +221,13 @@ class GWTarget(object):
 
         owning_gw = config.config['disks'][disk_key]['owner']
 
-        this_host = gethostname().split('.')[0]
+        if tpg_ip_address is None:
+            # just need to check one portal
+            for ip in lun.parent_tpg.network_portals:
+               tpg_ip_address = ip.ip_address 
+               break
 
-        if this_host == owning_gw:
+        if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
             self.logger.info("setting {} to ALUA/ActiveOptimised".format(stg_object.name))
             alua_tpg = ALUATargetPortGroup(stg_object, "ao")
             alua_tpg.bind_to_lun(lun)
@@ -226,6 +235,7 @@ class GWTarget(object):
             self.logger.info("setting {} to ALUA/ActiveNONOptimised".format(stg_object.name))
             alua_tpg = ALUATargetPortGroup(stg_object, "ano")
             alua_tpg.bind_to_lun(lun)
+
 
     def map_luns(self, config):
         """
@@ -284,7 +294,7 @@ class GWTarget(object):
                         self.error_msg = err
                         break
 
-                    self.bind_alua_group_to_lun(config, stg_object, mapped_lun)
+                    self.bind_alua_group_to_lun(config, mapped_lun)
 
     def lun_mapped(self, tpg, storage_object):
         """

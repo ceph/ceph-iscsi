@@ -229,7 +229,7 @@ def apply_config():
     # The tpgs, luns and clients are all defined, but the active tpg doesn't have an IP
     # bound to it yet (due to the enable_portals=False setting above)
     logger.info("Adding the IP to the enabled tpg, allowing iSCSI logins")
-    gateway.enable_active_tpg()
+    gateway.enable_active_tpg(config)
     if gateway.error:
         abort("Error enabling the IP with the active TPG")
 
