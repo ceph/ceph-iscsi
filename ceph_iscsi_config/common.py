@@ -48,6 +48,7 @@ class Config(object):
                     "disks": {},
                     "gateways": {},
                     "clients": {},
+                    "version": 1,
                     "epoch": 0
                     }
 
