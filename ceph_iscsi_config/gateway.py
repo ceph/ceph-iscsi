@@ -224,8 +224,8 @@ class GWTarget(object):
         if tpg_ip_address is None:
             # just need to check one portal
             for ip in lun.parent_tpg.network_portals:
-               tpg_ip_address = ip.ip_address 
-               break
+                tpg_ip_address = ip.ip_address
+                break
 
         if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
             self.logger.info("setting {} to ALUA/ActiveOptimised".format(stg_object.name))
