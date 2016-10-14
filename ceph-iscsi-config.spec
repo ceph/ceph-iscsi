@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        1.1
+Version:        1.2
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -50,6 +50,13 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Sat Oct 16 2016 Paul Cuzner <pcuzner@redhat.com> - 1.2-1
+- fix for BZ 1384858 - admin updated hosts file but did not add an ip to gateway_ip_list
+- fix unblacklisting process in rbd-target-gw
+- correct ALUA binding issue
+- added a version number to the rados configuration object
+- fix i/o delays when using non-optimised paths with ALUA
+
 * Wed Oct 12 2016 Paul Cuzner <pcuzner@redhat.com> - 1.1-1
 - spec file updated - patch from ktdreyer
 - alua module reformatting in line with PEP 8
