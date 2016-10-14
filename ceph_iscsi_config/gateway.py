@@ -32,16 +32,17 @@ class GWTarget(object):
 
         self.enable_portal = enable_portal      # boolean to trigger portal IP creation
 
-        self.logger = logger                # logger object
+        self.logger = logger                    # logger object
 
         self.iqn = iqn
 
         # if the ip list provided doesn't match any ip of this host, abort
         # the assumption here is that we'll only have one matching ip in the list!
         matching_ip = set(gateway_ip_list).intersection(ipv4_addresses())
-        if not matching_ip:
+        if len(list(matching_ip)) == 0:
             self.error = True
             self.error_msg = "gateway IP addresses provided do not match any ip on this host"
+            return
 
         self.active_portal_ip = list(matching_ip)[0]
         self.logger.debug("active portal will use {}".format(self.active_portal_ip))
