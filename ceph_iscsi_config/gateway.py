@@ -223,22 +223,48 @@ class GWTarget(object):
                                   stg_object.name)
 
         owning_gw = config.config['disks'][disk_key]['owner']
+        tpg = lun.parent_tpg
 
         if tpg_ip_address is None:
             # just need to check one portal
-            for ip in lun.parent_tpg.network_portals:
+            for ip in tpg.network_portals:
                 tpg_ip_address = ip.ip_address
                 break
 
-        if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
-            self.logger.info("setting {} to ALUA/ActiveOptimised".format(stg_object.name))
-            alua_tpg = ALUATargetPortGroup(stg_object, "ao")
-            alua_tpg.bind_to_lun(lun)
-        else:
-            self.logger.info("setting {} to ALUA/ActiveNONOptimised".format(stg_object.name))
-            alua_tpg = ALUATargetPortGroup(stg_object, "ano")
-            alua_tpg.bind_to_lun(lun)
+        if tpg_ip_address is None:
+            # this is being run during boot so the NP is not setup yet.
+            return
 
+        # TODO: The ports in a alua group must export the same state for a LU
+        # group. For different LUs we are exporting different states, so
+        # we should be creating different LU groups or creating different
+        # alua groups for each LU.
+        try:
+            if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
+                self.logger.info("setting {} to ALUA/ActiveOptimised group id {}".format(stg_object.name, tpg.tag))
+                group_name = "ao"
+                alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
+                alua_tpg.alua_access_state = 0
+            else:
+                self.logger.info("setting {} to ALUA/ActiveNONOptimised group id {}".format(stg_object.name, tpg.tag))
+                group_name = "ano{}".format(tpg.tag)
+                alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
+                alua_tpg.alua_access_state = 1
+        except RTSLibError as err:
+                self.logger.info("ALUA group id {} for stg obj {} lun {} already made".format(tpg.tag, stg_object, lun))
+                # someone mapped a LU then unmapped it without deleting the
+                # stg_object
+                alua_group = ALUATargetPortGroup(stg_object, group_name)
+                if alua_group.tpg_id != tpg.tag:
+                    # ports and owner were rearranged. Not sure we support that.
+                    raise RTSLibError
+
+        alua_tpg.alua_access_type = 1
+        alua_tpg.alua_support_offline = 0
+        alua_tpg.alua_support_unavailable = 0
+        alua_tpg.alua_support_standby = 0
+        alua_tpg.nonop_delay_msecs = 0
+        alua_tpg.bind_to_lun(lun)
 
     def map_luns(self, config):
         """
@@ -247,36 +273,6 @@ class GWTarget(object):
         """
 
         lio_root = root.RTSRoot()
-
-        # setup a ALUA group for local and remote tpgs for each backstore
-        # device we are going to map a lun to.
-        for stg_object in lio_root.storage_objects:
-
-            # TODO: We need to create a lun group per for the luns
-            # owned by each host or each lun's alua group should have
-            # different group id values. OSs do not care, but to be
-            # compliant with the SCSI spec we should one day one or the other.
-
-            for tpg in self.tpg_list:
-                try:
-                    if tpg.tag == 1:
-                        alua_tpg = ALUATargetPortGroup(stg_object, "ao", tpg.tag)
-                        alua_tpg.alua_access_state = 0
-                    else:
-                        alua_tpg = ALUATargetPortGroup(stg_object, "ano", tpg.tag)
-                        alua_tpg.alua_access_state = 1
-
-                    alua_tpg.alua_access_type = 1
-                    alua_tpg.alua_support_offline = 0
-                    alua_tpg.alua_support_unavailable = 0
-                    alua_tpg.alua_support_standby = 0
-                    alua_tpg.nonop_delay_msecs = 0
-
-                except RTSLibError as err:
-                    # ignore. Group could have been created already if this
-                    # was an update. Will find out below if it was a hard
-                    # error
-                    continue
 
         # process each storage object added to the gateway, and map to the tpg
         for stg_object in lio_root.storage_objects:
