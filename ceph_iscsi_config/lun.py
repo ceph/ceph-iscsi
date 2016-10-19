@@ -73,12 +73,27 @@ class RBDDev(object):
                     target_bytes = convert_2_bytes(self.size)
 
                     if target_bytes > current_bytes:
-                        #logger.debug("rbd image {} size needs to be changed".format(image))
 
                         # resize method, doesn't document potential exceptions
-                        rbd_image.resize(target_bytes)
-                        #logger.info("(rbd_size) resized {}/{} to {}".format(pool, image, reqd_size))
-                        self.changed = True
+                        # so using a generic catch all (Yuk!)
+                        try:
+                            rbd_image.resize(target_bytes)
+                        except:
+                            self.error = True
+                            self.error_msg = "rbd image resize failed for {}".format(self.image)
+                        else:
+                            pass
+                            # Once an image is resized we need to tell multipathd, so
+                            # the size is correct within LIO (targetcli)
+                            dm_path = LUN.dm_device_name_from_rbd_map(self.device_map)
+                            dm_device = dm_path[12:]
+                            response = shellcommand('multipathd resize map {}'.format(dm_device))
+                            if response.lower().startswith('ok'):
+                                self.changed = True
+                            else:
+                                self.error = True
+                                self.error_msg = "multipathd update failed on {} for {}".format(self.dm_device,
+                                                                                                self.image)
 
     def rbdmap_entry(self):
         """
@@ -232,6 +247,12 @@ class LUN(object):
             if self.config_key not in self.config.config['disks']:
                 self.config.add_item('disks', self.config_key)
 
+        # make sure the rbd is mapped. this will also ensure the
+        # RBDDEV object will hold a valid dm_device attribute
+        rbd_image.get_rbd_map()
+        if rbd_image.map_needed:
+            self.num_changes += 1
+
         self.logger.debug("Check the rbd image size matches the request")
 
         # if updates_made is not set, the disk pre-exists so on the owning host see if it needs to be resized
@@ -239,6 +260,13 @@ class LUN(object):
 
             # check the size, and update if needed
             rbd_image.rbd_size()
+            if rbd_image.error:
+                self.logger.critical("Unable to resize {}".format(self.image))
+                self.error = True
+                self.error_msg = "Unable to resize {}".format(self.image)
+                return
+
+            # resize either worked or was not required, so let's log accordingly
             if rbd_image.changed:
                 self.logger.debug("rbd image {} resized to {}".format(self.image, self.size))
                 self.num_changes += 1
@@ -246,10 +274,6 @@ class LUN(object):
                 self.logger.debug("rbd image {} size matches the configuration file request".format(self.image))
 
         self.logger.debug("Begin processing LIO mapping requirement")
-
-        rbd_image.get_rbd_map()
-        if rbd_image.map_needed:
-            self.num_changes += 1
 
         # for LIO mapping purposes, we use the device mapper device not the raw /dev/rbdX device
         # Using the dm device ensures that any connectivity issue doesn't result in stale device
