@@ -175,7 +175,11 @@ class LUN(object):
         self.pool_id = 0
         self.size = size
         self.config_key = '{}/{}'.format(self.pool, self.image)
-        self.allocating_host = allocating_host
+
+        # the allocating host could be fqdn or shortname - but the config
+        # only uses shortname so it needs to be converted to shortname format
+        self.allocating_host = allocating_host.split('.')[0]
+
         self.owner = ''                             # gateway host that owns the preferred path for this LUN
         self.error = False
         self.error_msg = ''
