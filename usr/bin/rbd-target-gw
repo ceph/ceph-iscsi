@@ -22,6 +22,7 @@ from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
 # from ceph_iscsi_config.utils import Defaults
 
+from rtslib_fb import root
 
 def ceph_rm_blacklist(blacklisted_ip):
     """
@@ -49,6 +50,13 @@ def signal_stop(*args):
     :param args: ignored/unused
     """
     logger.info("rbd-target-gw stop received")
+    lio_root = root.RTSRoot()
+    for tpg in lio_root.tpgs:
+        # This will fail incoming IO, but wait on outstanding IO to
+        # complete normally. We rely on the initiator multipath layer
+        # to handle retries like a normal path failure.
+        tpg.enable = 0
+
     sys.exit(0)
 
 
