@@ -12,6 +12,8 @@ from rtslib_fb.utils import RTSLibError
 from ceph_iscsi_config.alua import ALUATargetPortGroup
 from ceph_iscsi_config.utils import ipv4_addresses, get_pool_name
 from ceph_iscsi_config.common import Config
+import ceph_iscsi_config.settings as settings
+
 from socket import gethostname
 
 class GWTarget(object):

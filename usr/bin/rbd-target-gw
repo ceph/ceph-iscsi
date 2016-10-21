@@ -13,6 +13,8 @@ import os
 
 from socket import gethostname
 
+import ceph_iscsi_config.settings as settings
+
 # from rtslib_fb.utils import RTSLibError
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.lun import LUN
@@ -280,5 +282,7 @@ if __name__ == '__main__':
     # config_loading is defined in the outer-scope allowing it to be used as a flag to indicate when
     # the apply_config function is running to prevent multiple reloads from being triggered concurrently
     config_loading = False
+
+    settings.init()
 
     main()
