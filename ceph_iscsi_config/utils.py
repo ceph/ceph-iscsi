@@ -8,16 +8,17 @@ import struct
 import subprocess
 import rados
 
+import ceph_iscsi_config.settings as settings
 
 class Defaults(object):
-
-    size_suffixes = ['M', 'G', 'T']
-    time_out = 30
-    loop_delay = 2
-    ceph_conf = '/etc/ceph/ceph.conf'
-    keyring = '/etc/ceph/ceph.client.admin.keyring'
-    ceph_user = 'admin'
-    rbd_map_file = '/etc/ceph/rbdmap'
+    pass
+    # size_suffixes = ['M', 'G', 'T']
+    # time_out = 30
+    # loop_delay = 2
+    # ceph_conf = '/etc/ceph/ceph.conf'
+    # keyring = '/etc/ceph/ceph.client.admin.keyring'
+    # ceph_user = 'admin'
+    # rbd_map_file = '/etc/ceph/rbdmap'
 
 
 def shellcommand(command_string):
@@ -63,7 +64,7 @@ def valid_size(size):
     valid = True
     unit = size[-1]
 
-    if unit.upper() not in Defaults.size_suffixes:
+    if unit.upper() not in settings.config.size_suffixes:
         valid = False
     else:
         try:
@@ -152,7 +153,7 @@ def convert_2_bytes(disk_size):
 
     power = [2, 3, 4]
     unit = disk_size[-1]
-    offset = Defaults.size_suffixes.index(unit)
+    offset = settings.config.size_suffixes.index(unit)
     value = int(disk_size[:-1])     # already validated, so no need for try/except clause
 
     _bytes = value*(1024**power[offset])
@@ -160,26 +161,34 @@ def convert_2_bytes(disk_size):
     return _bytes
 
 
-def get_pool_id(conf=Defaults.ceph_conf, pool_name='rbd'):
+def get_pool_id(conf=None, pool_name='rbd'):
     """
     Query Rados to get the pool id of a given pool name
     :param conf: ceph configuration file
     :param pool_name: pool name (str)
     :return: pool id (int)
     """
+
+    if conf is None:
+        conf = settings.config.cephconf
+
     with rados.Rados(conffile=conf) as cluster:
         pool_id = cluster.pool_lookup(pool_name)
 
     return pool_id
 
 
-def get_pool_name(conf=Defaults.ceph_conf, pool_id=0):
+def get_pool_name(conf=None, pool_id=0):
     """
     Query Rados to get the pool name of a given pool_id
     :param conf: ceph configuration file
     :param pool_name: pool id number (int)
     :return: pool name (str)
     """
+
+    if conf is None:
+        conf = settings.config.cephconf
+
     with rados.Rados(conffile=conf) as cluster:
         pool_name = cluster.pool_reverse_lookup(pool_id)
 
