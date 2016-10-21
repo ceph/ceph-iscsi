@@ -113,9 +113,9 @@ class GWClient(object):
             # Try to detect network problems so we can kill connections
             # and cleanup before the initiator has begun recovery and
             # failed over.
-            self.acl.set_attribute('dataout_timeout', '20')
-            self.acl.set_attribute('nopin_response', '10')
-            self.acl.set_attribute('nopin_timeout', '10')
+            self.acl.set_attribute('dataout_timeout', '20')             # default  3
+            self.acl.set_attribute('nopin_response_timeout', '10')      # default 30
+            self.acl.set_attribute('nopin_timeout', '10')               # default 15
         except RTSLibError as err:
             self.logger.error("(Client.define_client) FAILED to define {}".format(self.iqn))
             self.logger.debug("(Client.define_client) failure msg {}".format(err))
