@@ -100,7 +100,9 @@ class Config(object):
             return {}
 
         try:
-            cfg_data = ioctx.read(self.config_name)
+            size,time = ioctx.stat(self.config_name)
+            size = size + 1
+            cfg_data = ioctx.read(self.config_name, length=size)
             ioctx.close()
         except rados.ObjectNotFound:
             # config object is not there, create a seed config
