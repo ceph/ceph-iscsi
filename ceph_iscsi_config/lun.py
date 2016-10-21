@@ -1,16 +1,21 @@
 #!/usr/bin/env python
-__author__ = 'paul'
+
+__author__ = 'pcuzner@redhat.com'
+
+import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.utils import convert_2_bytes, shellcommand, Defaults, get_pool_id
+from ceph_iscsi_config.utils import convert_2_bytes, shellcommand, get_pool_id
+
 
 from rtslib_fb import BlockStorageObject, root
-from rtslib_fb.utils import RTSLibError, fwrite, fread
+from rtslib_fb.utils import RTSLibError, fread
 
 import rados
 import rbd
 import json
 import os
+import glob
 
 from time import sleep
 from socket import gethostname
@@ -27,7 +32,7 @@ class RBDDev(object):
         self.pool_id = get_pool_id(pool_name=self.pool)
         self.error = False
         self.error_msg = ''
-        self.device_map = None
+        self.rbd_map = None
         self.map_needed = False
         self.changed = False
 
@@ -44,7 +49,7 @@ class RBDDev(object):
         for feature in RBDDev.rbd_feature_list:
             feature_int += getattr(rbd, feature)
 
-        with rados.Rados(conffile=Defaults.ceph_conf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 rbd_inst = rbd.RBD()
                 try:
@@ -62,11 +67,9 @@ class RBDDev(object):
         :return: boolean value reflecting whether the rbd image was resized
         """
 
-        with rados.Rados(conffile=Defaults.ceph_conf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 with rbd.Image(ioctx, self.image) as rbd_image:
-
-                    # logger.debug('rbd image {} opened OK'.format(image))
 
                     # get the current size in bytes
                     current_bytes = rbd_image.size()     # bytes
@@ -82,18 +85,27 @@ class RBDDev(object):
                             self.error = True
                             self.error_msg = "rbd image resize failed for {}".format(self.image)
                         else:
-                            pass
-                            # Once an image is resized we need to tell multipathd, so
-                            # the size is correct within LIO (targetcli)
-                            dm_path = LUN.dm_device_name_from_rbd_map(self.device_map)
-                            dm_device = dm_path[12:]
-                            response = shellcommand('multipathd resize map {}'.format(dm_device))
-                            if response.lower().startswith('ok'):
-                                self.changed = True
-                            else:
-                                self.error = True
-                                self.error_msg = "multipathd update failed on {} for {}".format(self.dm_device,
-                                                                                                self.image)
+                            self.changed = True
+
+    def _get_rbd_id(self):
+        """
+        pass back the rbdX component of the rbd_map attribute
+        :return: str - rbdX
+        """
+        return os.path.basename(self.rbd_map)
+
+    def _get_size_bytes(self):
+        """
+        return the current size of the rbd from sysfs query
+        :return:
+        """
+        rbd_bytes = 0
+        if self.rbd_map:
+            rbd_id = self.rbd_map.split('/')[-1]
+            rbd_sysfs_path = "/sys/class/block/{}/size".format(rbd_id)
+            # size is defined in 512b sectors
+            rbd_bytes = int(fread(rbd_sysfs_path))*512
+        return rbd_bytes
 
     def rbdmap_entry(self):
         """
@@ -105,7 +117,7 @@ class RBDDev(object):
         entry_needed = True
 
         srch_str = "{}/{}".format(self.pool, self.image)
-        with open(Defaults.rbd_map_file, 'a+') as rbdmap:
+        with open(settings.config.rbd_map_file, 'a+') as rbdmap:
 
             for entry in rbdmap:
                 if entry.startswith(srch_str):
@@ -116,18 +128,23 @@ class RBDDev(object):
             if entry_needed:
                 # need to add an entry to the rbdmap file
                 rbdmap.write("{}\t\tid={},keyring={},options=noshare\n".format(srch_str,
-                                                                               Defaults.ceph_user,
-                                                                               Defaults.keyring))
+                                                                               settings.config.ceph_user,
+                                                                               settings.config.gateway_keyring))
 
         return entry_needed
 
     def get_rbd_map(self):
+        """
+        Set objects rbd_map attribute based on the rbd showmapped command
+        e.g. /dev/rbdX
+        :return: nothing
+        """
 
         # Now look at mapping of the device - which would execute on all target hosts
         showmap_cmd = 'rbd showmapped --format=json'
         response = shellcommand(showmap_cmd)
         if not response:                        # showmapped command must have failed
-            self.device_map = None
+            self.rbd_map = None
             return
 
         # Check the showmapped output for this rbd image, and if so set the mapped device name
@@ -135,7 +152,7 @@ class RBDDev(object):
         for rbd_id in mapped_rbds:
             if (mapped_rbds[rbd_id]['name'] == self.image and
                     mapped_rbds[rbd_id]['pool'] == self.pool):
-                self.device_map = mapped_rbds[rbd_id]['device'].rstrip()
+                self.rbd_map = mapped_rbds[rbd_id]['device'].rstrip()
                 return
 
         # At this point the rbd image is not in showmap output, so map it
@@ -149,21 +166,30 @@ class RBDDev(object):
             response = shellcommand(map_cmd)
 
         if response:
-            self.device_map = response.rstrip()
+            self.rbd_map = response.rstrip()
 
     @staticmethod
-    def rbd_list(conf=Defaults.ceph_conf, pool='rbd'):
+    def rbd_list(conf=None, pool='rbd'):
         """
         return a list of rbd images in a given pool
         :param pool: pool name to look at to return a list of rbd image names for (str)
         :return: list of rbd image names (list)
         """
 
+        if conf is None:
+            conf = settings.config.cephconf
+
         with rados.Rados(conffile=conf) as cluster:
             with cluster.open_ioctx(pool) as ioctx:
                 rbd_inst = rbd.RBD()
                 rbd_names = rbd_inst.list(ioctx)
         return rbd_names
+
+    size_bytes = property(_get_size_bytes,
+                          doc="return the current size of the rbd in bytes from sysfs")
+
+    rbd_id = property(_get_rbd_id,
+                      doc="return the mapped rbd name for this rbd")
 
 
 class LUN(object):
@@ -239,10 +265,10 @@ class LUN(object):
                 # so wait until the disk arrives
                 waiting = 0
                 while self.image not in disk_list:
-                    sleep(Defaults.loop_delay)
+                    sleep(settings.config.loop_delay)
                     disk_list = RBDDev.rbd_list(pool=self.pool)
-                    waiting += Defaults.loop_delay
-                    if waiting >= Defaults.time_out:
+                    waiting += settings.config.loop_delay
+                    if waiting >= settings.config.time_out:
                         self.error = True
                         self.error_msg = "(LUN.allocate) timed out waiting for rbd to show up"
                         return
@@ -265,30 +291,36 @@ class LUN(object):
             # check the size, and update if needed
             rbd_image.rbd_size()
             if rbd_image.error:
-                self.logger.critical("Unable to resize {}".format(self.image))
+                self.logger.critical(rbd_image.error_msg)
                 self.error = True
-                self.error_msg = "Unable to resize {}".format(self.image)
+                self.error_msg = rbd_image.error_msg
                 return
 
-            # resize either worked or was not required, so let's log accordingly
             if rbd_image.changed:
-                self.logger.debug("rbd image {} resized to {}".format(self.image, self.size))
+                self.logger.info("rbd image {} resized to {}".format(self.image, self.size))
                 self.num_changes += 1
             else:
                 self.logger.debug("rbd image {} size matches the configuration file request".format(self.image))
 
-        self.logger.debug("Begin processing LIO mapping requirement")
-
         # for LIO mapping purposes, we use the device mapper device not the raw /dev/rbdX device
         # Using the dm device ensures that any connectivity issue doesn't result in stale device
         # structures in the kernel, since device-mapper will tidy those up
-        self.dm_get_device(rbd_image.device_map)
+        self.dm_get_device(rbd_image.rbd_map)
         if self.dm_device is None:
             self.logger.critical("Could not find dm multipath device for {}. Make sure the multipathd"
                                  " service is enabled, and confirm entry is in /dev/mapper/".format(self.image))
             self.error = True
             self.error_msg = "Could not find dm multipath device for {}".format(self.image)
             return
+
+        # ensure the dm device size matches the request size
+        if not self.dm_size_ok(rbd_image):
+            self.error = True
+            self.error_msg = "Unable to sync the dm device to the parent rbd size - {}".format(self.image)
+            self.logger.critical(self.error_msg)
+            return
+
+        self.logger.debug("Begin processing LIO mapping requirement")
 
         self.logger.debug("(LUN.allocate) {} is mapped to {}.".format(self.image, self.dm_device))
 
@@ -355,19 +387,19 @@ class LUN(object):
                 # lun is not already in LIO, but this is not the owning node that defines the wwn
                 # we need the wwn from the config (placed by the allocating host), so we wait!
                 waiting = 0
-                while waiting < Defaults.time_out:
+                while waiting < settings.config.time_out:
                     self.config.refresh()
                     if self.config_key in self.config.config['disks']:
                         if 'wwn' in self.config.config['disks'][self.config_key]:
                             if self.config.config['disks'][self.config_key]['wwn']:
                                 wwn = self.config.config['disks'][self.config_key]['wwn']
                                 break
-                    sleep(Defaults.loop_delay)
-                    waiting += Defaults.loop_delay
+                    sleep(settings.config.loop_delay)
+                    waiting += settings.config.loop_delay
                     self.logger.debug("(LUN.allocate) waiting for config object to show {}"
                                       " with it's wwn".format(self.image))
 
-                if waiting >= Defaults.time_out:
+                if waiting >= settings.config.time_out:
                     self.error = True
                     self.error_msg = ("(LUN.allocate) waited too long for the wwn information "
                                       "on image {} to arrive".format(self.image))
@@ -396,12 +428,82 @@ class LUN(object):
             self.error_msg = self.config.error_msg
 
     def dm_get_device(self, map_device):
+        """
+        set the dm_device attribute based on the rbd map device entry
+        :param map_device: /dev/rbdX
+        :return: None
+        """
+
         self.dm_device = LUN.dm_device_name_from_rbd_map(map_device)
         if self.dm_device is None:
             return
 
         if not LUN.dm_wait_for_device(self.dm_device):
             self.dm_device = None
+
+    def dm_size_ok(self, rbd_object):
+        """
+        Check that the dm device matches the request. if the size request is lower than
+        current size, just return since resizing down is not support and problematic
+        for client filesystems anyway
+        :return boolean indicating whether the size matches
+        """
+
+        target_bytes = convert_2_bytes(self.size)
+        if rbd_object.size_bytes > target_bytes:
+            return True
+
+        tmr = 0
+        size_ok = False
+        rbd_size_ok = False
+        dm_path_found = False
+
+        # we have to wait for the rbd size to match, since the rbd could have been
+        # resized on another gateway host when this is called from Ansible
+        while tmr < settings.config.time_out:
+            if rbd_object.size_bytes == target_bytes:
+                rbd_size_ok = True
+                break
+            sleep(settings.config.loop_delay)
+            tmr += settings.config.loop_delay
+
+        # since the size matches underneath device mapper, now we ensure the size
+        # matches with device mapper - if not issue a resize map request
+        if rbd_size_ok:
+
+            # find the dm-X device
+            dm_devices = glob.glob('/sys/class/block/dm-*/')
+            # convert the full dm_device path to just the name (last component of path
+            dm_name = os.path.basename(self.dm_device)
+
+            for dm_dev in dm_devices:
+                if fread(os.path.join(dm_dev, 'dm/name')) == dm_name:
+                    dm_path_found = True
+                    break
+
+            if dm_path_found:
+
+                # size is in sectors, so read it and * 512 = bytes
+                dm_size_bytes = int(fread(os.path.join(dm_dev, 'size')))*512
+                if dm_size_bytes != target_bytes:
+
+                    self.logger.info("Issuing a resize map for {}".format(dm_name))
+                    response = shellcommand('multipathd resize map {}'.format(dm_name))
+
+                    self.logger.debug("resize result : {}".format(response))
+                    dm_size_bytes = int(fread(os.path.join(dm_dev, 'size')))*512
+
+                    if response.lower().startswith('ok') and dm_size_bytes == target_bytes:
+                        size_ok = True
+                    else:
+                        self.logger.critical("multipathd resize map for {} failed".format(dm_name))
+                else:
+                    # size matches
+                    size_ok = True
+            else:
+                self.logger.critical("Unable to locate a dm-X device for this rbd image - {}".format(self.image))
+
+        return size_ok
 
     def lun_in_lio(self):
         found_it = False
@@ -462,6 +564,13 @@ class LUN(object):
 
     @staticmethod
     def dm_device_name_from_rbd_map(map_device):
+        """
+        take a mapped device name /dev/rbdX to determine the /dev/mapper/X
+        equivalent by reading the devices attribute files in sysfs
+        :param map_device: device path of the form /dev/rbdX
+        :return: device mapper name for the rbd device /dev/mapper/<pool>-<image-id>
+        """
+
         rbd_bus_id = map_device[8:]
         dm_uid = None
 
@@ -480,27 +589,38 @@ class LUN(object):
 
     @staticmethod
     def dm_wait_for_device(dm_device):
+        """
+        multipath may take a few seconds for the device to appear, so we
+        need to wait until we see it - but use a timeout to abort if necessary
+        :param dm_device: dm device name /dev/mapper/<pool>-<image_id>
+        :return boolean representing when the device has been found
+        """
+
         waiting = 0
 
         # wait for multipathd and udev to setup /dev node
         # /dev/mapper/<pool_id>-<rbd_image_id>
         # e.g. /dev/mapper/0-519d42ae8944a
         while os.path.exists(dm_device) is False:
-            sleep(Defaults.loop_delay)
-            waiting += Defaults.loop_delay
-            if waiting >= Defaults.time_out:
+            sleep(settings.config.loop_delay)
+            waiting += settings.config.loop_delay
+            if waiting >= settings.config.time_out:
                 break
 
         return os.path.exists(dm_device)
 
 
 
-def rados_pool(conf=Defaults.ceph_conf, pool='rbd'):
+def rados_pool(conf=None, pool='rbd'):
     """
     determine if a given pool name is defined within the ceph cluster
     :param pool: pool name to check for (str)
     :return: Boolean representing the pool's existence
     """
+
+    if conf is None:
+        conf = settings.config.cephconf
+
 
     with rados.Rados(conffile=conf) as cluster:
         pool_list = cluster.list_pools()
