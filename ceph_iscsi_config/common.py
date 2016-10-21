@@ -7,6 +7,8 @@ import os
 import sys
 import traceback
 
+import ceph_iscsi_config.settings as settings
+
 class ConfigTransaction(object):
 
     def __init__(self, cfg_type, element_name, txn_action='add', initial_value=None):
@@ -24,13 +26,12 @@ class ConfigTransaction(object):
 
 class CephCluster(object):
 
-    def __init__(self,
-                 conf_file='/etc/ceph/ceph.conf',
-                 conf_keyring='/etc/ceph/ceph.client.admin.keyring'):
+    def __init__(self):
+
         self.error = False
         self.error_msg = ''
-        self.cluster = rados.Rados(conffile=conf_file,
-                                   conf=dict(keyring=conf_keyring))
+        self.cluster = rados.Rados(conffile=settings.config.cephconf,
+                                   conf=dict(keyring="/etc/ceph/{}".format(settings.config.gateway_keyring)))
         try:
             self.cluster.connect()
         except rados.Error as err:
