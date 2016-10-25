@@ -200,7 +200,7 @@ class LUN(object):
         self.pool = pool
         self.pool_id = 0
         self.size = size
-        self.config_key = '{}/{}'.format(self.pool, self.image)
+        self.config_key = '{}.{}'.format(self.pool, self.image)
 
         # the allocating host could be fqdn or shortname - but the config
         # only uses shortname so it needs to be converted to shortname format
@@ -511,14 +511,10 @@ class LUN(object):
         for stg_object in rtsroot.storage_objects:
 
             # First match on name, but then check the pool incase the same name exists in multiple pools
-            if stg_object.name == self.image:
+            if stg_object.name == self.config_key:
 
-                # udev_path shows something like '/dev/mapper/0-8fd91515f007c' - the first component is the
-                # pool id
-                pool_id = int(os.path.basename(stg_object.udev_path).split('-')[0])
-                if pool_id == self.pool_id:
-                    found_it = True
-                    break
+                found_it = True
+                break
 
         return stg_object if found_it else None
 
@@ -533,7 +529,7 @@ class LUN(object):
                                                                                              self.dm_device))
         new_lun = None
         try:
-            new_lun = BlockStorageObject(name=self.image, dev=self.dm_device, wwn=in_wwn)
+            new_lun = BlockStorageObject(name=self.config_key, dev=self.dm_device, wwn=in_wwn)
         except RTSLibError as err:
             self.error = True
             self.error_msg = "failed to add {} to LIO - error({})".format(self.image, str(err))
