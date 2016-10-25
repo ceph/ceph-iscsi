@@ -216,13 +216,8 @@ class GWTarget(object):
         """
 
         stg_object = lun.storage_object
-        # turn the stg_object into the key of the disks dict
-        pool_number = int(os.path.basename(stg_object.udev_path).split('-')[0])
-        pool_name = get_pool_name(pool_id=pool_number)
-        disk_key = "{}/{}".format(pool_name,
-                                  stg_object.name)
 
-        owning_gw = config.config['disks'][disk_key]['owner']
+        owning_gw = config.config['disks'][stg_object.name]['owner']
         tpg = lun.parent_tpg
 
         if tpg_ip_address is None:
