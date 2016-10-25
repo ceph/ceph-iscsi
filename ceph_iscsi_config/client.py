@@ -20,22 +20,28 @@ class GWClient(object):
     This class holds a representation of a client connecting to LIO
     """
 
-    supported_access_types = ['chap']
+    seed_metadata = {
+                     "auth": {"chap": ''},
+                     "luns": {}
+                     }
 
-    def __init__(self, logger, client_iqn, image_list, auth_type, credentials):
+
+    def __init__(self, logger, client_iqn, image_list, chap):
         """
         Instantiate an instance of an LIO client
         :param client_iqn: iscsi iqn string
         :param image_list: list of rbd images (pool/image) to attach to this client
-        :param auth_type: authentication type - null or chap
-        :param credentials: chap credentials in the format 'user/password'
+        :param chap: chap credentials in the format 'user/password'
         :return:
         """
 
         self.iqn = client_iqn
-        self.requested_images = image_list      # images are in comma separated pool/image_name format
-        self.auth_type = auth_type              # auth ... '' or chap
-        self.credentials = credentials          # parameters for auth
+        self.requested_images = image_list      # images are in comma separated pool.image_name format
+
+        self.chap = chap          # parameters for auth
+        self.mutual = ''
+        self.tpgauth = ''
+        self.metadata = {}
         self.acl = None
         self.error = False
         self.error_msg = ''
@@ -46,6 +52,8 @@ class GWClient(object):
         self.change_count = 0
         self.commit_enabled = True              # enable commit to the config for changes by default
         self.logger = logger
+        self.current_config = {}
+
 
     def setup_luns(self):
         """
@@ -54,6 +62,11 @@ class GWClient(object):
         added, or images removed.
         """
 
+        # first drop the current lunid's used from the candidate list
+        # this allows luns to be added/removed, and new id's to occupy free lun-id
+        # slots rather than simply tag on the end. In a high churn environment,
+        # adding new lun(s) at highest lun +1 could lead to exhausting the
+        # 255 lun limit per target
         self.client_luns = self.get_images(self.acl)
         for image_name in self.client_luns:
             lun_id = self.client_luns[image_name]['lun_id']
@@ -83,7 +96,7 @@ class GWClient(object):
                 self._del_lun_map(image)
                 if self.error:
                     self.logger.error("(Client.setup) unable to delete {} from {}".format(self.iqn,
-                                                                                     image))
+                                                                                          image))
                     return
 
     def define_client(self):
@@ -126,30 +139,38 @@ class GWClient(object):
             self.change_count += 1
 
 
-    def configure_auth(self):
+    def configure_auth(self, auth_type, credentials):
         """
         Attempt to configure authentication for the client
         :return:
         """
-        client_username, client_password = self.credentials.split('/')
 
+        client_username, client_password = credentials.split('/')
+        if auth_type == 'chap':
+            acl_credentials = "{}/{}".format(self.acl.chap_userid,
+                                      self.acl.chap_password)
+
+        # if the credential match... nothing to do
+        if credentials == acl_credentials:
+            return
+
+        # credentials defined on the ACL don't match parms passed from
+        # caller so update the acl definition
         try:
-            # if the credential I have are already in the config then disable updates
-
-            if self.acl.chap_userid == '' or self.acl.chap_userid != client_username:
+            if auth_type == 'chap':
                 self.acl.chap_userid = client_username
-                self.logger.info("(Client.configure_auth) chap user name changed for {}".format(self.iqn))
-                self.change_count += 1
-
-            if self.acl.chap_password == '' or self.acl.chap_password != client_password:
                 self.acl.chap_password = client_password
-                self.logger.info("(Client.configure_auth) chap password changed for {}".format(self.iqn))
-                self.change_count += 1
+                self.metadata['auth']['chap'] = credentials
 
         except RTSLibError as err:
             self.error = True
-            self.error_msg = "Unable to (re)configure authentication for {} - ".format(self.iqn, err)
-            self.logger.error("Client.configure_auth) failed to set credentials for {}".format(self.iqn))
+            self.error_msg = "Unable to (re)configure {} authentication for {} - ".format(auth_type,
+                                                                                          self.iqn,
+                                                                                          err)
+            self.logger.error("Client.configure_auth) failed to set {} credentials for {}".format(auth_type,
+                                                                                                  self.iqn))
+        else:
+            self.change_count += 1
 
     def _add_lun(self, image, lun):
         """
@@ -162,20 +183,31 @@ class GWClient(object):
         rc = 0
         # get the tpg lun to map this client to
         tpg_lun = lun['tpg_lun']
-        lun_id = self.lun_id_list[0]        # pick the lowest available lun ID
+
+        # lunid allocated from the current config object setting, or if this is
+        # a new device from the next free lun id 'position'
+        if image in self.metadata['luns'].keys():
+            lun_id = self.metadata['luns'][image]['lun_id']
+        else:
+            lun_id = self.lun_id_list[0]        # pick the lowest available lun ID
+
         self.logger.debug("(Client._add_lun) Adding {} to {} at id {}".format(image, self.iqn, lun_id))
+
         try:
             m_lun = self.acl.mapped_lun(lun_id, tpg_lun=tpg_lun)
-            self.client_luns[image] = {"lun_id": lun_id,
-                                       "mapped_lun": m_lun,
-                                       "tpg_lun": tpg_lun}
-            self.lun_id_list.remove(lun_id)
-            self.logger.info("(Client.add_lun) added image '{}' to {}".format(image, self.iqn))
-            self.change_count += 1
-
         except RTSLibError as err:
             self.logger.error("Client.add_lun RTSLibError for lun id {} - {}".format(lun_id, err))
             rc = 12
+        else:
+
+            self.client_luns[image] = {"lun_id": lun_id,
+                                       "mapped_lun": m_lun,
+                                       "tpg_lun": tpg_lun}
+
+            self.metadata['luns'][image] = {"lun_id": lun_id}
+            self.lun_id_list.remove(lun_id)
+            self.logger.info("(Client.add_lun) added image '{}' to {}".format(image, self.iqn))
+            self.change_count += 1
 
         return rc
 
@@ -189,10 +221,12 @@ class GWClient(object):
         lun = self.client_luns[image]['mapped_lun']
         try:
             lun.delete()
-            self.change_count += 1
         except RTSLibError as err:
             self.error = True
             self.error_msg = err
+        else:
+            self.change_count += 1
+            del self.metadata['luns'][image]
 
     def delete(self):
         """
@@ -224,12 +258,12 @@ class GWClient(object):
         """
         function to seed the config object with a new client definition
         """
-        client_metadata = {"image_list": [],
-                           "credentials": ''}
 
         config.add_item("clients", self.iqn)
-        config.update_item("clients", self.iqn, client_metadata)
+        config.update_item("clients", self.iqn, GWClient.seed_metadata)
+
         # persist the config update, and leave the connection to the ceph object open
+        # since adding just the iqn is only the start of the definition
         config.commit("retain")
 
     def manage(self, rqst_type):
@@ -238,17 +272,20 @@ class GWClient(object):
         :param rqst_type is either present (try and create the nodeACL), or absent - delete the nodeACL
         """
         # Build a local object representing the rados configuration object
-        config = Config(self.logger)
-        if config.error:
+        config_object = Config(self.logger)
+        if config_object.error:
             self.error = True
-            self.error_msg = config.error_msg
+            self.error_msg = config_object.error_msg
             return
+
+        # use current config to hold a copy of the current rados config object (dict)
+        self.current_config = config_object.config
 
         running_under_ansible = ansible_control()
         self.logger.debug("(GWClient.manage) running under ansible? {}".format(running_under_ansible))
 
         if running_under_ansible:
-            update_host = GWClient.get_update_host(config.config)
+            update_host = GWClient.get_update_host(self.current_config)
             self.logger.debug("GWClient.manage) update host to handle any config update is {}".format(update_host))
         else:
             update_host = None
@@ -262,25 +299,32 @@ class GWClient(object):
             # first look at the request to see if it matches the settings already in the config
             # object - if so this is just a rerun, or a reboot so config object updates are not
             # needed when we change the LIO environment
-            if self.iqn in config.config['clients'].keys():
-                meta_data = config.config['clients'][self.iqn]
-                if self.credentials == meta_data['credentials'] and \
-                   self.requested_images == meta_data['image_list']:
-                    self.commit_enabled = False
+            if self.iqn in self.current_config['clients'].keys():
+                self.metadata = self.current_config['clients'][self.iqn]
+                config_image_list = sorted(self.metadata['luns'].keys())
 
-            self.logger.debug("(manage) changes made will commit to the config : {}".format(self.commit_enabled))
+                #
+                # Does the request match the current config?
+                if self.chap == self.metadata['auth']['chap'] and \
+                   config_image_list == sorted(self.requested_images):
+                    self.commit_enabled = False
+            else:
+                # requested iqn is not in the config object
+                if running_under_ansible:
+                    if update_host == gethostname().split('.')[0]:
+                        self.seed_config(config_object)
+                else:
+                    # not ansible, so just run the command
+                    self.seed_config(config_object)
+
+                self.metadata = GWClient.seed_metadata
+
+            self.logger.debug("(manage) config updates to be applied from this host: {}".format(self.commit_enabled))
 
             self.define_client()
             if self.error:
+                # unable to define the client!
                 return
-
-            if self.iqn not in config.config["clients"].keys():
-                if running_under_ansible:
-                    if update_host == gethostname().split('.')[0]:
-                        self.seed_config(config)
-                else:
-                    # not ansible, so just run the command
-                    self.seed_config(config)
 
             bad_images = self.validate_images()
             if not bad_images:
@@ -289,10 +333,9 @@ class GWClient(object):
                 if self.error:
                     return
 
-                if self.auth_type in GWClient.supported_access_types and \
-                   '/' in self.credentials:
+                if '/' in self.chap:
 
-                    self.configure_auth()
+                    self.configure_auth('chap', self.chap)
                     if self.error:
                         return
 
@@ -306,24 +349,22 @@ class GWClient(object):
 
             # check the client object's change count, and update the config object if this is the updating host
             if self.change_count > 0:
-                client_metadata = {"image_list": self.requested_images,
-                                   "credentials": self.credentials}
 
                 if self.commit_enabled:
 
                     if running_under_ansible:
                         if update_host == gethostname().split('.')[0]:
                             # update the config object with this clients settings
-                            config.update_item("clients", self.iqn, client_metadata)
+                            config_object.update_item("clients", self.iqn, self.metadata)
 
                             # persist the config update
-                            config.commit()
+                            config_object.commit()
                     else:
 
                         # this was a request directly (over API?)
-                        config.update_item("clients", self.iqn, client_metadata)
+                        config_object.update_item("clients", self.iqn, self.metadata)
                         # persist the config update
-                        config.commit()
+                        config_object.commit()
 
         else:
             ###############################################################################
@@ -340,11 +381,11 @@ class GWClient(object):
 
                         if update_host == gethostname().split('.')[0]:
                             self.logger.debug("Removing {} from the config object".format(self.iqn))
-                            config.del_item("clients", self.iqn)
-                            config.commit()
+                            config_object.del_item("clients", self.iqn)
+                            config_object.commit()
                     else:
-                        config.del_item("clients", self.iqn)
-                        config.commit()
+                        config_object.del_item("clients", self.iqn)
+                        config_object.commit()
             else:
                 # desired state is absent, but the client does not exist in LIO - Nothing to do!
                 self.logger.info("(main) client {} removal request, but the client is not "
@@ -358,6 +399,8 @@ class GWClient(object):
         """
         bad_images = []
         tpg_lun_list = self.get_images(self.tpg).keys()
+        self.logger.debug("tpg images: {}".format(tpg_lun_list))
+        self.logger.debug("request images: {}".format(self.requested_images))
         for image in self.requested_images:
             if image not in tpg_lun_list:
                 bad_images.append(image)
@@ -394,10 +437,8 @@ class GWClient(object):
         if isinstance(rts_object, NodeACL):
             # return a dict of images assigned to this client
             for m_lun in rts_object.mapped_luns:
-                image_name = m_lun.tpg_lun.storage_object.name
-                pool_id = int(os.path.basename(m_lun.tpg_lun.storage_object.udev_path).split('-')[0])
-                pool_name = get_pool_name(pool_id=pool_id)
-                key = "{}/{}".format(pool_name, image_name)
+
+                key = m_lun.tpg_lun.storage_object.name
                 luns_mapped[key] = {"lun_id": m_lun.mapped_lun,
                                     "mapped_lun": m_lun,
                                     "tpg_lun": m_lun.tpg_lun}
@@ -405,10 +446,8 @@ class GWClient(object):
         elif isinstance(rts_object, TPG):
             # return a dict of *all* images available to this tpg
             for m_lun in rts_object.luns:
-                image_name = m_lun.storage_object.name
-                pool_id = int(os.path.basename(m_lun.storage_object.udev_path).split('-')[0])
-                pool_name = get_pool_name(pool_id=pool_id)
-                key = "{}/{}".format(pool_name, image_name)
+
+                key = m_lun.storage_object.name
                 luns_mapped[key] = {"lun_id": m_lun.lun,
                                     "mapped_lun": None,
                                     "tpg_lun": m_lun}
