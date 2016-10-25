@@ -233,8 +233,9 @@ def apply_config():
     # Client configurations (NodeACL's)
     for client_iqn in config.config['clients']:
         client_metadata = config.config['clients'][client_iqn]
-        client = GWClient(logger, client_iqn, client_metadata['image_list'], 'chap',
-                          client_metadata['credentials'])
+        chap = client_metadata['auth']['chap']
+        image_list = client_metadata['luns'].keys()
+        client = GWClient(logger, client_iqn, image_list, chap)
         client.manage('present')    # ensure the client exists
 
     # The tpgs, luns and clients are all defined, but the active tpg doesn't have an IP
