@@ -8,6 +8,7 @@ import sys
 import traceback
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.utils import get_time
 
 class ConfigTransaction(object):
 
@@ -50,7 +51,9 @@ class Config(object):
                     "gateways": {},
                     "clients": {},
                     "version": 1,
-                    "epoch": 0
+                    "epoch": 0,
+                    "created": '',
+                    "updated": ''
                     }
 
     lock_time_limit = 30
@@ -66,8 +69,6 @@ class Config(object):
         self.error_msg = ""
         self.txn_list = []
         self.config_locked = False
-
-        # self.txn_ptr = 0
 
         if self.platform == 'rbd':
             self.ceph = CephCluster()
@@ -178,7 +179,9 @@ class Config(object):
         cfg_data = ioctx.read(self.config_name)
         if not cfg_data:
             self.logger.debug("_seed_rbd_config found empty config object")
-            seed = json.dumps(Config.seed_config, sort_keys=True, indent=4, separators=(',', ': '))
+            seed_now = Config.seed_config
+            seed_now['created'] = get_time()
+            seed = json.dumps(seed_now, sort_keys=True, indent=4, separators=(',', ': '))
             ioctx.write_full(self.config_name, seed)
             ioctx.set_xattr(self.config_name, "epoch", "0")
             self.changed = True
@@ -195,14 +198,31 @@ class Config(object):
         self.config = self.get_config()
 
     def add_item(self, cfg_type, element_name, initial_value=None):
-        init_state = {} if initial_value is None else initial_value
+        now = get_time()
+
+        # ensure the initial state for this item has a 'created' date/time value
+        if isinstance(initial_value, dict):
+            if 'created' not in initial_value:
+                initial_value['created'] = now
+
+        if initial_value is None:
+            init_state = {"created": now}
+        else:
+            init_state = initial_value
+
         self.config[cfg_type][element_name] = init_state
+
+        if isinstance(init_state, str) and 'created' not in self.config[cfg_type]:
+            self.config[cfg_type]['created'] = now
+            # add a separate transaction to capture the creation date to the section
+            txn = ConfigTransaction(cfg_type, 'created', initial_value=now)
+            self.txn_list.append(txn)
+
         self.logger.debug("(Config.add_item) config updated to {}".format(self.config))
         self.changed = True
 
         txn = ConfigTransaction(cfg_type, element_name, initial_value=init_state)
         self.txn_list.append(txn)
-        # self.txn_ptr = len(self.txn_list) - 1
 
     def del_item(self, cfg_type, element_name):
         self.changed = True
@@ -211,23 +231,28 @@ class Config(object):
 
         txn = ConfigTransaction(cfg_type, element_name, 'delete')
         self.txn_list.append(txn)
-        # self.txn_ptr = len(self.txn_list) - 1
 
     def update_item(self, cfg_type, element_name, element_value):
+        now = get_time()
+        current_values = self.config[cfg_type][element_name]
+        self.logger.debug("prior to update, item contains {}".format(current_values))
+        if isinstance(element_value, dict):
+            merged = current_values.copy()
+            new_dict = element_value
+            new_dict['updated'] = now
+            merged.update(new_dict)
+            element_value = merged.copy()
+
         self.config[cfg_type][element_name] = element_value
         self.logger.debug("(Config.update_item) config is {}".format(self.config))
         self.changed = True
         self.logger.debug("update_item: type={}, item={}, update={}".format(cfg_type, element_name, element_value))
-        # self.logger.debug("update_item point ; txn list length is {}, ptr is set to {}".format(len(self.txn_list),
-        #                                                                                            self.txn_ptr))
+
         txn = ConfigTransaction(cfg_type, element_name, 'add')
         txn.item_content = element_value
         self.txn_list.append(txn)
-        # self.txn_ptr = len(self.txn_list) - 1
 
     def _commit_rbd(self, post_action):
-
-        # self.logger.debug("_commit_rbd updating config with {}".format(config_str))
 
         ioctx = self.ceph.cluster.open_ioctx(self.pool)
 
@@ -256,6 +281,8 @@ class Config(object):
             else:
                 current_config["epoch"] += 1        # Python will switch from plain to long int automagically
 
+            now = get_time()
+            current_config['updated'] = now
             config_str = json.dumps(current_config)
             self.logger.debug("_commit_rbd updating config to {}".format(config_str))
             config_str_fmtd = json.dumps(current_config, sort_keys=True, indent=4, separators=(',', ': '))
