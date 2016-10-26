@@ -5,11 +5,12 @@ __author__ = 'pcuzner@redhat.com'
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config
+from ceph_iscsi_config.alua import ALUATargetPortGroup
 from ceph_iscsi_config.utils import convert_2_bytes, shellcommand, get_pool_id
 
-
+import fileinput
 from rtslib_fb import BlockStorageObject, root
-from rtslib_fb.utils import RTSLibError, fread
+from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS, fread
 
 import rados
 import rbd
@@ -59,6 +60,39 @@ class RBDDev(object):
                     self.error_msg = "Failed to create rbd image {} in pool {} : {}".format(self.image,
                                                                                             self.pool,
                                                                                             err)
+
+    def delete_rbd(self):
+        """
+        Delete the current rbd image
+        :return: nothing, but the objects error attribute is set if there are problems
+        """
+
+        rbd_deleted = False
+        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+            with cluster.open_ioctx(self.pool) as ioctx:
+                rbd_inst = rbd.RBD()
+
+                ctr = 0
+                while ctr < settings.config.time_out:
+
+                    try:
+                        rbd_inst.remove(ioctx, self.image)
+                    except rbd.ImageBusy:
+                        # catch and ignore the busy state - rbd probably still mapped on
+                        # another gateway, so we keep trying
+                        pass
+                    else:
+                        rbd_deleted = True
+                        break
+
+                    sleep(settings.config.loop_delay)
+                    ctr += settings.config.loop_delay
+
+                if rbd_deleted:
+                    return
+                else:
+                    self.error = True
+
 
     def rbd_size(self):
         """
@@ -127,11 +161,32 @@ class RBDDev(object):
 
             if entry_needed:
                 # need to add an entry to the rbdmap file
-                rbdmap.write("{}\t\tid={},keyring={},options=noshare\n".format(srch_str,
-                                                                               settings.config.ceph_user,
-                                                                               settings.config.gateway_keyring))
+                rbdmap.write("{}\t\tid={},keyring=/etc/ceph/{},"
+                             "options=noshare\n".format(srch_str,
+                                                        settings.config.ceph_user,
+                                                        settings.config.gateway_keyring))
 
         return entry_needed
+
+    def unmap_rbd(self):
+        """
+        Unmap this rbd image from the local system
+        :return: None
+        """
+
+        rbd_path = "{}/{}".format(self.pool, self.image)
+        resp = shellcommand("rbd -c {} unmap {}".format(settings.config.cephconf, rbd_path))
+        if resp != '':
+            self.error = True
+            return
+
+        # unmap'd from runtime, now remove from the rbdmap file referenced at boot
+        for rbdmap_entry in fileinput.input(settings.config.rbd_map_file, inplace=True):
+            if rbdmap_entry.startswith(rbd_path):
+                continue
+            print rbdmap_entry.strip()
+
+
 
     def get_rbd_map(self):
         """
@@ -141,7 +196,7 @@ class RBDDev(object):
         """
 
         # Now look at mapping of the device - which would execute on all target hosts
-        showmap_cmd = 'rbd showmapped --format=json'
+        showmap_cmd = 'rbd -c {} showmapped --format=json'.format(settings.config.cephconf)
         response = shellcommand(showmap_cmd)
         if not response:                        # showmapped command must have failed
             self.rbd_map = None
@@ -159,10 +214,14 @@ class RBDDev(object):
         self.map_needed = True
         # lock_on_read was not merged until RHCS 2.1. We temporarily
         # support it on/off to make the transition during devel easier
-        map_cmd = 'rbd map -o noshare,lock_on_read {}/{}'.format(self.pool, self.image)
+        map_cmd = 'rbd -c {} map -o noshare,lock_on_read {}/{}'.format(settings.config.cephconf,
+                                                                       self.pool,
+                                                                       self.image)
         response = shellcommand(map_cmd)
         if response is None:
-            map_cmd = 'rbd map -o noshare {}/{}'.format(self.pool, self.image)
+            map_cmd = 'rbd -c {} map -o noshare {}/{}'.format(settings.config.cephconf,
+                                                              self.pool,
+                                                              self.image)
             response = shellcommand(map_cmd)
 
         if response:
@@ -233,6 +292,93 @@ class LUN(object):
             # get created and mapped, and then need correcting. Better to exit if the pool doesn't exist
             self.error = True
             self.error_msg = "Pool '{}' does not exist. Unable to continue".format(self.pool)
+
+    @staticmethod
+    def remove_dm_device(dm_path):
+        dm_name = os.path.basename(dm_path)
+        resp = shellcommand('multipath -f {}'.format(dm_name))
+
+        return False if resp else True
+
+    def remove_lun(self):
+
+        this_host = gethostname().split('.')[0]
+        self.logger.info("LUN deletion request received, rbd removal to be "
+                         "performed by {}".format(self.allocating_host))
+
+        # First ensure the LUN is not allocated to a client
+        clients = self.config.config['clients']
+        lun_in_use = False
+        for iqn in clients:
+            client_luns = clients[iqn]['luns'].keys()
+            if self.config_key in client_luns:
+                lun_in_use = True
+                break
+
+        if lun_in_use:
+            # this will fail the ansible task for this lun/host
+            self.error = True
+            self.error_msg = "Unable to delete {} - allocated to {}".format(self.config_key,
+                                                                            iqn)
+            self.logger.warning(self.error_msg)
+            return
+
+        # Check that the LUN is in LIO - if not there is nothing to do for this request
+        lun = self.lun_in_lio()
+        if not lun:
+            return
+
+        # Now we know the request is for a LUN in LIO, and it's not masked to a client
+        self.remove_dev_from_lio()
+        if self.error:
+            return
+
+        rbd_image = RBDDev(self.image, '0G', self.pool)
+        rbd_image.get_rbd_map()
+
+        dm_path = LUN.dm_device_name_from_rbd_map(rbd_image.rbd_map)
+        if LUN.remove_dm_device(dm_path):
+
+            rbd_image.unmap_rbd()
+            if rbd_image.error:
+                self.error = True
+                self.error_msg = "Unable to unmap {} from host".format(self.config_key)
+                self.logger.error(self.error_msg)
+                return
+
+            self.num_changes += 1
+
+            if this_host == self.allocating_host:
+                # by using the allocating host we ensure the delete is not
+                # issue by several hosts when initiated through ansible
+                rbd_image.delete_rbd()
+                if rbd_image.error:
+                    self.error = True
+                    self.error_msg = "Unable to delete the underlying rbd image {}".format(self.config_key)
+                    return
+
+                # remove the definition from the config object
+                self.config.del_item('disks', self.config_key)
+                self.config.commit()
+
+        else:
+            self.error = True
+            self.error_msg = "Unable to remove dm device for {}".format(self.config_key)
+            self.logger.error(self.error_msg)
+            return
+
+    def manage(self, desired_state):
+
+        self.logger.debug("lun.manage request for {}, desired state {}".format(self.image, desired_state))
+
+        if desired_state == 'present':
+
+            self.allocate()
+
+        elif desired_state == 'absent':
+
+            self.remove_lun()
+
 
     def allocate(self):
         self.logger.debug("LUN.allocate starting, getting a list of rbd devices")
@@ -331,6 +477,7 @@ class LUN(object):
 
         # now see if we need to add this rbd image to LIO
         lun = self.lun_in_lio()
+
         if not lun:
 
             # this image has not been defined to this hosts LIO, so check the config for the details and
@@ -535,6 +682,48 @@ class LUN(object):
             self.error_msg = "failed to add {} to LIO - error({})".format(self.image, str(err))
 
         return new_lun
+
+    def remove_dev_from_lio(self):
+        lio_root = root.RTSRoot()
+
+        # remove the device from all tpgs
+        for t in lio_root.tpgs:
+            for lun in t.luns:
+                if lun.storage_object.name == self.config_key:
+                    try:
+                        lun.delete()
+                    except RTSLibError as e:
+                        self.error = True
+                        self.error_msg = "Delete from LIO/TPG failed - {}".format(e)
+                        return
+                    else:
+                        break       # continue to the next tpg
+
+        for stg_object in lio_root.storage_objects:
+            if stg_object.name == self.config_key:
+
+                alua_dir = os.path.join(stg_object.path, "alua")
+
+                # remove the alua directories (future versions will handle this
+                # natively within rtslib_fb
+                for dirname in next(os.walk(alua_dir))[1]:
+                    if dirname != "default_tg_pt_gp":
+                        try:
+                            alua_tpg = ALUATargetPortGroup(stg_object, dirname)
+                            alua_tpg.delete()
+                        except (RTSLibError, RTSLibNotInCFS) as err:
+                            self.error = True
+                            self.error_msg = "Delete of ALUA directories failed - {}".format(err)
+                            return
+
+                try:
+                    stg_object.delete()
+                except RTSLibError as e:
+                    self.error = True
+                    self.error_msg = "Delete from LIO/backstores failed - {}".format(e)
+                    return
+
+                break
 
     @staticmethod
     def set_owner(gateways):
