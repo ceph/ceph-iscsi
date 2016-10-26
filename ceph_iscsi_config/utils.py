@@ -7,6 +7,7 @@ import netifaces
 import struct
 import subprocess
 import rados
+import datetime
 
 import ceph_iscsi_config.settings as settings
 
@@ -193,3 +194,8 @@ def get_pool_name(conf=None, pool_id=0):
         pool_name = cluster.pool_reverse_lookup(pool_id)
 
     return pool_name
+
+
+def get_time():
+    utc = datetime.datetime.utcnow()
+    return utc.strftime('%Y/%m/%d %H:%M:%S')
