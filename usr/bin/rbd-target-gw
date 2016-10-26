@@ -166,6 +166,14 @@ def abort(message):
     logger.error(message)
     sys.exit(16)
 
+def get_tpgs():
+    """
+    determine the number of tpgs in the current LIO environment
+    :return: count of the defined tpgs
+    """
+
+    return len([tpg.tag for tpg in root.RTSRoot().tpgs])
+
 
 def apply_config():
     """
@@ -199,13 +207,18 @@ def apply_config():
     # enabled tpg will not have an outside IP address. This prevents clients from
     # logging in too early, failing and giving up because the nodeACL
     # hasn't been defined yet (yes Windows I'm looking at you!)
-    gateway = GWTarget(logger, gw_iqn, gw_ip_list, enable_portal=False)
+
+    # first check if there are tpgs already in LIO (True) - this would indicate a restart or reload
+    # call has been made. If the tpg count is 0, this is a boot time request
+    portals_active = get_tpgs() > 0
+
+    gateway = GWTarget(logger, gw_iqn, gw_ip_list, enable_portal=portals_active)
     gateway.manage('target')
     if gateway.error:
         abort("Error creating the iSCSI target (target, TPGs, Portals)")
 
     # LUN management
-    # disk_key ... pool/rbd_image
+    # disk_key ... pool.rbd_image
     for disk_key in config.config['disks']:
 
         disk = config.config['disks'][disk_key]
@@ -238,12 +251,13 @@ def apply_config():
         client = GWClient(logger, client_iqn, image_list, chap)
         client.manage('present')    # ensure the client exists
 
-    # The tpgs, luns and clients are all defined, but the active tpg doesn't have an IP
-    # bound to it yet (due to the enable_portals=False setting above)
-    logger.info("Adding the IP to the enabled tpg, allowing iSCSI logins")
-    gateway.enable_active_tpg(config)
-    if gateway.error:
-        abort("Error enabling the IP with the active TPG")
+    if not portals_active:
+        # The tpgs, luns and clients are all defined, but the active tpg doesn't have an IP
+        # bound to it yet (due to the enable_portals=False setting above)
+        logger.info("Adding the IP to the enabled tpg, allowing iSCSI logins")
+        gateway.enable_active_tpg(config)
+        if gateway.error:
+            abort("Error enabling the IP with the active TPG")
 
     config_loading = False
 
