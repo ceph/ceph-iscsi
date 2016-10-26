@@ -399,7 +399,7 @@ class LUN(object):
 
                 if not rbd_image.error:
                     self.config.add_item('disks', self.config_key)
-                    self.logger.info("(LUN.allocate) created {}/{} successfully".format(self.image, self.pool))
+                    self.logger.info("(LUN.allocate) created {}/{} successfully".format(self.pool, self.image))
                     self.num_changes += 1
                 else:
                     self.error = True
