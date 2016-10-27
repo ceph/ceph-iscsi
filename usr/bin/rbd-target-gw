@@ -15,15 +15,14 @@ from socket import gethostname
 
 import ceph_iscsi_config.settings as settings
 
-# from rtslib_fb.utils import RTSLibError
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.ceph_iscsi_lio import LIO, Gateway
-# from ceph_iscsi_config.utils import Defaults
+from ceph_iscsi_config.lio import LIO, Gateway
 
 from rtslib_fb import root
+
 
 def ceph_rm_blacklist(blacklisted_ip):
     """
@@ -57,6 +56,7 @@ def signal_stop(*args):
 
     lio = LIO()
     gw = Gateway(config)
+
     # This will fail incoming IO, but wait on outstanding IO to
     # complete normally. We rely on the initiator multipath layer
     # to handle retries like a normal path failure.

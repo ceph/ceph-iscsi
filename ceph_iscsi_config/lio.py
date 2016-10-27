@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-__author__ = 'pcuzner@redhat.com'
+__author__ = 'Paul Cuzner, Michael Christie'
 
 import subprocess
 import fileinput
@@ -12,6 +12,7 @@ from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.alua import ALUATargetPortGroup
+
 
 def dm_remove_device(dm_device):
     rm_ok = True
@@ -44,6 +45,7 @@ def rbd_unmap(rbd_path):
     return unmap_ok
 
 class LIO(object):
+
     def __init__(self):
         self.lio_root = root.RTSRoot()
         self.error = False
@@ -99,6 +101,7 @@ class LIO(object):
                             image_metadata['wwn'] = ''
                             image_metadata['dm_device'] = ''
                             config.update_item("disks", disk_key, image_metadata)
+
 
 class Gateway(LIO):
 
