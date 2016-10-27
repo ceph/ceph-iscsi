@@ -248,11 +248,13 @@ class GWTarget(object):
         except RTSLibError as err:
                 self.logger.info("ALUA group id {} for stg obj {} lun {} already made".format(tpg.tag, stg_object, lun))
                 # someone mapped a LU then unmapped it without deleting the
-                # stg_object
-                alua_group = ALUATargetPortGroup(stg_object, group_name)
-                if alua_group.tpg_id != tpg.tag:
+                # stg_object, or we are reloading the config.
+                alua_tpg = ALUATargetPortGroup(stg_object, group_name)
+                if alua_tpg.tpg_id != tpg.tag:
                     # ports and owner were rearranged. Not sure we support that.
                     raise RTSLibError
+                # drop down in case we are restarting due to error and we
+                # were not able to bind to a lun last time.
 
         alua_tpg.alua_access_type = 1
         alua_tpg.alua_support_offline = 0
