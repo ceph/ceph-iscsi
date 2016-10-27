@@ -57,6 +57,7 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 - add create/update datestamps to config object metadata
 - resolve rbd-target-gw reload/restart issues (rhbz 1388703)
 - add lun remove capability
+- fix rbd-target-gw to drop LIO configuration on a systemctl stop request
 
 * Fri Oct 21 2016 Paul Cuzner <pcuzner@redhat.com> - 1.3-1
 - fix disk size not showing correctly in targetcli following a resize (BZ 1386149)
