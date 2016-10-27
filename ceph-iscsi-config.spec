@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        1.3
+Version:        1.4
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -50,8 +50,16 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Thu Oct 27 2016 Paul Cuzner <pcuzner@redhat.com> - 1.4-1
+- fix - ensure large config objects are read correctly (rhbz 1387297)
+- provide support for the same image name across mulitple rados pools (rhbz 1387952)
+- add lun id to config object preventing potential data corruptions (rhbz 1387953)
+- add create/update datestamps to config object metadata
+- resolve rbd-target-gw reload/restart issues (rhbz 1388703)
+- add lun remove capability
+
 * Fri Oct 21 2016 Paul Cuzner <pcuzner@redhat.com> - 1.3-1
-- disk resize not showing in targetcli (BZ 1386149)
+- fix disk size not showing correctly in targetcli following a resize (BZ 1386149)
 - use of fqdn in the LUN request (BZ 1386939)
 - rbd-target-gw - ensure tpgs are disabled on service shutdown
 - config.gateway - create alua group per tpg
