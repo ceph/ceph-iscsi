@@ -2,6 +2,9 @@
 This will eventually be moved to rtslib-fb, so it can be used
 by targetcli-fb
 '''
+
+__author__ = 'Michael Christie'
+
 from rtslib_fb import BlockStorageObject
 from rtslib_fb.target import TPG
 from rtslib_fb.node import CFSNode
