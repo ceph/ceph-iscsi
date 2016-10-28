@@ -87,6 +87,16 @@ class Config(object):
         self.config = self.get_config()
         self.changed = False
 
+    def _read_rbd_config(self, ioctx):
+        """
+        Return rbd config string.
+        :param ioctx: rados ioctx
+        :return: config string.
+        """
+        size,time = ioctx.stat(self.config_name)
+        size = size + 1
+        return ioctx.read(self.config_name, length=size)
+
     def _get_rbd_config(self):
 
         cfg_dict = {}
@@ -101,9 +111,7 @@ class Config(object):
             return {}
 
         try:
-            size,time = ioctx.stat(self.config_name)
-            size = size + 1
-            cfg_data = ioctx.read(self.config_name, length=size)
+            cfg_data = self._read_rbd_config(ioctx)
             ioctx.close()
         except rados.ObjectNotFound:
             # config object is not there, create a seed config
@@ -176,7 +184,7 @@ class Config(object):
             return
 
         # if the config object is empty, seed it - if not just leave as is
-        cfg_data = ioctx.read(self.config_name)
+        cfg_data = self._read_rbd_config(ioctx)
         if not cfg_data:
             self.logger.debug("_seed_rbd_config found empty config object")
             seed_now = Config.seed_config
@@ -263,7 +271,7 @@ class Config(object):
 
         # reread the config to account for updates made by other systems
         # then apply this hosts update(s)
-        current_config = json.loads(ioctx.read(self.config_name))
+        current_config = json.loads(self._read_rbd_config(ioctx))
         for txn in self.txn_list:
 
             self.logger.debug("_commit_rbd transaction shows {}".format(txn))
