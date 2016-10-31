@@ -214,12 +214,12 @@ class RBDDev(object):
         self.map_needed = True
         # lock_on_read was not merged until RHCS 2.1. We temporarily
         # support it on/off to make the transition during devel easier
-        map_cmd = 'rbd -c {} map -o noshare,lock_on_read {}/{}'.format(settings.config.cephconf,
+        map_cmd = 'rbd -c {} map -o noshare,lock_on_read {}/{} 2> /dev/null'.format(settings.config.cephconf,
                                                                        self.pool,
                                                                        self.image)
         response = shellcommand(map_cmd)
         if response is None:
-            map_cmd = 'rbd -c {} map -o noshare {}/{}'.format(settings.config.cephconf,
+            map_cmd = 'rbd -c {} map -o noshare {}/{} 2> /dev/null'.format(settings.config.cephconf,
                                                               self.pool,
                                                               self.image)
             response = shellcommand(map_cmd)
@@ -335,6 +335,13 @@ class LUN(object):
 
         rbd_image = RBDDev(self.image, '0G', self.pool)
         rbd_image.get_rbd_map()
+
+        # Check that we have an rbd_map entry - if not the map command failed
+        if not rbd_image.rbd_map:
+            self.error = True
+            self.error_msg = "Unable to get the map device for {}/{}".format(rbd_image.pool, rbd_image.image)
+            self.logger.error(self.error_msg)
+            return
 
         dm_path = LUN.dm_device_name_from_rbd_map(rbd_image.rbd_map)
         if LUN.remove_dm_device(dm_path):
