@@ -7,7 +7,7 @@ import rtslib_fb.root as lio_root
 
 from socket import gethostname
 from rtslib_fb.target import NodeACL, TPG
-from rtslib_fb.utils import RTSLibError
+from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
 
@@ -38,13 +38,11 @@ class GWClient(object):
         self.iqn = client_iqn
         self.requested_images = image_list      # images are in comma separated pool.image_name format
 
-        self.chap = chap          # parameters for auth
+        self.chap = chap                        # parameters for auth
         self.mutual = ''
         self.tpgauth = ''
         self.metadata = {}
         self.acl = None
-        self.error = False
-        self.error_msg = ''
         self.client_luns = {}
         self.tpg = None
         self.tpg_luns = {}
@@ -53,6 +51,16 @@ class GWClient(object):
         self.commit_enabled = True              # enable commit to the config for changes by default
         self.logger = logger
         self.current_config = {}
+
+        try:
+            valid_iqn = normalize_wwn(['iqn'], client_iqn)
+        except RTSLibError as err:
+            self.error = True
+            self.error_msg = "Invalid client name for iSCSI - {}".format(err)
+        else:
+            self.error = False
+            self.error_msg = ''
+
 
 
     def setup_luns(self):
@@ -226,7 +234,11 @@ class GWClient(object):
             self.error_msg = err
         else:
             self.change_count += 1
-            del self.metadata['luns'][image]
+
+            # the lun entry could have been deleted by another host, so before we try and
+            # delete - make sure it's in our local copy of the metadata!
+            if image in self.metadata['luns']:
+                del self.metadata['luns'][image]
 
     def delete(self):
         """
