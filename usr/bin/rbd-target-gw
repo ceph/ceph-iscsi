@@ -54,6 +54,16 @@ def signal_stop(*args):
     config = Config(logger)
     this_host = gethostname().split('.')[0]
 
+    if "gateways" in config.config:
+        if this_host not in config.config["gateways"]:
+            logger.info("No gateway configuration to remove on this host ({})".format(this_host))
+            sys.exit(0)
+    else:
+        logger.info("Configuration object does not hold any gateway information - nothing to do")
+        sys.exit(0)
+
+    # At this point, we're working with a config object that has an entry for this host
+
     lio = LIO()
     gw = Gateway(config)
 
