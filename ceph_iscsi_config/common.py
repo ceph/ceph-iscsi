@@ -78,7 +78,7 @@ class Config(object):
                 return
             else:
                 # connection to the ceph cluster is OK to use
-                self.get_config = self._get_rbd_config
+                self.get_config = self._get_ceph_config
                 self.commit_config = self._commit_rbd
         else:
             self.error = True
@@ -87,17 +87,41 @@ class Config(object):
         self.config = self.get_config()
         self.changed = False
 
-    def _read_rbd_config(self, ioctx):
+    def _read_config_object(self, ioctx):
         """
-        Return rbd config string.
+        Return config string from the config object. The string is checked to see if it's valid
+        json. If it's not the read is likely to be a against the object while it's being updated by another
+        host - if this happens, we wait and reread until we get valid json.
         :param ioctx: rados ioctx
-        :return: config string.
+        :return: (str) current string.
         """
-        size,time = ioctx.stat(self.config_name)
-        size = size + 1
-        return ioctx.read(self.config_name, length=size)
 
-    def _get_rbd_config(self):
+        try:
+            size, mtime = ioctx.stat(self.config_name)
+        except rados.ObjectNotFound:
+            self.logger.debug("_read_config_object object not found")
+            cfg_str = ''
+        else:
+            self.logger.debug("_read_config_object reading the config object")
+            size += 1
+            cfg_str = ioctx.read(self.config_name, length=size)
+            if cfg_str:
+                valid = False
+                while not valid:
+                    try:
+                        cfg_js = json.loads(cfg_str)
+                    except ValueError:
+                        #
+                        self.logger.debug("_read_config_object not valid json, rereading")
+                        time.sleep(1)
+                        size, mtime = ioctx.stat(self.config_name)
+                        cfg_str = ioctx.read(self.config_name, length=size)
+                    else:
+                        valid = True
+
+        return cfg_str
+
+    def _get_ceph_config(self):
 
         cfg_dict = {}
 
@@ -109,13 +133,16 @@ class Config(object):
             self.error_msg = "'{}' pool does not exist!".format(self.pool)
             self.logger.error("(Config._get_rbd_config) {}".format(self.error_msg))
             return {}
+        else:
+            self.logger.debug("(_get_rbd_config) connection opened")
 
-        try:
-            cfg_data = self._read_rbd_config(ioctx)
-            ioctx.close()
-        except rados.ObjectNotFound:
-            # config object is not there, create a seed config
-            self.logger.debug("(_get_rbd_config) config object doesn't exist..seeding it")
+        cfg_data = self._read_config_object(ioctx)
+        ioctx.close()
+
+        if not cfg_data:
+            # attempt to read the object got nothing which means it's empty
+            # so we seed the object
+            self.logger.debug("(_get_rbd_config) config object is empty..seeding it")
             self._seed_rbd_config()
             if self.error:
                 self.logger.error("(Config._get_rbd_config) Unable to seed the config object")
@@ -123,17 +150,9 @@ class Config(object):
             else:
                 cfg_data = json.dumps(Config.seed_config)
 
-        if cfg_data:
-            self.logger.debug("(_get_rbd_config) config object contains '{}'".format(cfg_data))
-            cfg_dict = json.loads(cfg_data)
-        else:
-            self.logger.debug("(_get_rbd_config) config object exists, but is empty '{}'".format(cfg_data))
-            self._seed_rbd_config()
-            if self.error:
-                self.logger.error("(Config._get_rbd_config) Unable to seed the config object")
-                return {}
-            else:
-                cfg_dict = Config.seed_config
+        self.logger.debug("(_get_rbd_config) config object contains '{}'".format(cfg_data))
+
+        cfg_dict = json.loads(cfg_data)
 
         return cfg_dict
 
@@ -142,20 +161,20 @@ class Config(object):
         ioctx = self.ceph.cluster.open_ioctx(self.pool)
 
         secs = 0
-
+        self.logger.debug("config.lock attempting to acquire lock on {}".format(self.config_name))
         while secs < Config.lock_time_limit:
             try:
                 ioctx.lock_exclusive(self.config_name, 'lock', 'config')
                 self.config_locked = True
                 break
-            except rados.ObjectBusy:
+            except (rados.ObjectBusy, rados.ObjectExists):
                 self.logger.debug("(Config.lock) waiting for excl lock on {} object".format(self.config_name))
                 time.sleep(1)
                 secs += 1
 
         if secs >= Config.lock_time_limit:
             self.error = True
-            self.error_msg = ("Timed out ({}) waiting for excl "
+            self.error_msg = ("Timed out ({}s) waiting for excl "
                               "lock on {} object".format(Config.lock_time_limit, self.config_name))
             self.logger.error("(Config.lock) {}".format(self.error_msg))
 
@@ -164,6 +183,7 @@ class Config(object):
     def unlock(self):
         ioctx = self.ceph.cluster.open_ioctx(self.pool)
 
+        self.logger.debug("config.unlock releasing lock on {}".format(self.config_name))
         try:
             ioctx.unlock(self.config_name, 'lock', 'config')
             self.config_locked = False
@@ -184,7 +204,7 @@ class Config(object):
             return
 
         # if the config object is empty, seed it - if not just leave as is
-        cfg_data = self._read_rbd_config(ioctx)
+        cfg_data = self._read_config_object(ioctx)
         if not cfg_data:
             self.logger.debug("_seed_rbd_config found empty config object")
             seed_now = Config.seed_config
@@ -195,8 +215,6 @@ class Config(object):
             self.changed = True
 
         self.unlock()
-
-        ioctx.close()
 
     def _get_glfs_config(self):
         pass
@@ -271,7 +289,7 @@ class Config(object):
 
         # reread the config to account for updates made by other systems
         # then apply this hosts update(s)
-        current_config = json.loads(self._read_rbd_config(ioctx))
+        current_config = json.loads(self._read_config_object(ioctx))
         for txn in self.txn_list:
 
             self.logger.debug("_commit_rbd transaction shows {}".format(txn))
