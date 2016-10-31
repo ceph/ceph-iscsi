@@ -31,6 +31,29 @@ def shellcommand(command_string):
     else:
         return response
 
+def get_ip(addr):
+    """
+    return an ipv4 address for the given address - could be an ip or name passed in
+    :param addr: name or ip address (dotted quad)
+    :return: ipv4 address, or 0.0.0.0 if the address can't be validated as ipv4 or resolved from
+             a name
+    """
+
+    converted_addr = '0.0.0.0'
+
+    try:
+        socket.inet_aton(addr)
+    except socket.error:
+        # not an ip address, maybe a name
+        try:
+            converted_addr = socket.gethostbyname(addr)
+        except socket.error:
+            pass
+    else:
+        converted_addr = addr
+
+
+    return converted_addr
 
 def valid_ip(ip, port=22):
     """
