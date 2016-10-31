@@ -60,7 +60,7 @@ def signal_stop(*args):
     # This will fail incoming IO, but wait on outstanding IO to
     # complete normally. We rely on the initiator multipath layer
     # to handle retries like a normal path failure.
-    gw.drop_target(this_host, False)
+    gw.drop_target(this_host)
     if gw.error:
         logger.error("rbd-target-gw failed to remove target objects")
 
@@ -81,7 +81,7 @@ def signal_reload(*args):
         logger.info("Reloading configuration from rados configuration object")
         apply_config()
     else:
-        logger.warning("User attempted to reload the config during an active reload process - skipped, try later")
+        logger.warning("Admin attempted to reload the config during an active reload process - skipped, try later")
 
 
 def map_rbd(rbd_path):
@@ -196,17 +196,25 @@ def apply_config():
     global config_loading
     config_loading = True
 
-    this_host = gethostname().split('.')[0]
+    this_host = gethostname().split('.')[0]             # shortname for the current host
 
     logger.info("Reading the configuration object to update local LIO configuration")
     config = Config(logger)
+
     logger.info("Processing Gateway configuration")
 
-    # first check to see if we have any entries to handle - if not, there is not work to do..
-    if not config.config['gateways']:
+    # first check to see if we have any entries to handle - if not, there is no work to do..
+    if "gateways" not in config.config:
         logger.info("Configuration is empty - nothing to define to LIO")
         config_loading = False
         return
+    if this_host not in config.config['gateways']:
+        logger.info("Configuration does not have an entry for this host({}) - "
+                    "nothing to define to LIO".format(this_host))
+        config_loading = False
+        return
+
+    # at this point we have a gateway entry that applies to the running host
 
     gw_ip_list = config.config['gateways']['ip_list'] if 'ip_list' in config.config['gateways'] else None
     gw_iqn = config.config['gateways']['iqn'] if 'iqn' in config.config['gateways'] else None
@@ -226,6 +234,8 @@ def apply_config():
     gateway.manage('target')
     if gateway.error:
         abort("Error creating the iSCSI target (target, TPGs, Portals)")
+
+    logger.info("Processing LUN configuration")
 
     # LUN management
     # disk_key ... pool.rbd_image
@@ -253,6 +263,8 @@ def apply_config():
     if gateway.error:
         abort("Error mapping the LUNs to the tpg's within the iscsi Target")
 
+    logger.info("Processing client configuration")
+
     # Client configurations (NodeACL's)
     for client_iqn in config.config['clients']:
         client_metadata = config.config['clients'][client_iqn]
@@ -270,6 +282,8 @@ def apply_config():
             abort("Error enabling the IP with the active TPG")
 
     config_loading = False
+
+    logger.info("iSCSI configuration load complete")
 
 
 def main():

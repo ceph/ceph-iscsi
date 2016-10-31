@@ -52,8 +52,8 @@ class LIO(object):
         self.error_msg = ''
         self.changed = False
 
-    def save_config(self):
-        self.lio_root.save_to_file()
+    # def save_config(self):
+    #     self.lio_root.save_to_file()
 
     def drop_lun_maps(self, config, update_config):
 
@@ -99,7 +99,7 @@ class LIO(object):
                             # update the disk item to remove the wwn information
                             image_metadata = config.config['disks'][disk_key]   # current disk meta data dict
                             image_metadata['wwn'] = ''
-                            image_metadata['dm_device'] = ''
+                            # image_metadata['dm_device'] = ''
                             config.update_item("disks", disk_key, image_metadata)
 
 
@@ -113,7 +113,7 @@ class Gateway(LIO):
     def session_count(self):
         return len(list(self.lio_root.sessions))
 
-    def drop_target(self, this_host, update_config):
+    def drop_target(self, this_host):
         iqn = self.config.config['gateways'][this_host]['iqn']
 
         lio_root = root.RTSRoot()
@@ -121,6 +121,3 @@ class Gateway(LIO):
             if tgt.wwn == iqn:
                 tgt.delete()
                 self.changed = True
-                if update_config:
-                    # remove the gateway from the config dict
-                    self.config.del_item('gateways', this_host)
