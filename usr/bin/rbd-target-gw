@@ -211,6 +211,10 @@ def apply_config():
     logger.info("Reading the configuration object to update local LIO configuration")
     config = Config(logger)
 
+    if config.error:
+        logger.critical("Unable to read the configuration object - {}".format(config.error_msg))
+        sys.exit(12)
+
     logger.info("Processing Gateway configuration")
 
     # first check to see if we have any entries to handle - if not, there is no work to do..
