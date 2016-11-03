@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        1.4
+Version:        1.5
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -50,6 +50,14 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Fri 04 2016 Paul Cuzner <pcuzner@redhat.com> - 1.5-1
+- fix - catch config errors at rbd-target-gw startup
+- config.lun - trap unwanted rbd map stderr messages
+- rbd-target-gw - bypass shutdown if the gateway is not in the configuration (rhbz 1390022)
+- config.client - fix handling of invalid client iqn (rhbz 1390023)
+- rbd-target-gw - fix behaviour when daemon started prematurely (rhbz 1390022)
+- config.common - resolve invalid json backtrace during config read (rhbz 1387297)
+
 * Thu Oct 27 2016 Paul Cuzner <pcuzner@redhat.com> - 1.4-1
 - fix - ensure large config objects are read correctly (rhbz 1387297)
 - provide support for the same image name across mulitple rados pools (rhbz 1387952)
