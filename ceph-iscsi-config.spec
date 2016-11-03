@@ -50,7 +50,7 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
-* Fri 04 2016 Paul Cuzner <pcuzner@redhat.com> - 1.5-1
+* Fri Nov 04 2016 Paul Cuzner <pcuzner@redhat.com> - 1.5-1
 - fix - catch config errors at rbd-target-gw startup
 - config.lun - trap unwanted rbd map stderr messages
 - rbd-target-gw - bypass shutdown if the gateway is not in the configuration (rhbz 1390022)
