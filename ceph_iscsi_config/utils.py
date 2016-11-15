@@ -222,3 +222,10 @@ def get_pool_name(conf=None, pool_id=0):
 def get_time():
     utc = datetime.datetime.utcnow()
     return utc.strftime('%Y/%m/%d %H:%M:%S')
+
+
+def this_host():
+    """
+    return the local machine's shortname
+    """
+    return socket.gethostname().split('.')[0]
