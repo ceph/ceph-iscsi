@@ -2,6 +2,9 @@
 __author__ = 'pcuzner@redhat.com'
 
 from ConfigParser import ConfigParser
+from distutils.util import strtobool
+
+import re
 
 # this module when imported preserves the global values
 # defined by the init method allowing other classes to
@@ -15,13 +18,20 @@ class Settings(object):
     defaults = {"cluster_name": "ceph",
                 "gateway_keyring": "/etc/ceph/ceph.client.admin.keyring",
                 "time_out": 30,
-                "ceph_user": "admin"
+                "api_port": 5000,
+                "api_secure": "true",
+                "loop_delay": 2,
+                "trusted_ip_list": '',                  # comma separate list of IPs
+                "api_enabled": 'true',
+                "api_user": "admin",
+                "api_password": "admin",
+                "ceph_user": "admin",
+                "debug": "false"
                 }
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.conf'):
 
         self.size_suffixes = ['M', 'G', 'T']
-        self.loop_delay = 2
         self.rbd_map_file = '/etc/ceph/rbdmap'
 
         self.error = False
@@ -33,13 +43,15 @@ class Settings(object):
             # no config file present, set up defaults
             self._define_settings(Settings.defaults)
         else:
-            # If we have a
+            # If we have a file use it to override the defaults
             if config.has_section("config"):
                 runtime_settings = dict(Settings.defaults)
                 runtime_settings.update(dict(config.items("config")))
                 self._define_settings(runtime_settings)
 
         self.cephconf = '/etc/ceph/{}.conf'.format(self.cluster_name)
+        if self.api_secure:
+            self.api_ssl_verify = False if self.api_secure else None
 
     def __repr__(self):
         s = ''
@@ -50,9 +62,33 @@ class Settings(object):
     def _define_settings(self, settings):
         """
         receive a settings dict and apply those key/value to the
-        current instance
+        current instance, settings that look like numbers are converted
         :param settings: dict of settings
         :return: None
         """
+
+        float_regex = re.compile("^[0-9]*\.{1}[0-9]$")
+        int_regex = re.compile("^[0-9]+")
+
         for k in settings:
-            self.__setattr__(k, settings[k])
+
+            v = settings[k]
+
+            if k == 'trusted_ip_list':
+                v = v.split(',') if v else []
+
+            if v in ['true', 'True', 'false', 'False']:
+                v = strtobool(v)
+
+            if isinstance(v, str):
+                # convert any strings that hold numbers to int/float
+                if float_regex.search(settings[k]):
+                    v = float(settings[k])
+
+                if int_regex.search(settings[k]):
+                    v = int(settings[k])
+
+            self.__setattr__(k, v)
+
+
+

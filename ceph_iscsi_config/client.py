@@ -278,10 +278,12 @@ class GWClient(object):
         # since adding just the iqn is only the start of the definition
         config.commit("retain")
 
-    def manage(self, rqst_type):
+    def manage(self, rqst_type, committer=None):
         """
         Manage the allocation or removal of this client
         :param rqst_type is either present (try and create the nodeACL), or absent - delete the nodeACL
+        :param committer is the host responsible for any commits to the configuration - this is not
+               needed for Ansible management, but is used by the CLI->API->GWClient interaction
         """
         # Build a local object representing the rados configuration object
         config_object = Config(self.logger)
@@ -298,9 +300,10 @@ class GWClient(object):
 
         if running_under_ansible:
             update_host = GWClient.get_update_host(self.current_config)
-            self.logger.debug("GWClient.manage) update host to handle any config update is {}".format(update_host))
         else:
-            update_host = None
+            update_host = committer
+
+        self.logger.debug("GWClient.manage) update host to handle any config update is {}".format(update_host))
 
         if rqst_type == "present":
 
@@ -364,17 +367,11 @@ class GWClient(object):
 
                 if self.commit_enabled:
 
-                    if running_under_ansible:
-                        if update_host == gethostname().split('.')[0]:
-                            # update the config object with this clients settings
-                            config_object.update_item("clients", self.iqn, self.metadata)
-
-                            # persist the config update
-                            config_object.commit()
-                    else:
-
-                        # this was a request directly (over API?)
+                    if update_host == gethostname().split('.')[0]:
+                        # update the config object with this clients settings
+                        self.logger.debug("Updating the config object metadata for '{}'".format(self.iqn))
                         config_object.update_item("clients", self.iqn, self.metadata)
+
                         # persist the config update
                         config_object.commit()
 
@@ -389,15 +386,12 @@ class GWClient(object):
                     return
                 else:
                     # remove this client from the config
-                    if running_under_ansible:
 
-                        if update_host == gethostname().split('.')[0]:
-                            self.logger.debug("Removing {} from the config object".format(self.iqn))
-                            config_object.del_item("clients", self.iqn)
-                            config_object.commit()
-                    else:
+                    if update_host == gethostname().split('.')[0]:
+                        self.logger.debug("Removing {} from the config object".format(self.iqn))
                         config_object.del_item("clients", self.iqn)
                         config_object.commit()
+
             else:
                 # desired state is absent, but the client does not exist in LIO - Nothing to do!
                 self.logger.info("(main) client {} removal request, but the client is not "
