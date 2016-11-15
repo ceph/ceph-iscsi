@@ -10,8 +10,9 @@ import subprocess
 import time
 import sys
 import os
-
-from socket import gethostname
+import threading
+import ssl
+from OpenSSL import SSL
 
 import ceph_iscsi_config.settings as settings
 
@@ -20,8 +21,367 @@ from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.lio import LIO, Gateway
+from ceph_iscsi_config.utils import get_ip, this_host  # ipv4_addresses ?
 
 from rtslib_fb import root
+from rtslib_fb.utils import RTSLibError, normalize_wwn
+
+# requires - python-flask-restful
+# flask is in RHEL7 repos
+from flask import Flask, jsonify, make_response, request, abort
+
+# flask_restful is NOT! Install with pip from EPEL (i.e. yum install python-pip && pip install flask-restful)
+from flask_restful import Resource, Api
+
+from functools import wraps
+
+# def valid_request(src_ip):
+#
+#     local_gw = ['127.0.0.1']
+#     gw_names = [gw for gw in config.config['gateways'] if isinstance(config.config['gateways'][gw], dict)]
+#     gw_ips = [get_ip(gw_name) for gw_name in gw_names]
+#
+#     return src_ip in (local_gw + gw_ips)
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+
+        # First check that the source of the request is actually valid
+        local_gw = ['127.0.0.1']
+        gw_names = [gw for gw in config.config['gateways'] if isinstance(config.config['gateways'][gw], dict)]
+        gw_ips = [get_ip(gw_name) for gw_name in gw_names] + local_gw + settings.config.trusted_ip_list
+
+        if request.remote_addr not in gw_ips:
+            abort(403)
+
+        # check credentials supplied in the http request are valid
+        auth = request.authorization
+        if not auth:
+            abort(401)
+
+        if (auth.username != settings.config.api_user or
+           auth.password != settings.config.api_password):
+            abort(401)
+
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+class APIGatewayConfig(Resource):
+    @requires_auth
+    def get(self):
+        return make_response(jsonify(config.config), 200)
+
+
+class APIGateways(Resource):
+    @requires_auth
+    def get(self):
+        return make_response(jsonify(config.config["gateways"]), 200)
+
+
+class APIGateway(Resource):
+    pass
+
+
+class APIDisks(Resource):
+    @requires_auth
+    def get(self):
+        # if valid_request(request.remote_addr):
+        disk_names = config.config['disks'].keys()
+        response = {"disks": disk_names}
+
+        return make_response(jsonify(response), 200)
+        #
+        # else:
+        #     return make_response(jsonify({"message": "Invalid request source IP"}), 403)
+
+
+class APIDisk(Resource):
+    @requires_auth
+    def delete(self, image_id):
+
+        # let's assume that the request has been validated by the caller
+
+        # if valid_request(request.remote_addr):
+        purge_host = request.form['purge_host']
+
+        pool, image = image_id.split('.', 1)
+
+        lun = LUN(logger,
+                  pool,
+                  image,
+                  '0G',
+                  purge_host)
+
+        if lun.error:
+            # problem defining the LUN instance
+            abort(500, message="Error initialising the LUN ({})".format(lun.error_msg))
+            # return make_response(jsonify({"message": "Error initialising the LUN ({})".format(lun.error_msg)}), 500)
+
+        lun.remove_lun()
+        if lun.error:
+            if 'allocated to' in lun.error_msg:
+                # attempted to remove an rbd that is still allocated to a client
+                status_code = 400
+            else:
+                status_code = 500
+
+            abort(status_code, message="Error removing the LUN ({})".format(lun.error_msg))
+            # return make_response(jsonify({"message": }), status_code)
+
+        config.refresh()
+
+        return make_response(jsonify({"message": "LUN removed successfully".format(lun.error_msg)}), 200)
+
+        # else:
+        #     return make_response(jsonify({"message": "Invalid request source IP"}), 403)
+
+    @requires_auth
+    def get(self, image_id):
+
+        # if valid_request(request.remote_addr):
+
+        if image_id in config.config['disks']:
+            return make_response(jsonify(config.config["disks"][image_id]), 200)
+        else:
+            abort(404, message="rbd image {} not found in the configuration".format(image_id))
+            # return make_response(jsonify({"message": "rbd image {} not found in the configuration".format(image_id)}), 404)
+            #
+            # else:
+            #     return make_response(jsonify({"message": "Invalid request source IP"}), 403)
+
+    @requires_auth
+    def put(self, image_id):
+        # A put is for either a create or a resize
+        # put('http://127.0.0.1:5000/api/disk/ansible3',data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
+
+        # FIXME - MUST have a gateway before luns can be created
+        # the gateway must exist, since the workflow for mapping a lun will
+        # map the lun to TPG's and perform alua setup
+
+        # if valid_request(request.remote_addr):
+
+        rqst_fields = set(request.form.keys())
+        if rqst_fields.issuperset(("pool", "size", "owner", "mode")):
+            print "-> update the config for {} in pool {} ({}), owned by {}".format(image_id,
+                                                                                    request.form['pool'],
+                                                                                    request.form['size'],
+                                                                                    request.form['owner'],
+                                                                                    request.form['mode'])
+
+            image_name = image_id.split('.', 1)[1]
+            lun = LUN(logger,
+                      request.form['pool'],
+                      image_name,
+                      request.form['size'],
+                      request.form['owner'])
+
+            lun.allocate()
+            if lun.error:
+                return make_response(jsonify({"message": "{}".format(lun.error_msg)}), 500)
+
+            if request.form['mode'] == 'create':
+                # new disk is allocated, so refresh the local config object
+                config.refresh()
+
+                iqn = config.config['gateways']['iqn']
+                ip_list = config.config['gateways']['ip_list']
+
+                # Add the mapping lun to ensure the block device is
+                # present on all TPG's
+                gateway = GWTarget(logger,
+                                   iqn,
+                                   ip_list)
+
+                gateway.manage('map')
+                if gateway.error:
+                    # return make_response(jsonify({"message": "LUN mapping failed - {}".format(gateway.error_msg)}), 500)
+                    abort(500, message="LUN mapping failed - {}".format(gateway.error_msg))
+
+                return make_response(jsonify({"message": "LUN created and exported"}), 200)
+
+            elif request.form['mode'] == 'resize':
+
+                return make_response(jsonify({"message": "LUN resized and multipathd sync'd"}), 200)
+
+        else:
+            # this is an invalid request
+            # return make_response(jsonify({"message": "Invalid Request - need to provide pool, size and owner"}), 400)
+            abort(400, message="Invalid Request - need to provide pool, size and owner")
+            # else:
+            #     return make_response(jsonify({"message": "Invalid source IP address for the request - must originate from a gateway"}), 403)
+
+
+class APIClients(Resource):
+    @requires_auth
+    def get(self):
+        # if valid_request(request.remote_addr):
+        client_list = config.config['clients'].keys()
+        response = {"clients": client_list}
+
+        return make_response(jsonify(response), 200)
+
+        # else:
+        #     return make_response(jsonify({"message": "Invalid request source IP"}), 403)
+
+
+class APIClientHandler(Resource):
+    def update(self, client_iqn, images, chap, committing_host):
+
+        # convert the comma separated image_list string into a list for GWClient
+        if images:
+            image_list = images.split(',')
+        else:
+            image_list = []
+
+        client = GWClient(logger, client_iqn, image_list, chap)
+
+        if client.error:
+            return 500, "Unable to instantiate an instance of GWClient : {}".format(client.error_msg)
+
+        client.manage('present', committer=committing_host)
+        if client.error:
+            return 500, "Unable to configure the client instance : {}".format(client.error_msg)
+        else:
+            config.refresh()
+            return 200, "Client configured successfully"
+
+
+class APIClientAuth(APIClientHandler):
+    @requires_auth
+    def get(self, client_iqn):
+        # FIXME
+        abort(403)
+        # return make_response(jsonify({"message": "remote access to authentication details prohibited"}), 403)
+
+    @requires_auth
+    def put(self, client_iqn):
+        """
+        Handle auth
+        """
+        # if valid_request(request.remote_addr):
+
+        image_list = request.form['image_list']
+        chap = request.form['chap']
+        committing_host = request.form['committing_host']
+
+        status_code, status_text = self.update(client_iqn, image_list, chap, committing_host)
+
+        return make_response(jsonify({"message": status_text}), status_code)
+
+        # else:
+        #     return make_response(jsonify({"message": "Invalid source IP address for the request - must originate from a gateway"}), 403)
+
+    @requires_auth
+    def delete(self, client_iqn):
+        abort(405)
+        # return make_response(jsonify({"message": "delete method not implemented"}), 405)
+
+
+class APIClientLUN(APIClientHandler):
+    @requires_auth
+    def get(self, client_iqn):
+        """
+        return the LUNs allocated to this client, straight from the config object
+        """
+        # if valid_request(request.remote_addr):
+
+        disk = request.form['disk']
+
+        lun_config = config.config['clients'][client_iqn]['luns']
+
+        return make_response(jsonify({"message": lun_config}), 200)
+
+        # else:
+        #     return make_response(jsonify({"message": "Invalid source IP address for the request - must originate from a gateway"}), 403)
+
+    @requires_auth
+    def put(self, client_iqn):
+        """
+        handle the addition or removal of a lun for a given client
+        the image_list provided is used by the GWClient code to determine the
+        action to take rather than any specific logic here
+        """
+
+        # if valid_request(request.remote_addr):
+
+        # convert the comma separated image_list string into a list for GWClient
+        image_list = request.form['image_list']
+
+        chap = request.form['chap']
+        committing_host = request.form['committing_host']
+
+        status_code, status_text = self.update(client_iqn, image_list, chap, committing_host)
+
+        return make_response(jsonify({"message": status_text}), status_code)
+
+        # else:
+        #     return make_response(jsonify({"message": "Invalid source IP address for the request - must originate from a gateway"}), 403)
+
+
+class APIClient(APIClientHandler):
+    @requires_auth
+    def get(self, client_iqn):
+
+        # if valid_request(request.remote_addr):
+        if client_iqn in config.config['clients']:
+            return make_response(jsonify(config.config["clients"][client_iqn]), 200)
+        else:
+            # return make_response(jsonify({"message":"Client '{}' not defined to the configuration".format(client_iqn)}), 404)
+            abort(404, message="Client '{}' not defined to the configuration".format(client_iqn))
+            # else:
+            #     return make_response(jsonify({"message": "Invalid request source IP"}), 403)
+
+    @requires_auth
+    def put(self, client_iqn):
+
+        # put is request defines a client creation request
+
+        # if valid_request(request.remote_addr):
+
+        try:
+            valid_iqn = normalize_wwn(['iqn'], client_iqn)
+        except RTSLibError:
+            # return make_response(jsonify({"message": "An iqn of '{}' is not a valid name for iSCSI"}),400)
+            abort(400, message="An iqn of '{}' is not a valid name for iSCSI".format(client_iqn))
+
+        committing_host = request.form['committing_host']
+        image_list = ''
+        chap = ''
+
+        status_code, status_text = self.update(client_iqn, image_list, chap, committing_host)
+
+        return make_response(jsonify({"message": status_text}), status_code)
+        #
+        # else:
+        #     return make_response(jsonify({"message": "Invalid source IP address for the request - must originate from a gateway"}), 403)
+
+    @requires_auth
+    def delete(self, client_iqn):
+
+        # if valid_request(request.remote_addr):
+
+        committing_host = request.form['committing_host']
+
+        # Make sure the delete request is for a client we have defined
+        if client_iqn in config.config['clients'].keys():
+            client = GWClient(logger, client_iqn, '', '')
+            client.manage('absent', committer=committing_host)
+            if client.error:
+                abort(500, message="{}".format(client.error_msg))
+                # return make_response(jsonify({"message": "{}".format(client.error_msg)}), 500)
+            else:
+                if committing_host == this_host():
+                    config.refresh()
+                return make_response(jsonify({"message": "client deleted"}), 200)
+        else:
+            abort(405, message="Invalid Request - client does not exist in the config object")
+            # return make_response(jsonify({"message": "Invalid Request - client does not exist in the config object"}), 405)
+
+            # else:
+            #     return make_response(jsonify({"message": "Invalid source IP address for the request - must originate from a gateway"}), 403)
 
 
 def ceph_rm_blacklist(blacklisted_ip):
@@ -51,11 +411,10 @@ def signal_stop(*args):
     """
     logger.info("rbd-target-gw stop received")
 
-    config = Config(logger)
-    this_host = gethostname().split('.')[0]
+    local_gw = this_host()
 
     if "gateways" in config.config:
-        if this_host not in config.config["gateways"]:
+        if local_gw not in config.config["gateways"]:
             logger.info("No gateway configuration to remove on this host ({})".format(this_host))
             sys.exit(0)
     else:
@@ -70,7 +429,7 @@ def signal_stop(*args):
     # This will fail incoming IO, but wait on outstanding IO to
     # complete normally. We rely on the initiator multipath layer
     # to handle retries like a normal path failure.
-    gw.drop_target(this_host)
+    gw.drop_target(local_gw)
     if gw.error:
         logger.error("rbd-target-gw failed to remove target objects")
 
@@ -89,7 +448,13 @@ def signal_reload(*args):
     """
     if not config_loading:
         logger.info("Reloading configuration from rados configuration object")
+
+        config.refresh()
+        if config.error:
+            halt("Unable to read the configuration object - {}".format(config.error_msg))
+
         apply_config()
+
     else:
         logger.warning("Admin attempted to reload the config during an active reload process - skipped, try later")
 
@@ -181,10 +546,10 @@ def osd_blacklist_cleanup():
     return cleanup_state
 
 
-def abort(message):
-
-    logger.error(message)
+def halt(message):
+    logger.critical(message)
     sys.exit(16)
+
 
 def get_tpgs():
     """
@@ -206,14 +571,9 @@ def apply_config():
     global config_loading
     config_loading = True
 
-    this_host = gethostname().split('.')[0]             # shortname for the current host
+    local_gw = this_host()
 
     logger.info("Reading the configuration object to update local LIO configuration")
-    config = Config(logger)
-
-    if config.error:
-        logger.critical("Unable to read the configuration object - {}".format(config.error_msg))
-        sys.exit(12)
 
     logger.info("Processing Gateway configuration")
 
@@ -222,9 +582,9 @@ def apply_config():
         logger.info("Configuration is empty - nothing to define to LIO")
         config_loading = False
         return
-    if this_host not in config.config['gateways']:
+    if local_gw not in config.config['gateways']:
         logger.info("Configuration does not have an entry for this host({}) - "
-                    "nothing to define to LIO".format(this_host))
+                    "nothing to define to LIO".format(local_gw))
         config_loading = False
         return
 
@@ -247,7 +607,7 @@ def apply_config():
     gateway = GWTarget(logger, gw_iqn, gw_ip_list, enable_portal=portals_active)
     gateway.manage('target')
     if gateway.error:
-        abort("Error creating the iSCSI target (target, TPGs, Portals)")
+        halt("Error creating the iSCSI target (target, TPGs, Portals)")
 
     logger.info("Processing LUN configuration")
 
@@ -261,21 +621,21 @@ def apply_config():
 
             # disk size (4th parameter) is not important here since this is just registration of the
             # devices and disk resize is not supported on boot-up anyway
-            lun = LUN(logger, disk['pool'], disk['image'], '0G', this_host)
+            lun = LUN(logger, disk['pool'], disk['image'], '0G', local_gw)
             if lun.error:
-                abort("Error defining rbd image {}".format(disk_key))
+                halt("Error defining rbd image {}".format(disk_key))
 
             lun.allocate()
             if lun.error:
-                abort("Error unable to register {} with LIO".format(disk_key))
+                halt("Error unable to register {} with LIO".format(disk_key))
 
         else:
-            abort("Unable to attach to the dm device {} for image {}".format(dm_path, disk_key))
+            halt("Unable to attach to the dm device {} for image {}".format(dm_path, disk_key))
 
     # Gateway Mapping : Map the LUN's registered to all tpg's within the LIO target
     gateway.manage('map')
     if gateway.error:
-        abort("Error mapping the LUNs to the tpg's within the iscsi Target")
+        halt("Error mapping the LUNs to the tpg's within the iscsi Target")
 
     logger.info("Processing client configuration")
 
@@ -285,7 +645,7 @@ def apply_config():
         chap = client_metadata['auth']['chap']
         image_list = client_metadata['luns'].keys()
         client = GWClient(logger, client_iqn, image_list, chap)
-        client.manage('present')    # ensure the client exists
+        client.manage('present')  # ensure the client exists
 
     if not portals_active:
         # The tpgs, luns and clients are all defined, but the active tpg doesn't have an IP
@@ -293,11 +653,64 @@ def apply_config():
         logger.info("Adding the IP to the enabled tpg, allowing iSCSI logins")
         gateway.enable_active_tpg(config)
         if gateway.error:
-            abort("Error enabling the IP with the active TPG")
+            halt("Error enabling the IP with the active TPG")
 
     config_loading = False
 
     logger.info("iSCSI configuration load complete")
+
+
+class APIServer(threading.Thread):
+    def __init__(self, api_ip='0.0.0.0', api_port=5000, api_debug=True, api_reloader=False):
+        threading.Thread.__init__(self)
+        self.api_ip = api_ip
+        self.api_port = api_port
+        self.api_debug = api_debug
+        self.api_reloader = api_reloader
+        self.app = Flask(__name__)
+        api = Api(self.app)
+
+        # MUST set daemon attribute on the thread for a clean shutdown
+        self.daemon = True
+
+        api.add_resource(APIGatewayConfig, '/api/config')
+        api.add_resource(APIGateways, '/api/gateways')
+        api.add_resource(APIGateway, '/api/gateway/<gateway_iqn>')
+        api.add_resource(APIDisks, '/api/disks')
+        api.add_resource(APIDisk, '/api/disk/<image_id>')
+        api.add_resource(APIClients, '/api/clients')
+        api.add_resource(APIClient, '/api/client/<client_iqn>')
+        api.add_resource(APIClientAuth, '/api/clientauth/<client_iqn>')
+        api.add_resource(APIClientLUN, '/api/clientlun/<client_iqn>')
+
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.DEBUG)
+
+        # Attach the werkzeug log to the handlers defined in the outer scope
+        log.addHandler(file_handler)
+        log.addHandler(syslog_handler)
+
+    def run(self):
+
+        if settings.config.api_secure:
+
+            # FIXME - ideally this should be TLSv1_2 !
+            context = SSL.Context(SSL.TLSv1_METHOD)
+
+            # Use these self-signed crt and key files
+            context.use_privatekey_file('/etc/ceph/iscsi-gateway.key')
+            context.use_certificate_file('/etc/ceph/iscsi-gateway.crt')
+
+            # context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+            # context.load_cert_chain('/etc/ceph/iscsi-gateway.crt', '/etc/ceph/iscsi-gateway.key')
+        else:
+            context = None
+
+        self.app.run(host=self.api_ip,
+                     port=self.api_port,
+                     debug=self.api_debug,
+                     use_reloader=self.api_reloader,
+                     ssl_context=context)
 
 
 def main():
@@ -309,6 +722,11 @@ def main():
     # Read the configuration object and apply to the local LIO instance
     if not config_loading:
         apply_config()
+
+    if settings.config.api_enabled:
+        api_thread = APIServer(api_port=settings.config.api_port)
+        api_thread.start()
+
 
     # Just keep the main process alive. (This is where the API server thread would be started)
     while True:
@@ -345,5 +763,10 @@ if __name__ == '__main__':
     config_loading = False
 
     settings.init()
+
+    # config is set in the outer scope, so it's easily accessible to the api classes
+    config = Config(logger)
+    if config.error:
+        halt("Unable to open/read the configuration object")
 
     main()
