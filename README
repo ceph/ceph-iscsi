@@ -1,0 +1,4 @@
+ceph-iscsi-cli installs a targetcli-like interface to allow
+multiple ceph/iscsi gateways to be managed from a single
+interface. The CLI interfaces with the API exposed in the
+rbd-target-gw daemon running on each gateway.
