@@ -14,7 +14,7 @@ from gwcli.client import Clients
 # from configshell_fb import ExecutionError
 
 from gwcli.utils import (human_size, readcontents,
-                         GatewayAPIError, GatewayLIOError,
+                         GatewayAPIError, GatewayLIOError, GatewayError,
                          this_host, get_other_gateways)
 
 from requests import delete, put, get, ConnectionError
@@ -347,16 +347,28 @@ class Disk(UINode):
         # image_path is a symlink to the actual /dev/rbdX file
         image_path = "/dev/rbd/{}/{}".format(self.pool, self.rbd_image)
         dev_id = os.path.realpath(image_path)[8:]
-        rbd_path = "/sys/devices/rbd/{}".format(dev_id)
-        self.features = readcontents(os.path.join(rbd_path, 'features'))
-        self.size = int(readcontents(os.path.join(rbd_path, 'size')))
-        self.size_h = human_size(self.size)
+        rbd_path = "/sys/devices/rbd{}".format(dev_id)
 
-        # update the parent's disk info map
-        disk_map = self.parent.disk_info
+        try:
+            self.features = readcontents(os.path.join(rbd_path, 'features'))
+            self.size = int(readcontents(os.path.join(rbd_path, 'size')))
+        except IOError:
+            # if we get an ioError here, it means the config object passed
+            # back from the API is out of step with the physical configuration
+            # this can happen after a purge_gateways ansible playbook run if
+            # the gateways do not have there rbd-target-gw daemons reloaded
+            error_msg = "The API has returned disks that are not on this server...reload rbd-target-gw?"
+            self.logger.critical(error_msg)
+            raise GatewayError(error_msg)
+        else:
 
-        disk_map[self.image_id]['size'] = self.size
-        disk_map[self.image_id]['size_h'] = self.size_h
+            self.size_h = human_size(self.size)
+
+            # update the parent's disk info map
+            disk_map = self.parent.disk_info
+
+            disk_map[self.image_id]['size'] = self.size
+            disk_map[self.image_id]['size_h'] = self.size_h
 
     def ui_command_resize(self, size=None):
         """
