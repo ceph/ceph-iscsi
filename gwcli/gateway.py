@@ -3,14 +3,17 @@ __author__ = 'pcuzner@redhat.com'
 import sys
 import json
 
-# FIXME - relative imports
 from gwcli.node import UIGroup, UINode, UIRoot
 from requests import delete, put, get, ConnectionError
 
 from gwcli.storage import Disks
 from gwcli.client import Clients
-from gwcli.utils import this_host
+from gwcli.utils import this_host, get_other_gateways, GatewayAPIError, GatewayError
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.utils import get_ip
+
+from rtslib_fb.utils import normalize_wwn, RTSLibError
+import rtslib_fb.root as root
 
 from gwcli.ceph import Ceph
 
@@ -76,8 +79,8 @@ class ISCSIRoot(UIRoot):
         else:
             # Unable to get the config, tell the user and exit the cli
             self.logger.critical("Unable to access the configuration object : {}".format(self.error_msg))
-            # print("Unable to access the configuration object : {}".format(self.error_msg))
-            sys.exit(16)
+            raise GatewayError
+
 
     def _get_config(self):
         try:
@@ -133,20 +136,11 @@ class ISCSIRoot(UIRoot):
         for var in ansible_vars:
             print(var)
 
-
     def export_copy(self, config):
 
         fmtd_config = json.dumps(config, sort_keys=True, indent=4, separators=(',', ': '))
         print(fmtd_config)
 
-    def ui_command_refresh(self):
-
-        print "not implemented yet"
-        # self.target.reset()
-        # self.disks.reset()
-        # self.clients.reset()
-
-        # self.refresh()
 
     def ui_command_export(self, mode='ansible'):
 
@@ -176,40 +170,97 @@ class ISCSITarget(UIGroup):
 
     def __init__(self, parent):
         UIGroup.__init__(self, 'iscsi-target', parent)
+        self.logger = self.parent.logger
         self.gateway_group = {}
         self.client_group = {}
 
-    def reset(self):
-        children = set(self.children)  # set of child objects
-        for child in children:
-            self.remove_child(child)
+
+    def ui_command_create(self, target_iqn):
+        """
+        Create a gateway target. This target is defined across all gateway nodes,
+        providing the client with a single 'image' for iscsi discovery.
+
+        Only ONE target is supported, at this time.
+        """
+
+        defined_targets = [tgt.name for tgt in self.children]
+        if len(defined_targets) > 0:
+            self.logger.error("Only ONE iscsi target image is supported")
+            return
+
+        # We need LIO to be empty, so check there aren't any targets defined
+        local_lio = root.RTSRoot()
+        current_target_names = [tgt.wwn for tgt in local_lio.targets]
+        if current_target_names:
+            self.logger.error("Local LIO instance already has LIO configured with a target - unable to continue")
+            raise GatewayError
+
+        # OK - this request is valid, lets make sure the iqn is also valid :P
+        try:
+            valid_iqn = normalize_wwn(['iqn'], target_iqn)
+        except RTSLibError:
+            self.logger.error("IQN name '{}' is not valid for iSCSI".format(target_iqn))
+            return
+
+
+        # 'safe' to continue with the definition
+        self.logger.debug("Create an iscsi target definition in the UI")
+        Target(target_iqn, self)
+        self.logger.info('ok')
+
+        # FIXME - should this iqn be committed to the config object?
+        # that way when you exit the cli, and then enter again it will be retained
+
+    def ui_command_delete(self, target_iqn):
+        # this delete request would need to
+        # 1. confirm no sessions for this specific target
+        # 2. delete all hosts definitions
+        # 3. delete all gateway definitions
+        # 4. delete the target
+        print "FIXME - not implemented yet"
+
 
     def refresh(self):
 
+        self.reset()
         if 'iqn' in self.gateway_group:
-            Target(self.gateway_group, self.client_group, self)
+            tgt = Target(self.gateway_group['iqn'], self)
+            tgt.gateway_group.load(self.gateway_group)
+            tgt.client_group.load(self.client_group)
 
     def summary(self):
         return "Targets: {}".format(len(self.children)), None
 
 class Target(UIGroup):
+
     help_info = '''
-                definition of iscsi target
+                The iscsi target bla
                 '''
-    def __init__(self, gateway_group, client_group, parent):
-        UIGroup.__init__(self, gateway_group['iqn'], parent)
-        self.gateways = [ gw for gw in gateway_group if isinstance(gateway_group[gw], dict)]
 
-        # if we have gateways, add it's subtree under the target iqn
-        if self.gateways:
-            GatewayGroup(self, gateway_group)
+    def __init__(self, target_iqn, parent):
+        UIGroup.__init__(self, target_iqn, parent)
+        self.logger = self.parent.logger
+        # self.gateways = [ gw for gw in gateway_group if isinstance(gateway_group[gw], dict)]
+        self.target_iqn = target_iqn
+        self.gateway_group = GatewayGroup(self)
+        self.client_group = Clients(self)
 
-        # if we have clients, add the subtree here
-        if client_group:
-            Clients(self, client_group)
+
+
+    # def load_gateways(self):
+    #     GatewayGroup(self, gateway_group)
+    #
+    # def load_clients(self):
+    #     Clients(self, client_group)
+
+    # def refresh(self):
+    #     self.reset()
+    #     # self.load_gateways()
+    #     # self.load_clients()
+
 
     def summary(self):
-        return "Gateways: {}".format(len(self.gateways)), None
+        return "Gateways: {}".format(len(self.gateway_group.children)), None
 
 class GatewayGroup(UIGroup):
 
@@ -228,32 +279,140 @@ class GatewayGroup(UIGroup):
                  If in doubt, use Ansible :)
                  '''
 
-    def __init__(self,  parent, gateway_group):
+    def __init__(self,  parent):
 
         UIGroup.__init__(self, 'gateways', parent)
+        self.logger = self.parent.logger
+        # gateway_list = [gw for gw in gateway_group if isinstance(gateway_group[gw], dict)]
+        # for gateway_name in gateway_list:
+        #     Gateway(self, gateway_name, gateway_group[gateway_name])
 
+
+    def load(self, gateway_group):
+        # define the host entries from the gateway_group dict
         gateway_list = [gw for gw in gateway_group if isinstance(gateway_group[gw], dict)]
         for gateway_name in gateway_list:
             Gateway(self, gateway_name, gateway_group[gateway_name])
-
-
-    def reset(self):
-        self.iqn = ''
-        children = set(self.children)  # set of child objects
-        for child in children:
-            self.remove_child(child)
 
     def ui_command_info(self):
         for child in self.children:
             print(child)
 
-    def ui_command_create(self):
+    def ui_command_create(self, gateway_name, ip_address):
         """
-        Define the gateway group
-        :return:
-        """
+        Define a gateway to the gateway group for this iscsi target. The
+        first host added should be the gateway running the command
 
-        pass
+        gateway_name ... should resolve to the hostname of the gateway
+        ip_address ..... is the IP v4 address of the interface the iscsi
+                         portal should use
+        """
+        # where possible, validation is done against the local ui tree elements
+        # as opposed to multiple calls to the API - in order to to keep the UI
+        # as responsive as possible
+
+        # fixme
+        # validate the gateway name is resolvable
+        if get_ip(gateway_name) == '0.0.0.0':
+            self.logger.error("Gateway '{}' is not resolvable to an ipv4 address".format(gateway_name))
+            return
+
+        # validate the ip_address is valid ipv4
+        if get_ip(ip_address) == '0.0.0.0':
+            self.logger.error("IP address provided is not usable (name doesn't resolve, or not a valid ipv4 address)")
+            return
+
+        # validate that the gateway name isn't already known within the configuration
+        current_gws = [gw for gw in self.children]
+        current_gw_names = [gw.name for gw in current_gws]
+        current_gw_portals = [gw.portal_ip_address for gw in current_gws]
+        if gateway_name in current_gw_names:
+            self.logger.error("'{}' is already defined to the configuration".format(gateway_name))
+            return
+
+        # validate that the ip address given is NOT already known
+        if ip_address in current_gw_portals:
+            self.logger.error("'{}' is already defined within the configuration".format(ip_address))
+
+        local_gw = this_host()
+        current_gateways = [tgt.name for tgt in self.children]
+
+        if gateway_name != local_gw and len(current_gateways) == 0:
+            # the first gateway defined must be the local machine. By doing this
+            # the initial create uses 127.0.0.1, and places the portal IP in the
+            # gateway ip list. Once the gateway ip list is defined, the api server
+            # can resolve against the gateways - until the list is defined only a
+            # request from 127.0.0.1 is acceptable in the api
+            self.logger.error("The first gateway defined must be the name of the local machine")
+            return
+
+        if local_gw in current_gateways:
+            current_gateways.remove(local_gw)
+
+        portals = [tgt.portal_ip_address for tgt in self.children]
+        portals.append(ip_address)
+        portals_str = ','.join(portals)
+
+        # The local API must be updated first. When the config is empty, the api will
+        # accept a 127.0.0.1 request so we have to apply the updates locally first
+        local_api = '{}://127.0.0.1:{}/api/gateway/{}'.format(self.http_mode,
+                                                        settings.config.api_port,
+                                                        gateway_name)
+
+        api_vars = {"gateway_ip_list": portals_str,
+                    "target_iqn": self.parent.target_iqn}
+
+        response = put(local_api,
+                       data=api_vars,
+                       auth=(settings.config.api_user, settings.config.api_password),
+                       verify=settings.config.api_ssl_verify)
+
+        if response.status_code == 200:
+            self.logger.debug("- gateway '{}' added locally".format(gateway_name))
+            current_gateways.append(gateway_name)
+            for gw in current_gateways:
+                gateway_api = '{}://{}:{}/api/gateway/{}'.format(self.http_mode,
+                                                                 gw,
+                                                                 settings.config.api_port,
+                                                                 gw)
+                response = put(gateway_api,
+                               data=api_vars,
+                               auth=(settings.config.api_user, settings.config.api_password),
+                               verify=settings.config.api_ssl_verify)
+
+                if response.status_code == 200:
+                    self.logger.debug("- gateway defined on {}".format(gw))
+                    continue
+                else:
+
+                    error_msg = "gateway definition failed on {}, with http status {}".format(gw,
+                                                                                              response.status_code)
+                    self.logger.error(error_msg)
+                    raise GatewayAPIError(response.json()['message'])
+
+            # Get the gateways metadata to use for the local gateway object in the UI
+            new_gw = '{}://{}:{}/api/gateway/{}'.format(self.http_mode,
+                                                        gateway_name,
+                                                        settings.config.api_port,
+                                                        gateway_name)
+            response = get(new_gw,
+                           auth=(settings.config.api_user, settings.config.api_password),
+                           verify=settings.config.api_ssl_verify)
+
+            if response.status_code == 200:
+
+                gateway_config = response.json()
+                Gateway(self, gateway_name, gateway_config)
+                self.logger.info('ok')
+
+            else:
+                raise GatewayAPIError("Unable to read the gateway info from the config - status code: {}".format(response.status_code))
+        else:
+            raise GatewayAPIError("Unable to define the gateway ({})\n{} ".format(response.status_code,
+                                                                                   response.json()['message']))
+
+
+
 
     def summary(self):
 
