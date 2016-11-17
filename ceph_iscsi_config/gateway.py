@@ -361,6 +361,7 @@ class GWTarget(object):
 
                 config.add_item("gateways", this_host)
                 config.update_item("gateways", this_host, gateway_metadata)
+                config.update_item("gateways", "ip_list", self.gateway_ip_list)
                 self.config_updated = True
             else:
                 # gateway already defined, so check that the IP list it has matches the
