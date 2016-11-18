@@ -297,7 +297,7 @@ class APIClientHandler(Resource):
 
         # convert the comma separated image_list string into a list for GWClient
         if images:
-            image_list = images.split(',')
+            image_list = str(images).split(',')
         else:
             image_list = []
 
@@ -384,7 +384,23 @@ class APIClientLUN(APIClientHandler):
         #     return make_response(jsonify({"message": "Invalid source IP address for the request - must originate from a gateway"}), 403)
 
 
+# class APIClientAIO(APIClientHandler):
+#     '''
+#     Client All-In-One (AIO) class to handle the complete definition in one call
+#     '''
+#
+#     @requires_restricted_auth
+#     def put(self, client_iqn):
+#
+#
+#         pass
+
+
 class APIClient(APIClientHandler):
+    '''
+    Handle the definition of a client to the local LIO instance
+    '''
+
     @requires_restricted_auth
     def get(self, client_iqn):
 
@@ -396,10 +412,11 @@ class APIClient(APIClientHandler):
 
     @requires_restricted_auth
     def put(self, client_iqn):
-
-        # put is request defines a client creation request
-
-        # if valid_request(request.remote_addr):
+        """
+        The put request needs the client_iqn as a minimum to get
+        the client defined. However, image_list and chap can also
+        be provided to define the client fully in one pass
+        """
 
         try:
             valid_iqn = normalize_wwn(['iqn'], client_iqn)
@@ -407,8 +424,16 @@ class APIClient(APIClientHandler):
             abort(400, "An iqn of '{}' is not a valid name for iSCSI".format(client_iqn))
 
         committing_host = request.form['committing_host']
-        image_list = ''
-        chap = ''
+
+        if 'image_list' in request.form:
+            image_list = request.form['image_list']
+        else:
+            image_list = ''
+
+        if 'chap' in request.form:
+            chap = request.form['chap']
+        else:
+            chap = ''
 
         status_code, status_text = self.update(client_iqn, image_list, chap, committing_host)
 
@@ -732,6 +757,7 @@ class APIServer(threading.Thread):
         api.add_resource(APIClient, '/api/client/<client_iqn>')
         api.add_resource(APIClientAuth, '/api/clientauth/<client_iqn>')
         api.add_resource(APIClientLUN, '/api/clientlun/<client_iqn>')
+        # api.add_resource(APIClientAIO, '/api/clientaio/<client_iqn>')
         api.add_resource(APISysInfo, '/api/sysinfo/<query_type>')
 
         log = logging.getLogger('werkzeug')
