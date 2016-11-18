@@ -49,7 +49,9 @@ def exception_handler(exception_type, exception, traceback, debug_hook=sys.excep
     if options.debug:
         debug_hook(exception_type, exception, traceback)
     else:
-        print("{}: {}".format(exception_type.__name__, exception))
+        color_red = '\x1b[31;1m'
+        color_off = '\x1b[0m'
+        print("{}{}: {}{}".format(color_red, exception_type.__name__, exception, color_off))
 
 def get_options():
 
