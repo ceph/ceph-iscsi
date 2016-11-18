@@ -10,6 +10,11 @@ class UIGroup(ConfigNode):
         ConfigNode.__init__(self, name, parent, shell)
         self.http_mode = self.parent.http_mode
 
+    def reset(self):
+        children = set(self.children)  # set of child objects
+        for child in children:
+            self.remove_child(child)
+
 
 class UINode(UIGroup):
 
@@ -29,18 +34,22 @@ class UINode(UIGroup):
             attr_value = getattr(self, k)
 
             if isinstance(attr_value, dict):
-                print attr_label
-                max_dict_field = len(max(attr_value.keys(), key=len))
-                for dict_key in sorted(attr_value):
 
-                    if isinstance(attr_value[dict_key], dict):
-                        inner_dict = attr_value[dict_key]
-                        display_value = ", ".join(["=".join([key, str(val)]) for key, val in inner_dict.items()])
-                        print "- {} .. {}".format(dict_key, display_value)
-                    else:
-                        print "- {} .. {}".format(dict_key, attr_value[dict_key])
+                if attr_value:
+                    print attr_label
+                    max_dict_field = len(max(attr_value.keys(), key=len))
+                    for dict_key in sorted(attr_value):
 
-                continue
+                        if isinstance(attr_value[dict_key], dict):
+                            inner_dict = attr_value[dict_key]
+                            display_value = ", ".join(["=".join([key, str(val)]) for key, val in inner_dict.items()])
+                            print "- {} .. {}".format(dict_key, display_value)
+                        else:
+                            print "- {} .. {}".format(dict_key, attr_value[dict_key])
+
+                    continue
+                else:
+                    attr_value = 'UNDEFINED'
 
             if isinstance(attr_value, list):
                 attr_value = [str(s) for s in attr_value]
