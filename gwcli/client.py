@@ -5,13 +5,13 @@ __author__ = 'pcuzner@redhat.com'
 import json
 import re
 
-from requests import delete, put, get, ConnectionError
+# from requests import delete, put, get, ConnectionError
 
 from gwcli.node import UIGroup, UINode
 
 from gwcli.utils import (human_size, get_other_gateways,
                     GatewayAPIError, GatewayLIOError,
-                    this_host)
+                    this_host, APIRequest)
 
 import ceph_iscsi_config.settings as settings
 
@@ -28,20 +28,13 @@ class Clients(UIGroup):
                  Clients bla
                  '''
 
-    def __init__(self, parent, client_info={}):
+    def __init__(self, parent):
         UIGroup.__init__(self, 'hosts', parent)
-        self.client_info = client_info
-        self.logger = self.parent.parent.parent.logger
-        self.load_clients()
+        self.logger = self.parent.logger
 
-    def load_clients(self):
-        for client_iqn, client_settings in self.client_info.iteritems():
+    def load(self, client_info):
+        for client_iqn, client_settings in client_info.iteritems():
             Client(self, client_iqn, client_settings)
-
-    def reset(self):
-        children = set(self.children)  # set of child objects
-        for child in children:
-            self.remove_child(child)
 
     def ui_command_create(self, client_iqn):
         """
@@ -54,6 +47,13 @@ class Clients(UIGroup):
 
         """
 
+        # to be able to create a host/client, we need to ensure that there are
+        # gateways defined
+        gws = [gw for gw in self.parent.gateway_group.children]
+        if len(gws) < settings.config.minimum_gateways:
+            self.logger.error("You need at least {} gateways defined, before hosts can be added".format(settings.config.minimum_gateways))
+            return
+
         cli_seed = {"luns": {}, "auth": {}}
 
         # make sure the iqn isn't already defined
@@ -61,7 +61,6 @@ class Clients(UIGroup):
         if client_iqn in existing_clients:
             self.logger.error("Client '{}' is already defined".format(client_iqn))
             return
-
 
         try:
             valid_iqn = normalize_wwn(['iqn'], client_iqn)
@@ -78,12 +77,15 @@ class Clients(UIGroup):
                                                               client_iqn)
 
         self.logger.debug("Client CREATE for {}".format(client_iqn))
-        response = put(client_api,
-                       data=api_vars,
-                       auth=(settings.config.api_user, settings.config.api_password),
-                       verify=settings.config.api_ssl_verify)
+        api = APIRequest(client_api, data=api_vars)
+        api.put()
 
-        if response.status_code == 200:
+        # response = put(client_api,
+        #                data=api_vars,
+        #                auth=(settings.config.api_user, settings.config.api_password),
+        #                verify=settings.config.api_ssl_verify)
+
+        if api.response.status_code == 200:
             Client(self, client_iqn, cli_seed)
             self.logger.debug("- Client '{}' added locally".format(client_iqn))
             # defined locally OK, so let's apply to the other gateways
@@ -92,19 +94,20 @@ class Clients(UIGroup):
                                                                gw,
                                                                settings.config.api_port,
                                                                client_iqn)
+                api = APIRequest(client_api, data=api_vars)
+                api.put()
+                # response = put(client_api,
+                #                data=api_vars,
+                #                auth=(settings.config.api_user, settings.config.api_password),
+                #                verify=settings.config.api_ssl_verify)
 
-                response = put(client_api,
-                               data=api_vars,
-                               auth=(settings.config.api_user, settings.config.api_password),
-                               verify=settings.config.api_ssl_verify)
-
-                if response.status_code == 200:
+                if api.response.status_code == 200:
                     self.logger.debug("- Client '{}' added to {}".format(client_iqn, gw))
                     continue
                 else:
-                    raise GatewayAPIError(response.text)
+                    raise GatewayAPIError(api.response.json()['message'])
         else:
-            raise GatewayAPIError(response.text)
+            raise GatewayAPIError(api.response.json()['message'])
 
         self.logger.info('ok')
 
@@ -146,33 +149,35 @@ class Clients(UIGroup):
                                                            gw,
                                                            settings.config.api_port,
                                                            client_iqn)
+            api = APIRequest(client_api, data=api_vars)
+            api.delete()
+            # response = delete(client_api,
+            #                   data=api_vars,
+            #                   auth=(settings.config.api_user, settings.config.api_password),
+            #                   verify=settings.config.api_ssl_verify)
 
-            response = delete(client_api,
-                              data=api_vars,
-                              auth=(settings.config.api_user, settings.config.api_password),
-                              verify=settings.config.api_ssl_verify)
-
-            if response.status_code == 200:
+            if api.response.status_code == 200:
                 self.logger.debug("- '{}' removed from {}".format(client_iqn, gw))
                 continue
-            elif response.status_code == 400:
+            elif api.response.status_code == 400:
                 self.logger.critical("- '{}' is in use on {}".format(client_iqn, gw))
                 return
             else:
-                raise GatewayAPIError(response.text)
+                raise GatewayAPIError(api.response.json()['message'])
 
         # At this point the other gateways have removed the client, so
         # remove from the local instance and delete from the interface
         client_api = '{}://127.0.0.1:{}/api/client/{}'.format(self.http_mode,
                                                               settings.config.api_port,
                                                               client_iqn)
+        api = APIRequest(client_api, data=api_vars)
+        api.delete()
+        # response = delete(client_api,
+        #                   data=api_vars,
+        #                   auth=(settings.config.api_user, settings.config.api_password),
+        #                   verify=settings.config.api_ssl_verify)
 
-        response = delete(client_api,
-                          data=api_vars,
-                          auth=(settings.config.api_user, settings.config.api_password),
-                          verify=settings.config.api_ssl_verify)
-
-        if response.status_code == 200:
+        if api.response.status_code == 200:
 
             self.logger.debug("- '{}' removed from local gateway, configuration updated".format(client_iqn))
             self.delete(client)
@@ -305,13 +310,14 @@ class Client(UINode):
         clientauth_api = '{}://127.0.0.1:{}/api/clientauth/{}'.format(self.http_mode,
                                                                       settings.config.api_port,
                                                                       self.client_iqn)
+        api = APIRequest(clientauth_api, data=api_vars)
+        api.put()
+        # response = put(clientauth_api,
+        #                data=api_vars,
+        #                auth=(settings.config.api_user, settings.config.api_password),
+        #                verify=settings.config.api_ssl_verify)
 
-        response = put(clientauth_api,
-                       data=api_vars,
-                       auth=(settings.config.api_user, settings.config.api_password),
-                       verify=settings.config.api_ssl_verify)
-
-        if response.status_code == 200:
+        if api.response.status_code == 200:
             self.logger.debug("- Local environment updated")
 
             self.auth['chap'] = chap
@@ -321,19 +327,20 @@ class Client(UINode):
                                                                        gw,
                                                                        settings.config.api_port,
                                                                        self.client_iqn)
+                api = APIRequest(clientauth_api, data=api_vars)
+                api.put()
+                # response = put(clientauth_api,
+                #                data=api_vars,
+                #                auth=(settings.config.api_user, settings.config.api_password),
+                #                verify=settings.config.api_ssl_verify)
 
-                response = put(clientauth_api,
-                               data=api_vars,
-                               auth=(settings.config.api_user, settings.config.api_password),
-                               verify=settings.config.api_ssl_verify)
-
-                if response.status_code == 200:
+                if api.response.status_code == 200:
                     self.logger.debug("- {} updated".format(gw))
                     continue
                 else:
-                    raise GatewayAPIError(response.text)
+                    raise GatewayAPIError(api.response.json()['message'])
         else:
-            raise GatewayAPIError(response.text)
+            raise GatewayAPIError(api.response.json()['message'])
 
         self.logger.info('ok')
 
@@ -400,18 +407,21 @@ class Client(UINode):
 
         api_vars = {"committing_host": this_host(),
                     "image_list": image_list,
-                    "chap": self.auth['chap']}
+                    "chap": self.auth.get('chap', '')}
 
         clientlun_api = '{}://127.0.0.1:{}/api/clientlun/{}'.format(self.http_mode,
                                                                     settings.config.api_port,
                                                                     self.client_iqn)
 
-        response = put(clientlun_api,
-                       data=api_vars,
-                       auth=(settings.config.api_user, settings.config.api_password),
-                       verify=settings.config.api_ssl_verify)
+        api = APIRequest(clientlun_api, data=api_vars)
+        api.put()
 
-        if response.status_code == 200:
+        # response = put(clientlun_api,
+        #                data=api_vars,
+        #                auth=(settings.config.api_user, settings.config.api_password),
+        #                verify=settings.config.api_ssl_verify)
+
+        if api.response.status_code == 200:
 
             if action == 'add':
 
@@ -419,17 +429,20 @@ class Client(UINode):
                 # we need to query the api server to get the new configuration
                 # to be able to set the local cli entry correctly
                 get_api_vars = {"disk": disk}
-                response = get(clientlun_api,
-                               data=get_api_vars,
-                               auth=(settings.config.api_user, settings.config.api_password),
-                               verify=settings.config.api_ssl_verify)
+                api = APIRequest(clientlun_api, data=get_api_vars)
+                api.get()
 
-                if response.status_code == 200:
-                    lun_dict = json.loads(response.text)['message']
+                # response = get(clientlun_api,
+                #                data=get_api_vars,
+                #                auth=(settings.config.api_user, settings.config.api_password),
+                #                verify=settings.config.api_ssl_verify)
+
+                if api.response.status_code == 200:
+                    lun_dict = api.response.json()['message']
                     lun_id = lun_dict[disk]['lun_id']
                     MappedLun(self, disk, lun_id)
                 else:
-                    raise GatewayAPIError(response.text)
+                    raise GatewayAPIError(api.response.json()['message'])
 
             else:
 
@@ -446,19 +459,21 @@ class Client(UINode):
                                                                      gw,
                                                                      settings.config.api_port,
                                                                      self.client_iqn)
+                api = APIRequest(clientlun_api, data=api_vars)
+                # response = put(clientlun_api,
+                #                data=api_vars,
+                #                auth=(settings.config.api_user, settings.config.api_password),
+                #                verify=settings.config.api_ssl_verify)
+                api.put()
 
-                response = put(clientlun_api,
-                               data=api_vars,
-                               auth=(settings.config.api_user, settings.config.api_password),
-                               verify=settings.config.api_ssl_verify)
 
-                if response.status_code == 200:
+                if api.response.status_code == 200:
                     self.logger.debug("- gateway '{}' updated".format(gw))
                     continue
                 else:
-                    raise GatewayAPIError(response.text)
+                    raise GatewayAPIError(api.response.json()['message'])
         else:
-            raise GatewayAPIError(response.text)
+            raise GatewayAPIError(api.response.json()['message'])
 
         self.logger.info('ok')
 

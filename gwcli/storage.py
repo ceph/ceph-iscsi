@@ -15,9 +15,9 @@ from gwcli.client import Clients
 
 from gwcli.utils import (human_size, readcontents,
                          GatewayAPIError, GatewayLIOError, GatewayError,
-                         this_host, get_other_gateways)
+                         this_host, get_other_gateways, APIRequest)
 
-from requests import delete, put, get, ConnectionError
+# from requests import delete, put, get, ConnectionError
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes
 
 import ceph_iscsi_config.settings as settings
@@ -110,21 +110,27 @@ class Disks(UIGroup):
         api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw, 'mode': 'create'}
 
         self.logger.debug("Processing local LIO instance")
-        response = put(disk_api,
-                       data=api_vars,
-                       auth=(settings.config.api_user, settings.config.api_password),
-                       verify=settings.config.api_ssl_verify)
 
-        if response.status_code == 200:
+        api = APIRequest(disk_api, data=api_vars)
+        api.put()
+
+        # response = put(disk_api,
+        #                data=api_vars,
+        #                auth=(settings.config.api_user, settings.config.api_password),
+        #                verify=settings.config.api_ssl_verify)
+
+        if api.response.status_code == 200:
             # rbd create and map successful, so request it's details and add
             # to the gwcli
             self.logger.debug("- LUN is ready on local")
-            response = get(disk_api,
-                           auth=(settings.config.api_user, settings.config.api_password),
-                           verify=settings.config.api_ssl_verify)
+            api = APIRequest(disk_api)
+            api.get()
+            # response = get(disk_api,
+            #                auth=(settings.config.api_user, settings.config.api_password),
+            #                verify=settings.config.api_ssl_verify)
 
-            if response.status_code == 200:
-                image_config = response.json()
+            if api.response.status_code == 200:
+                image_config = api.response.json()
                 Disk(self, disk_key, image_config)
 
                 self.logger.debug("Processing other gateways")
@@ -133,16 +139,17 @@ class Disks(UIGroup):
                                                                gw,
                                                                settings.config.api_port,
                                                                disk_key)
+                    api = APIRequest(disk_api, data=api_vars)
+                    api.put()
+                    # response = put(disk_api,
+                    #                data=api_vars,
+                    #                auth=(settings.config.api_user, settings.config.api_password),
+                    #                verify=settings.config.api_ssl_verify)
 
-                    response = put(disk_api,
-                                   data=api_vars,
-                                   auth=(settings.config.api_user, settings.config.api_password),
-                                   verify=settings.config.api_ssl_verify)
-
-                    if response.status_code == 200:
+                    if api.response.status_code == 200:
                         self.logger.debug("- LUN is ready on {}".format(gw))
                     else:
-                        raise GatewayAPIError(response.text)
+                        raise GatewayAPIError(api.response.json()['message'])
 
         else:
             raise GatewayLIOError("- Error defining the rbd image to the local gateway")
@@ -227,22 +234,25 @@ class Disks(UIGroup):
 
             self.logger.debug("- removing '{}' from {}".format(image_id,
                                                                gw_name))
-            response = delete(disk_api,
-                              data=api_vars,
-                              auth=(settings.config.api_user, settings.config.api_password),
-                              verify=settings.config.api_ssl_verify)
 
-            if response.status_code == 200:
+            api = APIRequest(disk_api, data=api_vars)
+            api.delete()
+            # response = delete(disk_api,
+            #                   data=api_vars,
+            #                   auth=(settings.config.api_user, settings.config.api_password),
+            #                   verify=settings.config.api_ssl_verify)
+
+            if api.response.status_code == 200:
                 pass
-            elif response.status_code == 400:
+            elif api.response.status_code == 400:
                 # 400 means the rbd is still allocated to a client
-                msg = json.loads(response.text)['message']
+                msg = api.response.json()['message']
                 self.logger.error(msg)
                 return
             else:
                 # delete failed - don't know why, pass the error to the
                 # admin and abort
-                raise GatewayAPIError(response.text)
+                raise GatewayAPIError(api.response.json()['message'])
 
 
         # at this point the remote gateways are cleaned up, now perform the
@@ -253,12 +263,15 @@ class Disks(UIGroup):
 
         self.logger.debug("- removing '{}' from the local machine".format(image_id))
 
-        response = delete(disk_api,
-                          data=api_vars,
-                          auth=(settings.config.api_user, settings.config.api_password),
-                          verify=settings.config.api_ssl_verify)
+        api = APIRequest(disk_api, data=api_vars)
+        api.delete()
 
-        if response.status_code == 200:
+        # response = delete(disk_api,
+        #                   data=api_vars,
+        #                   auth=(settings.config.api_user, settings.config.api_password),
+        #                   verify=settings.config.api_ssl_verify)
+
+        if api.response.status_code == 200:
             self.logger.debug("- rbd removed")
             disk_object = [disk for disk in self.children if disk.name == image_id][0]
             self.remove_child(disk_object)
@@ -347,7 +360,7 @@ class Disk(UINode):
         # image_path is a symlink to the actual /dev/rbdX file
         image_path = "/dev/rbd/{}/{}".format(self.pool, self.rbd_image)
         dev_id = os.path.realpath(image_path)[8:]
-        rbd_path = "/sys/devices/rbd{}".format(dev_id)
+        rbd_path = "/sys/devices/rbd/{}".format(dev_id)
 
         try:
             self.features = readcontents(os.path.join(rbd_path, 'features'))
@@ -413,12 +426,15 @@ class Disk(UINode):
         api_vars = {'pool': self.pool, 'size': size_rqst, 'owner': local_gw, 'mode': 'resize'}
 
         self.logger.debug("Processing local LIO instance")
-        response = put(disk_api,
-                       data=api_vars,
-                       auth=(settings.config.api_user, settings.config.api_password),
-                       verify=settings.config.api_ssl_verify)
+        api = APIRequest(disk_api, data=api_vars)
+        api.put()
 
-        if response.status_code == 200:
+        # response = put(disk_api,
+        #                data=api_vars,
+        #                auth=(settings.config.api_user, settings.config.api_password),
+        #                verify=settings.config.api_ssl_verify)
+
+        if api.response.status_code == 200:
             # rbd resize request successful, so update the local information
             self.logger.debug("- LUN resize complete")
             self.get_meta_data()
@@ -429,18 +445,20 @@ class Disk(UINode):
                                                            gw,
                                                            settings.config.api_port,
                                                            self.image_id)
+                api = APIRequest(disk_api, data=api_vars)
+                api.put()
 
-                response = put(disk_api,
-                               data=api_vars,
-                               auth=(settings.config.api_user, settings.config.api_password),
-                               verify=settings.config.api_ssl_verify)
+                # response = put(disk_api,
+                #                data=api_vars,
+                #                auth=(settings.config.api_user, settings.config.api_password),
+                #                verify=settings.config.api_ssl_verify)
 
-                if response.status_code == 200:
+                if api.response.status_code == 200:
                     self.logger.debug("- LUN resize registered on {}".format(gw))
                 else:
-                    raise GatewayAPIError(response.text)
+                    raise GatewayAPIError(api.response.json()['message'])
 
         else:
-            raise GatewayAPIError(response.text)
+            raise GatewayAPIError(api.response.json()['message'])
 
         self.logger.info('ok')
