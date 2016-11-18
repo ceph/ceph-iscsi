@@ -345,7 +345,7 @@ class GatewayGroup(UIGroup):
         api.get()
 
         if api.response.status_code != 200:
-            self.logger.error("Network query failed to {} - check API server is running".format(gateway_name))
+            self.logger.error("API query to {} failed - check rbd-target-gw log, is the API server running?".format(gateway_name))
             raise GatewayAPIError("API call to {}, returned status {}".format(gateway_name,
                                                                               api.response.status_code))
 
