@@ -114,10 +114,12 @@ class Gateway(LIO):
         return len(list(self.lio_root.sessions))
 
     def drop_target(self, this_host):
-        iqn = self.config.config['gateways'][this_host]['iqn']
+        if this_host in self.config.config['gateways']:
 
-        lio_root = root.RTSRoot()
-        for tgt in lio_root.targets:
-            if tgt.wwn == iqn:
-                tgt.delete()
-                self.changed = True
+            iqn = self.config.config['gateways'][this_host]['iqn']
+
+            lio_root = root.RTSRoot()
+            for tgt in lio_root.targets:
+                if tgt.wwn == iqn:
+                    tgt.delete()
+                    self.changed = True
