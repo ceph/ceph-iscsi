@@ -26,7 +26,8 @@ class Settings(object):
                 "api_user": "admin",
                 "api_password": "admin",
                 "ceph_user": "admin",
-                "debug": "false"
+                "debug": "false",
+                "minimum_gateways": 2
                 }
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.conf'):
