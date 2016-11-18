@@ -4,11 +4,13 @@ import sys
 import json
 
 from gwcli.node import UIGroup, UINode, UIRoot
-from requests import delete, put, get, ConnectionError
+# from requests import delete, put, get, ConnectionError
 
 from gwcli.storage import Disks
 from gwcli.client import Clients
-from gwcli.utils import this_host, get_other_gateways, GatewayAPIError, GatewayError
+from gwcli.utils import (this_host, get_other_gateways,
+                         GatewayAPIError, GatewayError,
+                         APIRequest)
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import get_ip
 
@@ -83,21 +85,23 @@ class ISCSIRoot(UIRoot):
 
 
     def _get_config(self):
-        try:
-            response = get(self.local_api + "/config",
-                           auth=(settings.config.api_user, settings.config.api_password),
-                           verify=settings.config.api_ssl_verify)
 
-        except ConnectionError as e:
-            self.error = True
-            self.error_msg = "API unavailable @ {}".format(self.local_api)
-            return {}
+        api = APIRequest(self.local_api + "/config")
+        api.get()
+        # response = get(self.local_api + "/config",
+        #                auth=(settings.config.api_user, settings.config.api_password),
+        #                verify=settings.config.api_ssl_verify)
 
-        if response.status_code == 200:
-            return response.json()
+        # except ConnectionError as e:
+        #     self.error = True
+        #     self.error_msg = "API unavailable @ {}".format(self.local_api)
+        #     return {}
+
+        if api.response.status_code == 200:
+            return api.response.json()
         else:
             self.error = True
-            self.error_msg = "REST API failure, code : {}".format(response.status_code)
+            self.error_msg = "REST API failure, code : {}".format(api.response.status_code)
             return {}
 
 
@@ -311,7 +315,6 @@ class GatewayGroup(UIGroup):
         # as opposed to multiple calls to the API - in order to to keep the UI
         # as responsive as possible
 
-        # fixme
         # validate the gateway name is resolvable
         if get_ip(gateway_name) == '0.0.0.0':
             self.logger.error("Gateway '{}' is not resolvable to an ipv4 address".format(gateway_name))
@@ -333,13 +336,31 @@ class GatewayGroup(UIGroup):
         # validate that the ip address given is NOT already known
         if ip_address in current_gw_portals:
             self.logger.error("'{}' is already defined within the configuration".format(ip_address))
+            return
+
+        # check the intended host actually has the requested IP available
+        api = APIRequest('{}://{}:{}/api/sysinfo/ipv4_addresses'.format(self.http_mode,
+                                                                         gateway_name,
+                                                                         settings.config.api_port))
+        api.get()
+
+        if api.response.status_code != 200:
+            self.logger.error("Network query failed to {} - check API server is running".format(gateway_name))
+            raise GatewayAPIError("API call to {}, returned status {}".format(gateway_name,
+                                                                              api.response.status_code))
+
+        target_ips = api.response.json()['data']
+        if ip_address not in target_ips:
+            self.logger.error("{} is not available on {}".format(ip_address,
+                                                                 gateway_name))
+            return
 
         local_gw = this_host()
         current_gateways = [tgt.name for tgt in self.children]
 
         if gateway_name != local_gw and len(current_gateways) == 0:
             # the first gateway defined must be the local machine. By doing this
-            # the initial create uses 127.0.0.1, and places the portal IP in the
+            # the initial create uses 127.0.0.1, and places it's portal IP in the
             # gateway ip list. Once the gateway ip list is defined, the api server
             # can resolve against the gateways - until the list is defined only a
             # request from 127.0.0.1 is acceptable in the api
@@ -355,19 +376,21 @@ class GatewayGroup(UIGroup):
 
         # The local API must be updated first. When the config is empty, the api will
         # accept a 127.0.0.1 request so we have to apply the updates locally first
-        local_api = '{}://127.0.0.1:{}/api/gateway/{}'.format(self.http_mode,
-                                                        settings.config.api_port,
-                                                        gateway_name)
-
         api_vars = {"gateway_ip_list": portals_str,
                     "target_iqn": self.parent.target_iqn}
+        api = APIRequest('{}://127.0.0.1:{}/api/gateway/{}'.format(self.http_mode,
+                                                                   settings.config.api_port,
+                                                                   gateway_name),
+                         data=api_vars)
+        api.put()
 
-        response = put(local_api,
-                       data=api_vars,
-                       auth=(settings.config.api_user, settings.config.api_password),
-                       verify=settings.config.api_ssl_verify)
 
-        if response.status_code == 200:
+        # response = put(local_api,
+        #                data=api_vars,
+        #                auth=(settings.config.api_user, settings.config.api_password),
+        #                verify=settings.config.api_ssl_verify)
+
+        if api.response.status_code == 200:
             self.logger.debug("- gateway '{}' added locally".format(gateway_name))
             current_gateways.append(gateway_name)
             for gw in current_gateways:
@@ -375,12 +398,14 @@ class GatewayGroup(UIGroup):
                                                                  gw,
                                                                  settings.config.api_port,
                                                                  gw)
-                response = put(gateway_api,
-                               data=api_vars,
-                               auth=(settings.config.api_user, settings.config.api_password),
-                               verify=settings.config.api_ssl_verify)
+                api = APIRequest(gateway_api, data=api_vars)
+                api.put()
+                # response = put(gateway_api,
+                #                data=api_vars,
+                #                auth=(settings.config.api_user, settings.config.api_password),
+                #                verify=settings.config.api_ssl_verify)
 
-                if response.status_code == 200:
+                if api.response.status_code == 200:
                     self.logger.debug("- gateway defined on {}".format(gw))
                     continue
                 else:
@@ -388,28 +413,30 @@ class GatewayGroup(UIGroup):
                     error_msg = "gateway definition failed on {}, with http status {}".format(gw,
                                                                                               response.status_code)
                     self.logger.error(error_msg)
-                    raise GatewayAPIError(response.json()['message'])
+                    raise GatewayAPIError(api.response.json()['message'])
 
             # Get the gateways metadata to use for the local gateway object in the UI
             new_gw = '{}://{}:{}/api/gateway/{}'.format(self.http_mode,
                                                         gateway_name,
                                                         settings.config.api_port,
                                                         gateway_name)
-            response = get(new_gw,
-                           auth=(settings.config.api_user, settings.config.api_password),
-                           verify=settings.config.api_ssl_verify)
+            api = APIRequest(new_gw)
+            api.get()
+            # response = get(new_gw,
+            #                auth=(settings.config.api_user, settings.config.api_password),
+            #                verify=settings.config.api_ssl_verify)
 
-            if response.status_code == 200:
+            if api.response.status_code == 200:
 
-                gateway_config = response.json()
+                gateway_config = api.response.json()
                 Gateway(self, gateway_name, gateway_config)
                 self.logger.info('ok')
 
             else:
-                raise GatewayAPIError("Unable to read the gateway info from the config - status code: {}".format(response.status_code))
+                raise GatewayAPIError("Unable to read the gateway info from the config - status code: {}".format(api.response.status_code))
         else:
-            raise GatewayAPIError("Unable to define the gateway ({})\n{} ".format(response.status_code,
-                                                                                   response.json()['message']))
+            raise GatewayAPIError("Unable to define the gateway ({})\n{} ".format(api.response.status_code,
+                                                                                  api.response.json()['message']))
 
 
 
