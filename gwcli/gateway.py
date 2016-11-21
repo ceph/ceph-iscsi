@@ -7,10 +7,11 @@ from gwcli.node import UIGroup, UINode, UIRoot
 # from requests import delete, put, get, ConnectionError
 
 from gwcli.storage import Disks
-from gwcli.client import Clients
+from gwcli.client import Clients, Client
 from gwcli.utils import (this_host, get_other_gateways,
                          GatewayAPIError, GatewayError,
-                         APIRequest)
+                         APIRequest, progress_message)
+
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import get_ip
 
@@ -209,11 +210,21 @@ class ISCSITarget(UIGroup):
 
         # 'safe' to continue with the definition
         self.logger.debug("Create an iscsi target definition in the UI")
-        Target(target_iqn, self)
-        self.logger.info('ok')
 
-        # FIXME - should this iqn be committed to the config object?
-        # that way when you exit the cli, and then enter again it will be retained
+        local_api = '{}://127.0.0.1:{}/api/target/{}'.format(self.http_mode,
+                                                             settings.config.api_port,
+                                                             target_iqn)
+        api = APIRequest(local_api)
+        api.put()
+
+        if api.response.status_code == 200:
+            self.logger.info('ok')
+            # create the target entry in the UI tree
+            Target(target_iqn, self)
+        else:
+            self.logger.error("Failed to create the target on the local node")
+            raise GatewayAPIError("iSCSI target creation failed - {}".format(api.response.json()['message']))
+
 
     def ui_command_delete(self, target_iqn):
         # this delete request would need to
@@ -411,7 +422,7 @@ class GatewayGroup(UIGroup):
                 else:
 
                     error_msg = "gateway definition failed on {}, with http status {}".format(gw,
-                                                                                              response.status_code)
+                                                                                              api.response.status_code)
                     self.logger.error(error_msg)
                     raise GatewayAPIError(api.response.json()['message'])
 
@@ -430,6 +441,97 @@ class GatewayGroup(UIGroup):
 
                 gateway_config = api.response.json()
                 Gateway(self, gateway_name, gateway_config)
+
+                # gateway is defined across all nodes, adding a tpg - but the
+                # tpg will be empty, so we need to check if the current config
+                # has disks and clients, that need to be applied to the new
+                # gateway
+                existing_disks = [disk for disk in
+                                  self.parent.parent.parent.disks.children]
+                existing_hosts = [client for client in
+                                  self.parent.client_group.children]
+
+                if existing_disks or existing_hosts:
+
+                    local_api = '{}://127.0.0.1:{}/api/config'.format(self.http_mode,
+                                                                      settings.config.api_port)
+                    api = APIRequest(local_api)
+                    api.get()
+                    if api.response.status_code != 200:
+                        self.logger.error("Unable to refresh local config"
+                                          " over API - sync aborted, restart"
+                                          " rbd-target-gw on {} to sync".format(gateway_name))
+                        return
+
+                    config = api.response.json()
+                    current_disks = config['disks']
+                    current_clients = config['clients']
+                    total_objects = (len(current_disks.keys()) +
+                                     len(current_clients.keys()))
+
+                    self.logger.debug('syncing, new gateway')
+
+                    sync_cnt = 1
+                    gw_api = '{}://{}:{}/api'.format(self.http_mode,
+                                                     gateway_name,
+                                                     settings.config.api_port)
+
+                    self.logger.debug("sync api requests will be made to {}".format(gw_api))
+
+                    for disk_key in current_disks:
+
+                        this_disk = current_disks[disk_key]
+                        # we can use a size 0G here, since the disk already
+                        # exists
+                        api_vars = {"pool": this_disk['pool'],
+                                    "size": '0G',
+                                    "owner": this_disk['owner'],
+                                    "mode": 'create'}
+
+                        api = APIRequest("{}/disk/{}".format(gw_api,
+                                                             disk_key),
+                                         data=api_vars)
+                        progress_message("Syncing {}/{}".format(sync_cnt,
+                                                                total_objects))
+                        api.put()
+                        if api.response.status_code == 200:
+                            sync_cnt += 1
+                            continue
+                        else:
+                            self.logger.error("Problem adding disk {} - {}".format(disk_key,
+                                                                                   api.response.json()['message']))
+                            return
+
+                    for client_iqn in current_clients:
+
+                        this_client = current_clients[client_iqn]
+                        client_luns = this_client['luns']
+                        lun_list = [(disk, client_luns[disk]['lun_id'])
+                                    for disk in client_luns]
+                        srtd_list = Client.get_srtd_names(lun_list)
+
+                        # client_iqn, image_list, chap, committing_host
+                        api_vars = {'chap': this_client['auth']['chap'],
+                                    'image_list': ','.join(srtd_list),
+                                    'committing_host': local_gw}
+
+                        api = APIRequest("{}/client/{}".format(gw_api,
+                                                               client_iqn),
+                                         data=api_vars)
+
+                        progress_message("Syncing {}/{}".format(sync_cnt,
+                                                                total_objects))
+                        api.put()
+                        if api.response.status_code == 200:
+                            sync_cnt += 1
+                            continue
+                        else:
+                            self.logger.error("Problem adding client {} - {}".format(client_iqn,
+                                                                                     api.response.json()['message']))
+                            return
+
+                    # add a new line, to tidy up the display
+                    print("")
                 self.logger.info('ok')
 
             else:
