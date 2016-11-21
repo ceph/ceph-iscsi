@@ -273,12 +273,12 @@ class Client(UINode):
             # insert mutual or any other credentials logic here!
             return True
 
-    def ui_command_auth(self, chap=None):
+    def ui_command_auth(self, nochap=False, chap=None):
         """
         Client authentication can be set to use CHAP by supplying the
         a string of the form <username>/<password>
 
-        > auth chap=myserver/mypassword2016
+        > auth nochap | chap=myserver/mypassword2016
 
         username ... The username is freeform, but would normally be the
                      hostname or iqn
@@ -287,20 +287,23 @@ class Client(UINode):
                      special characters !,&,_
 
         """
+        if nochap:
+            chap = ''
 
-        if not chap:
+        if not nochap and not chap:
             self.logger.error("To set CHAP authentication provide a string of the format 'user/password'")
             return
 
-        else:
+        if chap:
             # validate the chap credentials are acceptable
             if not Client.valid_credentials(chap, auth_type='chap'):
                 self.logger.error("-> the format of the CHAP string is invalid, use 'help auth' for examples")
                 return
 
-        self.logger.debug("Client '{}' AUTH update : {}".format(self.client_iqn, chap))
+        self.logger.debug("Client '{}' AUTH update".format(self.client_iqn))
         # get list of children (luns) to build current image list
-        image_list = ','.join(self._get_lun_names())
+        lun_list = [(lun.rbd_name, lun.lun_id) for lun in self.children]
+        image_list = ','.join(Client.get_srtd_luns(lun_list))
 
         other_gateways = get_other_gateways(self.parent.parent.parent.parent.target.children)
         api_vars = {"committing_host": this_host(),
@@ -345,14 +348,16 @@ class Client(UINode):
         self.logger.info('ok')
 
 
-    def _get_lun_names(self):
+    @staticmethod
+    def get_srtd_names(lun_list):
         """
-        process the children objects (LUNs), but sort the result by LUN id, so there is a
-        prescribed order
-        :return: list of sorted mapped disks (list)
+        sort the supplied list of luns (tuples - [('disk1',1),('disk2',0)])
+        :return: list of LUN names, in lun_id sequence
         """
 
-        return [lun.rbd_name for lun in self.children]
+        srtd_luns = sorted(lun_list, key=lambda field: field[1])
+
+        return [rbd_name for rbd_name, lun_id in srtd_luns]
 
     def ui_command_disk(self, action='add', disk=None):
         """
@@ -370,7 +375,8 @@ class Client(UINode):
 
         valid_actions = ['add', 'remove']
 
-        current_luns = self._get_lun_names()
+        lun_list = [(lun.rbd_name, lun.lun_id) for lun in self.children]
+        current_luns = Client.get_srtd_names(lun_list)
 
         if action == 'add':
 
@@ -498,4 +504,6 @@ class MappedLun(UINode):
         self.size_h = disk_map[self.rbd_name]['size_h']
 
     def summary(self):
-        return "{}({}), Owner: {}".format(self.rbd_name, self.size_h, self.owner), True
+        return "{}({}), Owner: {}".format(self.rbd_name,
+                                          self.size_h,
+                                          self.owner), True
