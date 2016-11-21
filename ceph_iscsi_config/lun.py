@@ -686,7 +686,8 @@ class LUN(object):
             new_lun = BlockStorageObject(name=self.config_key, dev=self.dm_device, wwn=in_wwn)
         except RTSLibError as err:
             self.error = True
-            self.error_msg = "failed to add {} to LIO - error({})".format(self.image, str(err))
+            self.error_msg = "failed to add {} to LIO - error({})".format(self.config_key, str(err))
+            self.logger.error(self.error_msg)
 
         return new_lun
 
