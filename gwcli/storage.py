@@ -107,7 +107,8 @@ class Disks(UIGroup):
                                                           settings.config.api_port,
                                                           disk_key)
 
-        api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw, 'mode': 'create'}
+        api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
+                    'mode': 'create'}
 
         self.logger.debug("Processing local LIO instance")
 
@@ -273,7 +274,8 @@ class Disks(UIGroup):
 
         if api.response.status_code == 200:
             self.logger.debug("- rbd removed")
-            disk_object = [disk for disk in self.children if disk.name == image_id][0]
+            disk_object = [disk for disk in self.children
+                           if disk.name == image_id][0]
             self.remove_child(disk_object)
         else:
             raise GatewayLIOError("--> Failed to remove the device from the local machine")
@@ -315,18 +317,21 @@ class Disks(UIGroup):
         total_bytes = 0
         for disk in self.children:
             total_bytes += disk.size
-        return '{}, Disks: {}'.format(human_size(total_bytes), len(self.children)), None
+        return '{}, Disks: {}'.format(human_size(total_bytes),
+                                      len(self.children)), None
 
 
 class Disk(UINode):
 
-    display_attributes = ["image", "pool", "wwn", "size_h", "size", "features", "owner", "dm_device"]
+    display_attributes = ["image", "pool", "wwn", "size_h", "size",
+                          "features", "owner", "dm_device"]
 
     def __init__(self, parent, image_id, image_config):
         """
         Create a disk entry under the Disks subtree
         :param parent: parent object (instance of the Disks class)
-        :param image_id: key used in the config object for this rbd image (pool.image_name) - str
+        :param image_id: key used in the config object for this rbd image
+               (pool.image_name) - str
         :param image_config: meta data for this image
         :return:
         """
