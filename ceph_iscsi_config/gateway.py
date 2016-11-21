@@ -38,19 +38,27 @@ class GWTarget(object):
 
         self.iqn = iqn
 
-        # if the ip list provided doesn't match any ip of this host, abort
-        # the assumption here is that we'll only have one matching ip in the list!
-        matching_ip = set(gateway_ip_list).intersection(ipv4_addresses())
-        if len(list(matching_ip)) == 0:
-            self.error = True
-            self.error_msg = "gateway IP addresses provided do not match any ip on this host"
-            return
+        # If the ip list received has data in it, this is a target we need to act
+        # on the IP's provided, otherwise just set to null
+        if gateway_ip_list:
+            # if the ip list provided doesn't match any ip of this host, abort
+            # the assumption here is that we'll only have one matching ip in the list!
+            matching_ip = set(gateway_ip_list).intersection(ipv4_addresses())
+            if len(list(matching_ip)) == 0:
+                self.error = True
+                self.error_msg = "gateway IP addresses provided do not match any ip on this host"
+                return
 
-        self.active_portal_ip = list(matching_ip)[0]
-        self.logger.debug("active portal will use {}".format(self.active_portal_ip))
+            self.active_portal_ip = list(matching_ip)[0]
+            self.logger.debug("active portal will use {}".format(self.active_portal_ip))
 
-        self.gateway_ip_list = gateway_ip_list
-        self.logger.debug("tpg's will be defined in this order - {}".format(self.gateway_ip_list))
+            self.gateway_ip_list = gateway_ip_list
+            self.logger.debug("tpg's will be defined in this order - {}".format(self.gateway_ip_list))
+        else:
+            # without gateway_ip_list passed in this is a simple
+            # 'init' request
+            self.gateway_ip_list = []
+            self.active_portal_ip = []
 
         self.changes_made = False
         self.config_updated = False
@@ -179,6 +187,7 @@ class GWTarget(object):
         else:
             self.changes_made = True
             self.logger.info("(Gateway.create_target) created an iscsi target with iqn of '{}'".format(self.iqn))
+
 
     def load_config(self):
         """
@@ -392,5 +401,23 @@ class GWTarget(object):
                 self.error_msg = ("Attempted to map to a gateway '{}' that hasn't been defined yet..."
                                   "out of order steps?".format(self.iqn))
 
+        elif mode == 'init':
+
+            # init mode just creates the iscsi target definition and updates
+            # the config object. It is used by the CLI only
+            if self.exists():
+                self.logger.info("GWTarget init request skipped - target already exists")
+
+            else:
+                # create the target
+                self.create_target()
+                current_iqn = config.config['gateways'].get('iqn', '')
+
+                # First gateway asked to create the target will update the
+                # config object
+                if not current_iqn:
+
+                    config.add_item("gateways", "iqn", initial_value=self.iqn)
+                    config.commit()
 
 
