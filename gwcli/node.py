@@ -45,7 +45,8 @@ class UINode(UIGroup):
                             display_value = ", ".join(["=".join([key, str(val)]) for key, val in inner_dict.items()])
                             print "- {} .. {}".format(dict_key, display_value)
                         else:
-                            print "- {} .. {}".format(dict_key, attr_value[dict_key])
+                            print "- {} .. {}".format(dict_key,
+                                                      attr_value[dict_key])
 
                     continue
                 else:
