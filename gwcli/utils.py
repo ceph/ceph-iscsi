@@ -5,9 +5,16 @@ __author__ = 'pcuzner@redhat.com'
 import socket
 import json
 import requests
+import sys
 
 import ceph_iscsi_config.settings as settings
 
+class Colors(object):
+
+    map = {'green': '\x1b[32;1m',
+           'red': '\x1b[31;1m',
+           ' yellow': '\x1b[33;1m',
+           ' blue': '\x1b[34;1m'}
 
 def readcontents(filename):
     with open(filename, 'r') as input_file:
@@ -16,7 +23,8 @@ def readcontents(filename):
 
 
 def human_size(num):
-    for unit, precision in [('b', 0), ('K', 0), ('M', 0), ('G', 0), ('T', 1), ('P', 1), ('E', 2), ('Z', 2)]:
+    for unit, precision in [('b', 0), ('K', 0), ('M', 0), ('G', 0), ('T', 1),
+                            ('P', 1), ('E', 2), ('Z', 2)]:
         if abs(num) < 1024.0:
             return "{0:.{1}f}{2}".format(num, precision, unit)
         num /= 1024.0
@@ -73,7 +81,8 @@ class APIRequest(object):
 
         # Establish defaults for the API connection
         if 'auth' not in self.kwargs:
-            self.kwargs['auth'] = (settings.config.api_user, settings.config.api_password)
+            self.kwargs['auth'] = (settings.config.api_user,
+                                   settings.config.api_password)
         if 'verify' not in self.kwargs:
             self.kwargs['verify'] = settings.config.api_ssl_verify
 
@@ -91,9 +100,17 @@ class APIRequest(object):
             except requests.ConnectionError:
                 raise GatewayAPIError("Unable to connect to api endpoint @ {}".format(self.args[0]))
             else:
-                # since the attribute is a callable, we must return with a callable
+                # since the attribute is a callable, we must return with
+                # a callable
                 return self._get_response
         raise AttributeError()
 
     response = property(_get_response,
                         doc="get http response output")
+
+def progress_message(text, color='green'):
+
+    sys.stdout.write("{}{}{}\r".format(Colors.map[color],
+                                       text,
+                                       '\x1b[0m'))
+    sys.stdout.flush()
