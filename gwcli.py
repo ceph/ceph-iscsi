@@ -44,30 +44,38 @@ class GatewayCLI(ConfigShell):
                      }
 
 
-def exception_handler(exception_type, exception, traceback, debug_hook=sys.excepthook):
+def exception_handler(exception_type, exception, traceback,
+                      debug_hook=sys.excepthook):
 
     if options.debug:
         debug_hook(exception_type, exception, traceback)
     else:
         color_red = '\x1b[31;1m'
         color_off = '\x1b[0m'
-        print("{}{}: {}{}".format(color_red, exception_type.__name__, exception, color_off))
+        print("{}{}: {}{}".format(color_red, exception_type.__name__,
+                                  exception, color_off))
 
 def get_options():
 
-    # Set up the runtime overrides, any of these could be provided by the cfg file(s)
-    parser = argparse.ArgumentParser(prog='gwcli', description='Interact/manage iSCSI gateway configuration')
+    # Set up the runtime overrides, any of these could be provided
+    # by the cfg file(s)
+    parser = argparse.ArgumentParser(prog='gwcli',
+                                     description='Manage iSCSI gateways')
     parser.add_argument('-c', '--config-object', type=str,
-                        help='pool and object name holding the iSCSI config object (pool/object_name)')
-    parser.add_argument('-d', '--debug', action='store_true', default=False,
+                        help='pool and object name holding the iSCSI config'
+                             ' object (pool/object_name)')
+    parser.add_argument('-d', '--debug', action='store_true',
+                        default=False,
                         help='run with additional debug')
-    parser.add_argument('-v', '--version', action='version', version='%(prog)s 0.1')
+    parser.add_argument('-v', '--version', action='version',
+                        version='%(prog)s 0.1')
     parser.add_argument('cli_command', type=str, nargs=argparse.REMAINDER)
 
     # create the opts object
     opts = parser.parse_args()
 
-    # establish defaults, just in case they're missing from the config file(s) AND run time call
+    # establish defaults, just in case they're missing from the config
+    # file(s) AND run time call
     if not opts.config_object:
         opts.config_object = 'rbd/gateway.conf'
 
@@ -92,7 +100,8 @@ def main():
     # Load the config to populate the object model
     root_node.refresh()
     if root_node.error:
-        print("Unable to contact the local API endpoint ({})".format(settings.config.api_endpoint))
+        print("Unable to contact the local API endpoint "
+              "({})".format(settings.config.api_endpoint))
         sys.exit(-1)
 
     # Account for invocation which includes a command to run i.e. batch mode
@@ -147,7 +156,10 @@ if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)
 
     file_handler = logging.FileHandler(log_path, mode='w')
-    file_format = logging.Formatter('%(asctime)s %(levelname)-8s - %(message)s')
+
+    file_format = logging.Formatter('%(asctime)s %(levelname)-8s - '
+                                    '%(message)s')
+
     file_handler.setFormatter(file_format)
     file_handler.setLevel(logging.DEBUG)
 
@@ -162,7 +174,8 @@ if __name__ == "__main__":
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
 
-    # Override the default exception handler to only show back traces in debug mode
+    # Override the default exception handler to only show back traces
+    # in debug mode
     sys.excepthook = exception_handler
 
     # Intercept ctrl-c and ctrl-z events to stop the user exiting

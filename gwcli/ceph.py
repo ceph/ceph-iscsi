@@ -8,6 +8,7 @@ import rados
 from gwcli.utils import human_size
 import ceph_iscsi_config.settings as settings
 
+
 class Ceph(UIGroup):
     """
     define an object to represent the ceph cluster. The methods use librados
@@ -87,7 +88,6 @@ class Ceph(UIGroup):
 
 
 class CephPools(UIGroup):
-
     help_intro = '''
                  Each pool within the ceph cluster is shown with the following
                  metrics;
@@ -118,7 +118,7 @@ class CephPools(UIGroup):
 
     def __init__(self, parent):
         UIGroup.__init__(self, 'pools', parent)
-        self.pool_lookup = {}           # pool_name -> pool object hash
+        self.pool_lookup = {}  # pool_name -> pool object hash
         self.populate()
 
     def populate(self):
@@ -135,10 +135,11 @@ class CephPools(UIGroup):
 
     def refresh(self):
 
-        # unfortunately the rados python api does not expose all the needed metrics through
-        # an ioctx call - specifically pool size is missing, so stats need to be gathered at
-        # this level through the mon_command interface, and pushed down to the child objects.
-        # Having a refresh method within the child object would have been preferred!
+        # unfortunately the rados python api does not expose all the needed
+        # metrics through an ioctx call - specifically pool size is missing,
+        # so stats need to be gathered at this level through the mon_command
+        # interface, and pushed down to the child objects. Having a refresh
+        # method within the child object would have been preferred!
         with rados.Rados(conffile=self.parent.conf) as cluster:
             cmd = {'prefix': 'df', 'format': 'json'}
             rc, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
@@ -154,8 +155,8 @@ class CephPools(UIGroup):
 
 
 class RadosPool(UINode):
-
-    display_attributes = ["name", "commit", "overcommit_PCT", "max_bytes", "used_bytes"]
+    display_attributes = ["name", "commit", "overcommit_PCT", "max_bytes",
+                          "used_bytes"]
 
     def __init__(self, parent, pool_name):
         UINode.__init__(self, pool_name, parent)
@@ -167,7 +168,8 @@ class RadosPool(UINode):
             if child.pool == self.name:
                 potential_demand += child.size
 
-        return potential_demand, int((potential_demand / float(self.max_bytes)) * 100)
+        return potential_demand, int(
+            (potential_demand / float(self.max_bytes)) * 100)
 
     def update(self, pool_metadata):
 
@@ -175,7 +177,6 @@ class RadosPool(UINode):
         self.used_bytes = pool_metadata['stats']['bytes_used']
 
         self.commit, self.overcommit_PCT = self._calc_overcommit()
-
 
     def summary(self):
         msg = ["Commit: {}".format(human_size(self.commit))]
@@ -186,7 +187,6 @@ class RadosPool(UINode):
 
 
 class CephTopology(UINode):
-
     def __init__(self, parent):
         UINode.__init__(self, 'topology', parent)
 
