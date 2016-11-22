@@ -6,18 +6,14 @@ import os
 import socket
 import json
 
-# FIXME - relative imports
 from gwcli.node import UIGroup, UINode
 
 from gwcli.client import Clients
-
-# from configshell_fb import ExecutionError
 
 from gwcli.utils import (human_size, readcontents,
                          GatewayAPIError, GatewayLIOError, GatewayError,
                          this_host, get_other_gateways, APIRequest)
 
-# from requests import delete, put, get, ConnectionError
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes
 
 import ceph_iscsi_config.settings as settings
@@ -25,24 +21,6 @@ import ceph_iscsi_config.settings as settings
 # FIXME - this ignores the warning issued when verify=False is used
 from requests.packages import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# def display_msg(msg_type='info', msg_text=''):
-#
-#     prefix = {'error': '--> ',
-#               'info': '- '}
-#
-#     if '{' in msg_text:
-#         # assume json, so load it and use the 1st variable defined as
-#         # the message to print
-#         msg_js = json.loads(msg_text)
-#         key = msg_js.keys()[0]
-#         msg = msg_js[key]
-#     else:
-#         msg = msg_text
-#
-#     print("{}{}".format(prefix[msg_type],
-#                         msg))
-
 
 
 class Disks(UIGroup):
@@ -93,10 +71,10 @@ class Disks(UIGroup):
         # get pool, image, and size ; use this host as the creator
         local_gw = this_host()
         disk_key = "{}.{}".format(pool, image)
-
         other_gateways = get_other_gateways(self.parent.target.children)
-        if len(other_gateways) < 1:
-            self.logger.error("At least 2 gateways must be defined before disks can be added")
+        if len(other_gateways) < (settings.config.minimum_gateways - 1):
+            self.logger.error("At least {} gateways must be defined before "
+                              "disks can be added".format(settings.config.minimum_gateways))
             return
 
         self.logger.debug("Creating/mapping disk {}/{}".format(pool,
@@ -115,20 +93,12 @@ class Disks(UIGroup):
         api = APIRequest(disk_api, data=api_vars)
         api.put()
 
-        # response = put(disk_api,
-        #                data=api_vars,
-        #                auth=(settings.config.api_user, settings.config.api_password),
-        #                verify=settings.config.api_ssl_verify)
-
         if api.response.status_code == 200:
             # rbd create and map successful, so request it's details and add
             # to the gwcli
             self.logger.debug("- LUN is ready on local")
             api = APIRequest(disk_api)
             api.get()
-            # response = get(disk_api,
-            #                auth=(settings.config.api_user, settings.config.api_password),
-            #                verify=settings.config.api_ssl_verify)
 
             if api.response.status_code == 200:
                 image_config = api.response.json()
@@ -142,10 +112,6 @@ class Disks(UIGroup):
                                                                disk_key)
                     api = APIRequest(disk_api, data=api_vars)
                     api.put()
-                    # response = put(disk_api,
-                    #                data=api_vars,
-                    #                auth=(settings.config.api_user, settings.config.api_password),
-                    #                verify=settings.config.api_ssl_verify)
 
                     if api.response.status_code == 200:
                         self.logger.debug("- LUN is ready on {}".format(gw))
@@ -215,7 +181,6 @@ class Disks(UIGroup):
         if disk_users:
             self.logger.error("- Unable to delete '{}', it is currently allocated to:".format(image_id))
 
-            # error_str = "- Unable to delete '{}', it is currently allocated to:\n".format(image_id)
             for client in disk_users:
                 self.logger.error("  - {}".format(client))
             return
@@ -238,10 +203,6 @@ class Disks(UIGroup):
 
             api = APIRequest(disk_api, data=api_vars)
             api.delete()
-            # response = delete(disk_api,
-            #                   data=api_vars,
-            #                   auth=(settings.config.api_user, settings.config.api_password),
-            #                   verify=settings.config.api_ssl_verify)
 
             if api.response.status_code == 200:
                 pass
@@ -267,16 +228,12 @@ class Disks(UIGroup):
         api = APIRequest(disk_api, data=api_vars)
         api.delete()
 
-        # response = delete(disk_api,
-        #                   data=api_vars,
-        #                   auth=(settings.config.api_user, settings.config.api_password),
-        #                   verify=settings.config.api_ssl_verify)
-
         if api.response.status_code == 200:
             self.logger.debug("- rbd removed")
             disk_object = [disk for disk in self.children
                            if disk.name == image_id][0]
             self.remove_child(disk_object)
+            del self.disk_info[image_id]
         else:
             raise GatewayLIOError("--> Failed to remove the device from the local machine")
 
@@ -434,11 +391,6 @@ class Disk(UINode):
         api = APIRequest(disk_api, data=api_vars)
         api.put()
 
-        # response = put(disk_api,
-        #                data=api_vars,
-        #                auth=(settings.config.api_user, settings.config.api_password),
-        #                verify=settings.config.api_ssl_verify)
-
         if api.response.status_code == 200:
             # rbd resize request successful, so update the local information
             self.logger.debug("- LUN resize complete")
@@ -452,11 +404,6 @@ class Disk(UINode):
                                                            self.image_id)
                 api = APIRequest(disk_api, data=api_vars)
                 api.put()
-
-                # response = put(disk_api,
-                #                data=api_vars,
-                #                auth=(settings.config.api_user, settings.config.api_password),
-                #                verify=settings.config.api_ssl_verify)
 
                 if api.response.status_code == 200:
                     self.logger.debug("- LUN resize registered on {}".format(gw))
