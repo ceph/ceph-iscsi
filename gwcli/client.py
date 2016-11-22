@@ -284,7 +284,7 @@ class Client(UINode):
         self.logger.debug("Client '{}' AUTH update".format(self.client_iqn))
         # get list of children (luns) to build current image list
         lun_list = [(lun.rbd_name, lun.lun_id) for lun in self.children]
-        image_list = ','.join(Client.get_srtd_luns(lun_list))
+        image_list = ','.join(Client.get_srtd_names(lun_list))
 
         other_gateways = get_other_gateways(self.parent.parent.parent.parent.target.children)
         api_vars = {"committing_host": this_host(),
