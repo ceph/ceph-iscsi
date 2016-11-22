@@ -679,11 +679,13 @@ class LUN(object):
         :return: LIO LUN object
         """
 
-        self.logger.info("(LUN.add_dev_to_lio) Adding image '{}' with path {} to LIO".format(self.image,
+        self.logger.info("(LUN.add_dev_to_lio) Adding image '{}' with path {} to LIO".format(self.config_key,
                                                                                              self.dm_device))
         new_lun = None
         try:
-            new_lun = BlockStorageObject(name=self.config_key, dev=self.dm_device, wwn=in_wwn)
+            new_lun = BlockStorageObject(name=self.config_key,
+                                         dev=self.dm_device,
+                                         wwn=in_wwn)
         except RTSLibError as err:
             self.error = True
             self.error_msg = "failed to add {} to LIO - error({})".format(self.config_key, str(err))
