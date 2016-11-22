@@ -5,8 +5,6 @@ __author__ = 'pcuzner@redhat.com'
 import json
 import re
 
-# from requests import delete, put, get, ConnectionError
-
 from gwcli.node import UIGroup, UINode
 
 from gwcli.utils import (human_size, get_other_gateways,
@@ -80,11 +78,6 @@ class Clients(UIGroup):
         api = APIRequest(client_api, data=api_vars)
         api.put()
 
-        # response = put(client_api,
-        #                data=api_vars,
-        #                auth=(settings.config.api_user, settings.config.api_password),
-        #                verify=settings.config.api_ssl_verify)
-
         if api.response.status_code == 200:
             Client(self, client_iqn, cli_seed)
             self.logger.debug("- Client '{}' added locally".format(client_iqn))
@@ -96,10 +89,6 @@ class Clients(UIGroup):
                                                                client_iqn)
                 api = APIRequest(client_api, data=api_vars)
                 api.put()
-                # response = put(client_api,
-                #                data=api_vars,
-                #                auth=(settings.config.api_user, settings.config.api_password),
-                #                verify=settings.config.api_ssl_verify)
 
                 if api.response.status_code == 200:
                     self.logger.debug("- Client '{}' added to {}".format(client_iqn, gw))
@@ -151,10 +140,6 @@ class Clients(UIGroup):
                                                            client_iqn)
             api = APIRequest(client_api, data=api_vars)
             api.delete()
-            # response = delete(client_api,
-            #                   data=api_vars,
-            #                   auth=(settings.config.api_user, settings.config.api_password),
-            #                   verify=settings.config.api_ssl_verify)
 
             if api.response.status_code == 200:
                 self.logger.debug("- '{}' removed from {}".format(client_iqn, gw))
@@ -172,10 +157,6 @@ class Clients(UIGroup):
                                                               client_iqn)
         api = APIRequest(client_api, data=api_vars)
         api.delete()
-        # response = delete(client_api,
-        #                   data=api_vars,
-        #                   auth=(settings.config.api_user, settings.config.api_password),
-        #                   verify=settings.config.api_ssl_verify)
 
         if api.response.status_code == 200:
 
@@ -315,10 +296,6 @@ class Client(UINode):
                                                                       self.client_iqn)
         api = APIRequest(clientauth_api, data=api_vars)
         api.put()
-        # response = put(clientauth_api,
-        #                data=api_vars,
-        #                auth=(settings.config.api_user, settings.config.api_password),
-        #                verify=settings.config.api_ssl_verify)
 
         if api.response.status_code == 200:
             self.logger.debug("- Local environment updated")
@@ -332,10 +309,6 @@ class Client(UINode):
                                                                        self.client_iqn)
                 api = APIRequest(clientauth_api, data=api_vars)
                 api.put()
-                # response = put(clientauth_api,
-                #                data=api_vars,
-                #                auth=(settings.config.api_user, settings.config.api_password),
-                #                verify=settings.config.api_ssl_verify)
 
                 if api.response.status_code == 200:
                     self.logger.debug("- {} updated".format(gw))
@@ -422,11 +395,6 @@ class Client(UINode):
         api = APIRequest(clientlun_api, data=api_vars)
         api.put()
 
-        # response = put(clientlun_api,
-        #                data=api_vars,
-        #                auth=(settings.config.api_user, settings.config.api_password),
-        #                verify=settings.config.api_ssl_verify)
-
         if api.response.status_code == 200:
 
             if action == 'add':
@@ -437,11 +405,6 @@ class Client(UINode):
                 get_api_vars = {"disk": disk}
                 api = APIRequest(clientlun_api, data=get_api_vars)
                 api.get()
-
-                # response = get(clientlun_api,
-                #                data=get_api_vars,
-                #                auth=(settings.config.api_user, settings.config.api_password),
-                #                verify=settings.config.api_ssl_verify)
 
                 if api.response.status_code == 200:
                     lun_dict = api.response.json()['message']
@@ -466,12 +429,7 @@ class Client(UINode):
                                                                      settings.config.api_port,
                                                                      self.client_iqn)
                 api = APIRequest(clientlun_api, data=api_vars)
-                # response = put(clientlun_api,
-                #                data=api_vars,
-                #                auth=(settings.config.api_user, settings.config.api_password),
-                #                verify=settings.config.api_ssl_verify)
                 api.put()
-
 
                 if api.response.status_code == 200:
                     self.logger.debug("- gateway '{}' updated".format(gw))
