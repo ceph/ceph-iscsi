@@ -98,17 +98,17 @@ class APITarget(Resource):
         gateway_ip_list = []
 
         target = GWTarget(logger,
-                          target_iqn,
+                          str(target_iqn),
                           gateway_ip_list)
 
         if target.error:
             logger.error("Unable to create an instance of the GWTarget class")
-            abort(500, "GWTarget instantiation problem - {}".format(target.error_msg))
+            abort(418, "GWTarget instantiation problem - {}".format(target.error_msg))
 
         target.manage('init')
         if target.error:
             logger.error("Failure during gateway 'init' processing")
-            abort(500, "iscsi target 'init' process failed for {} - "
+            abort(418, "iscsi target 'init' process failed for {} - "
                   "{}".format(target_iqn, target.error_msg))
 
         return make_response(jsonify({"message": "Target defined successfully"}), 200)
@@ -145,6 +145,7 @@ class APIGateway(Resource):
         # with the comparison logic in common.config.add_item
         gateway_ips = str(request.form['gateway_ip_list'])
         target_iqn = str(request.form['target_iqn'])
+        target_mode = str(request.form.get('mode', 'target'))
 
         gateway_ip_list = gateway_ips.split(',')
 
@@ -154,18 +155,24 @@ class APIGateway(Resource):
 
         if gateway.error:
             logger.error("Unable to create an instance of the GWTarget class")
-            abort(500, "Error initialising an instance of GWTarget for {}: {}".format(gateway_name,
+            abort(418, "Error initialising an instance of GWTarget for {}: {}".format(gateway_name,
                                                                                       gateway.error_msg))
 
-        gateway.manage('target')
+        gateway.manage(target_mode)
         if gateway.error:
-            logger.error("Running the manage(target) logic failed for {}".format(gateway_name))
-            abort(500, "Error defining the {} gateway: {}".format(gateway_name,
+            logger.error("manage({}) logic failed for {}".format(target_mode,
+                                                                 gateway_name))
+            abort(418, "Error defining the {} gateway: {}".format(gateway_name,
                                                                   gateway.error_msg))
         logger.info("created the gateway")
-        config.refresh()
 
-        return make_response(jsonify({"message": "Gateway defined successfully"}), 200)
+        if target_mode == 'target':
+            # refresh only for target definitions, since that's when the config
+            # will actually change
+            logger.info("refreshing the configuration after the gateway creation")
+            config.refresh()
+
+        return make_response(jsonify({"message": "Gateway defined/mapped successfully"}), 200)
 
     @requires_restricted_auth
     def delete(self, gateway_name):
@@ -242,7 +249,7 @@ class APIDisk(Resource):
     @requires_restricted_auth
     def put(self, image_id):
         # A put is for either a create or a resize
-        # put('http://127.0.0.1:5000/api/disk/ansible3',data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
+        # put('http://127.0.0.1:5000/api/disk/rbd.ansible3',data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
 
         # FIXME - MUST have a gateway before luns can be created
         # the gateway must exist, since the workflow for mapping a lun will
@@ -258,7 +265,7 @@ class APIDisk(Resource):
             #                                                                         request.form['owner'],
             #                                                                         request.form['mode'])
 
-            image_name = str(image_id).split('.', 1)[1]
+            image_name = str(image_id.split('.', 1)[1])
             lun = LUN(logger,
                       str(request.form['pool']),
                       image_name,
@@ -839,9 +846,10 @@ class ConfigWatcher(threading.Thread):
             try:
                 obj_epoch = int(ioctx.get_xattr('gateway.conf', 'epoch'))
             except rados.ObjectNotFound:
-                # daemon is running prior to any config being created so just
-                # skip the error, and keep checking
-                pass
+                # daemon is running prior to any config being created or it has
+                # skip the error, and
+                logger.warning("config object missing, recreating")
+                config.refresh()
 
             else:
                 # if it's changed, refresh the local config to ensure a query
