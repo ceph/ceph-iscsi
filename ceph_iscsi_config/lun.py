@@ -364,8 +364,23 @@ class LUN(object):
                     self.error_msg = "Unable to delete the underlying rbd image {}".format(self.config_key)
                     return
 
+                # determine which host was the path owner
+                disk_owner = self.config.config['disks'][self.config_key]['owner']
+
+                #
                 # remove the definition from the config object
                 self.config.del_item('disks', self.config_key)
+
+                # update the active_luns count for gateway that owned this
+                # lun
+                gw_metadata = self.config.config['gateways'][disk_owner]
+                if gw_metadata['active_luns'] > 0:
+                    gw_metadata['active_luns'] -= 1
+
+                    self.config.update_item('gateways',
+                                            disk_owner,
+                                            gw_metadata)
+
                 self.config.commit()
 
         else:
