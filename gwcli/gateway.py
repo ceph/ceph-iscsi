@@ -13,7 +13,7 @@ from gwcli.utils import (this_host, get_other_gateways,
                          APIRequest, progress_message)
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import get_ip, ipv4_addresses
+from ceph_iscsi_config.utils import get_ip, ipv4_addresses, gen_file_hash
 
 from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
@@ -349,15 +349,18 @@ class GatewayGroup(UIGroup):
             self.logger.error("'{}' is already defined within the "
                               "configuration".format(ip_address))
             return
+        gw_api = '{}://{}:{}/api'.format(self.http_mode,
+                                         gateway_name,
+                                         settings.config.api_port)
 
         # check the intended host actually has the requested IP available
-        api = APIRequest('{}://{}:{}/api/sysinfo/ipv4_addresses'.format(self.http_mode,
-                                                                         gateway_name,
-                                                                         settings.config.api_port))
+        api = APIRequest(gw_api + '/sysinfo/ipv4_addresses')
         api.get()
 
         if api.response.status_code != 200:
-            self.logger.error("API query to {} failed - check rbd-target-gw log, is the API server running?".format(gateway_name))
+            self.logger.error("ipv4_addresses query to {} failed - check"
+                              "rbd-target-gw log, is the API server "
+                              "running?".format(gateway_name))
             raise GatewayAPIError("API call to {}, returned status {}".format(gateway_name,
                                                                               api.response.status_code))
 
@@ -365,6 +368,27 @@ class GatewayGroup(UIGroup):
         if ip_address not in target_ips:
             self.logger.error("{} is not available on {}".format(ip_address,
                                                                  gateway_name))
+            self.logger.error("{} IP's are : {}".format(gateway_name,
+                                                        ','.join(target_ips)))
+            return
+
+
+        api = APIRequest(gw_api + '/sysinfo/checkconf')
+        api.get()
+        if api.response.status_code !=200:
+            msg = ("checkconf API call to {} failed with "
+                   "code".format(gateway_name, api.response.status_code))
+
+            self.logger.error(msg)
+            raise GatewayAPIError(msg)
+
+        # compare the hash of the new gateways conf file with the local one
+        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.conf')
+        remote_hash = str(api.response.json()['data'])
+        if local_hash != remote_hash:
+            self.logger.error("/etc/ceph/iscsi-gateway.conf on {} does "
+                              "not match the local version. Correct and "
+                              "retry".format(gateway_name))
             return
 
         local_gw = this_host()
