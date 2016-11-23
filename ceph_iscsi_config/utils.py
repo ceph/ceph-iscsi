@@ -8,6 +8,8 @@ import struct
 import subprocess
 import rados
 import datetime
+import hashlib
+import os
 
 import ceph_iscsi_config.settings as settings
 
@@ -125,7 +127,7 @@ def valid_cidr(subnet):
 
 def ipv4_addresses():
     """
-    return a list of IP addresses on the system
+    return a list of IPv4 addresses on the system (excluding 127.0.0.1)
     :return: IP address list
     """
     ip_list = []
@@ -136,6 +138,8 @@ def ipv4_addresses():
 
         for link in netifaces.ifaddresses(iface)[netifaces.AF_INET]:
             ip_list.append(link['addr'])
+
+    ip_list.remove('127.0.0.1')
 
     return ip_list
 
@@ -149,8 +153,9 @@ def ipv4_address():
     for iface in netifaces.interfaces():
         if len(netifaces.ifaddresses(iface)) < 3:
             continue
-        for link in netifaces.ifaddresses(iface)[netifaces.AF_INET]:            # 3rd element (2)
-            yield link['addr']
+        for link in netifaces.ifaddresses(iface)[netifaces.AF_INET]:
+            if link['addr'] != '127.0.0.1':
+                yield link['addr']
 
 
 def get_ip_address(iscsi_network):
@@ -229,3 +234,27 @@ def this_host():
     return the local machine's shortname
     """
     return socket.gethostname().split('.')[0]
+
+def gen_file_hash(filename, hash_type='sha256'):
+    """
+    generate a hash(default sha256) of a file and return the result
+    :param filename: filename to generate the checksum for
+    :param hash_type: type of checksum to generate
+    :return: checkum (str)
+    """
+
+    if (hash_type not in ['sha1', 'sha256', 'sha512', 'md5'] or
+            not os.path.exists(filename)):
+        return ''
+
+    hash_function = getattr(hashlib, hash_type)
+    h = hash_function()
+
+    with open(filename, 'rb') as file_in:
+        chunk = 0
+        while chunk != b'':
+            chunk = file_in.read(1024)
+            h.update(chunk)
+
+    return h.hexdigest()
+
