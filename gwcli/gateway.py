@@ -29,13 +29,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class ISCSIRoot(UIRoot):
 
-    display_attributes = ['http_mode', 'local_api']
+    # display_attributes = ['http_mode', 'local_api']
 
     def __init__(self, shell, logger, endpoint=None):
         UIRoot.__init__(self, shell)
         self.config = {}
         self.error = False
         self.error_msg = ''
+        self.interactive = True           # default interactive mode
         self.logger = logger
 
         if settings.config.api_secure:
@@ -431,8 +432,9 @@ class GatewayGroup(UIGroup):
                 cnt = 1
                 total_disks = len(current_disks.keys())
                 for disk_key in current_disks:
-                    progress_message("syncing disks {}/{}".format(cnt,
-                                                                  total_disks))
+                    if self.interactive:
+                        progress_message("syncing disks {}/{}".format(cnt,
+                                                                      total_disks))
                     this_disk = current_disks[disk_key]
                     lun_rqst = api_endpoint + '/disk/{}'.format(disk_key)
                     lun_vars = { "pool": this_disk['pool'],
@@ -450,7 +452,9 @@ class GatewayGroup(UIGroup):
                         raise GatewayAPIError(msg)
 
                     cnt += 1
-                print("")
+
+                if self.interactive:
+                    print("")
 
             # Adding a gateway introduces a new tpg - each tpg MUST have the luns
             # defined so a RTPG call can be responded to correctly, so
@@ -476,8 +480,9 @@ class GatewayGroup(UIGroup):
                     cnt = 1
                     total_clients = len(current_clients.keys())
                     for client_iqn in current_clients:
-                        progress_message("syncing clients {}/{}".format(cnt,
-                                                                        total_clients))
+                        if self.interactive:
+                            progress_message("syncing clients {}/{}".format(cnt,
+                                                                            total_clients))
                         this_client = current_clients[client_iqn]
                         client_luns = this_client['luns']
                         lun_list = [(disk, client_luns[disk]['lun_id'])
@@ -501,7 +506,8 @@ class GatewayGroup(UIGroup):
                         cnt += 1
 
                     # add a new line, to tidy up the display
-                    print("")
+                    if self.interactive:
+                        print("")
 
         self.logger.debug("Processing complete. Adding gw to UI")
         # Target created OK, get the details back from the gateway and
@@ -519,6 +525,13 @@ class GatewayGroup(UIGroup):
     def summary(self):
 
         return "Portals: {}".format(len(self.children)), True
+
+    def _interactive_shell(self):
+        return self.parent.parent.parent.interactive
+
+    interactive = property(_interactive_shell,
+                           doc="determine whether the cli is running in "
+                               "interactive mode")
 
 
 class Gateway(UINode):

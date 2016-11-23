@@ -96,6 +96,7 @@ def main():
     shell = GatewayCLI('~/.gwcli')
 
     root_node = ISCSIRoot(shell, logger)
+    root_node.interactive = False if options.cli_command else True
 
     # Load the config to populate the object model
     root_node.refresh()
@@ -155,24 +156,24 @@ if __name__ == "__main__":
     logger = logging.getLogger('gwcli')
     logger.setLevel(logging.DEBUG)
 
-    file_handler = logging.FileHandler(log_path, mode='w')
+    file_handler = logging.FileHandler(log_path, mode='a')
 
     file_format = logging.Formatter('%(asctime)s %(levelname)-8s - '
                                     '%(message)s')
 
     file_handler.setFormatter(file_format)
     file_handler.setLevel(logging.DEBUG)
-
-    stream_handler = logging.StreamHandler(stream=sys.stdout)
-    if options.debug:
-        stream_handler.setLevel(logging.DEBUG)
-    else:
-        stream_handler.setLevel(logging.INFO)
-
-    stream_handler.emit = log_in_color(stream_handler.emit)
-
     logger.addHandler(file_handler)
-    logger.addHandler(stream_handler)
+
+    if not options.cli_command:
+        stream_handler = logging.StreamHandler(stream=sys.stdout)
+        if options.debug:
+            stream_handler.setLevel(logging.DEBUG)
+        else:
+            stream_handler.setLevel(logging.INFO)
+
+        stream_handler.emit = log_in_color(stream_handler.emit)
+        logger.addHandler(stream_handler)
 
     # Override the default exception handler to only show back traces
     # in debug mode
