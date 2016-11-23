@@ -49,7 +49,8 @@ class Clients(UIGroup):
         # gateways defined
         gws = [gw for gw in self.parent.gateway_group.children]
         if len(gws) < settings.config.minimum_gateways:
-            self.logger.error("You need at least {} gateways defined, before hosts can be added".format(settings.config.minimum_gateways))
+            self.logger.error("You need at least {} gateways defined, before "
+                              "hosts can be added".format(settings.config.minimum_gateways))
             return
 
         cli_seed = {"luns": {}, "auth": {}}
@@ -57,13 +58,15 @@ class Clients(UIGroup):
         # make sure the iqn isn't already defined
         existing_clients = [client.name for client in self.children]
         if client_iqn in existing_clients:
-            self.logger.error("Client '{}' is already defined".format(client_iqn))
+            self.logger.error("Client '{}' is already "
+                              "defined".format(client_iqn))
             return
 
         try:
             valid_iqn = normalize_wwn(['iqn'], client_iqn)
         except RTSLibError:
-            self.logger.critical("An iqn of '{}' is not a valid name for iSCSI".format(client_iqn))
+            self.logger.critical("An iqn of '{}' is not a valid name for "
+                                 "iSCSI".format(client_iqn))
             return
 
 
@@ -102,31 +105,37 @@ class Clients(UIGroup):
 
     def ui_command_delete(self, client_iqn):
         """
-        You may delete a client from the configuration, but you must ensure that
+        You may delete a client from the configuration, but you must ensure
         the client has logged out of the iscsi gateways. Attempting to delete a
         client that has an open session will fail the request
 
         > delete <client_iqn>
 
         """
-        # check the iqn given matches one of the child objects - i.e. it's valid
+        # check the iqn given matches one of the child objects
+        # - i.e. it's valid
         client_names = [child.name for child in self.children]
         if client_iqn not in client_names:
-            self.logger.error("Host with an iqn of '{}' is not defined...mis-typed?".format(client_iqn))
+            self.logger.error("Host with an iqn of '{}' is not defined."
+                              "..mis-typed?".format(client_iqn))
             return
 
         lio_root = root.RTSRoot()
-        clients_logged_in = [session['parent_nodeacl'].node_wwn for session in lio_root.sessions
+        clients_logged_in = [session['parent_nodeacl'].node_wwn
+                             for session in lio_root.sessions
                              if session['state'] == 'LOGGED_IN']
 
         if client_iqn in clients_logged_in:
-            self.logger.error("Host '{}' is logged in - unable to delete until it's logged out".format(client_iqn))
+            self.logger.error("Host '{}' is logged in - unable to delete until"
+                              " it's logged out".format(client_iqn))
             return
 
-        # At this point we know the client requested is defined to the configuration
-        # and is not currently logged in (at least to this host), OK to delete
+        # At this point we know the client requested is defined to the
+        # configuration and is not currently logged in (at least to this host),
+        # OK to delete
         self.logger.debug("Client DELETE for {}".format(client_iqn))
-        client = [client for client in self.children if client.name == client_iqn][0]
+        client = [client for client in self.children
+                  if client.name == client_iqn][0]
 
         # Process flow: remote gateways > local > delete config object entry
 
@@ -160,7 +169,8 @@ class Clients(UIGroup):
 
         if api.response.status_code == 200:
 
-            self.logger.debug("- '{}' removed from local gateway, configuration updated".format(client_iqn))
+            self.logger.debug("- '{}' removed from local gateway, "
+                              "configuration updated".format(client_iqn))
             self.delete(client)
 
         self.logger.info('ok')
@@ -231,7 +241,8 @@ class Client(UINode):
     @staticmethod
     def valid_credentials(credentials_str, auth_type='chap'):
         """
-        Return a boolean indicating whether the credentials supplied are acceptable
+        Return a boolean indicating whether the credentials supplied are
+        acceptable
         """
 
         # regardless of the auth_type, the credentials_str must be of
@@ -243,7 +254,8 @@ class Client(UINode):
 
         if auth_type == 'chap':
             # username is any length and includes . and : chars
-            # password is 12-16 chars long containing any alphanumeric or !,_,& symbol
+            # password is 12-16 chars long containing any alphanumeric
+            # or !,_,& symbol
             usr_regex = re.compile("^[\w\\.\:]+")
             pw_regex = re.compile("^[\w\!\&\_]{12,16}$")
             if not usr_regex.search(user_name) or not pw_regex.search(password):
@@ -272,13 +284,15 @@ class Client(UINode):
             chap = ''
 
         if not nochap and not chap:
-            self.logger.error("To set CHAP authentication provide a string of the format 'user/password'")
+            self.logger.error("To set CHAP authentication provide a string of "
+                              "the format 'user/password'")
             return
 
         if chap:
             # validate the chap credentials are acceptable
             if not Client.valid_credentials(chap, auth_type='chap'):
-                self.logger.error("-> the format of the CHAP string is invalid, use 'help auth' for examples")
+                self.logger.error("-> the format of the CHAP string is invalid"
+                                  ", use 'help auth' for examples")
                 return
 
         self.logger.debug("Client '{}' AUTH update".format(self.client_iqn))
@@ -353,27 +367,33 @@ class Client(UINode):
 
         if action == 'add':
 
-            valid_disk_names = [defined_disk.image_id for defined_disk in self.parent.parent.parent.parent.disks.children]
+            valid_disk_names = [defined_disk.image_id
+                                for defined_disk in self.parent.parent.parent.parent.disks.children]
         else:
             valid_disk_names = current_luns
 
         if not disk:
-            self.logger.critical("You must supply a disk name to add/remove from this client")
+            self.logger.critical("You must supply a disk name to add/remove "
+                                 "from this client")
             return
 
         if action not in valid_actions:
-            self.logger.error("you can only add and remove disks - {} is invalid ".format(action))
+            self.logger.error("you can only add and remove disks - {} is "
+                              "invalid ".format(action))
             return
 
         if disk not in valid_disk_names:
-            self.logger.critical("the request to {} disk '{}' is invalid".format(action,
-                                                                                 disk))
+            self.logger.critical("the request to {} disk '{}' is "
+                                 "invalid".format(action,
+                                                  disk))
             return
 
-        # At this point we are either in add/remove mode, with a valid disk to act upon
-        self.logger.debug("Client '{}' update - {} disk {}".format(self.client_iqn,
-                                                                   action,
-                                                                   disk))
+        # At this point we are either in add/remove mode, with a valid disk
+        # to act upon
+        self.logger.debug("Client '{}' update - {} disk "
+                          "{}".format(self.client_iqn,
+                                      action,
+                                      disk))
 
         if action == 'add':
             current_luns.append(disk)
@@ -410,6 +430,11 @@ class Client(UINode):
                     lun_dict = api.response.json()['message']
                     lun_id = lun_dict[disk]['lun_id']
                     MappedLun(self, disk, lun_id)
+
+                    # update the objects lun list (so ui info cmd picks
+                    # up the change
+                    self.luns[disk] = {'lun_id': lun_id}
+
                 else:
                     raise GatewayAPIError(api.response.json()['message'])
 
@@ -418,8 +443,10 @@ class Client(UINode):
                 # this was a remove request, so simply delete the child
                 # MappedLun object corresponding to this rbd name
 
-                mlun = [lun for lun in self.children if lun.rbd_name == disk][0]
+                mlun = [lun for lun in self.children
+                        if lun.rbd_name == disk][0]
                 self.remove_child(mlun)
+                del self.luns[disk]
 
             self.logger.debug("- local environment updated")
 
