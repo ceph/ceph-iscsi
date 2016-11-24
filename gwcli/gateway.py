@@ -229,15 +229,76 @@ class ISCSITarget(UIGroup):
             self.logger.error("Failed to create the target on the local node")
             raise GatewayAPIError("iSCSI target creation failed - {}".format(api.response.json()['message']))
 
+    def ui_command_clearconfig(self, confirm=None):
+        """
+        The 'clearconfig' command allows you to return the configuration to an
+        unused state: LIO on each gateway will be cleared, and gateway
+        definitions in the configuration object will be removed.
 
-    def ui_command_delete(self, target_iqn):
-        # this delete request would need to
-        # 1. confirm no sessions for this specific target
-        # 2. delete all hosts definitions
-        # 3. delete all gateway definitions
-        # 4. delete the target
-        print "FIXME - not implemented yet"
+        > clearconfig confirm=true
 
+        In order to run the clearconfig command, all clients and disks *must*
+        have already have been removed.
+        """
+
+        confirm = self.ui_eval_param(confirm, 'bool', False)
+        if not confirm:
+            self.logger.error("To clear the configuration you must specify "
+                              "confirm=true")
+            return
+
+        # get a new copy of the config dict over the local API
+        # check that there aren't any disks or client listed
+        local_api = "{}://127.0.0.1:{}/api/config".format(self.http_mode,
+                                                          settings.config.api_port)
+        api = APIRequest(local_api)
+        api.get()
+
+        if api.response.status_code != 200:
+            self.logger.error("Unable to get fresh copy of the configuration")
+            raise GatewayAPIError
+
+        current_config = api.response.json()
+        num_clients = len(current_config['clients'].keys())
+        num_disks = len(current_config['disks'].keys())
+
+        if num_clients > 0 or num_disks > 0:
+            self.logger.error("Clients({}) and Disks({}) must be removed first"
+                              " before clearing the gateway "
+                              "configuration".format(num_clients,
+                                                     num_disks))
+            return
+
+        self.clear_config(current_config['gateways'])
+
+    def clear_config(self, gateway_group):
+
+        # we need to process the gateways, leaving the local machine until
+        # last to ensure we don't fall foul of the api auth check
+        gw_list = [gw_name for gw_name in gateway_group
+                   if isinstance(gateway_group[gw_name], dict)]
+        gw_list.remove(this_host())
+        gw_list.append(this_host())
+
+        for gw_name in gw_list:
+
+            gw_api = '{}://{}:{}/api/gateway/{}'.format(self.http_mode,
+                                                        gw_name,
+                                                        settings.config.api_port,
+                                                        gw_name)
+            api = APIRequest(gw_api)
+            api.delete()
+            if api.response.status_code != 200:
+                msg = api.response.json()['message']
+                self.logger.error("Delete of {} failed : {}".format(gw_name,
+                                                                    msg))
+                raise GatewayAPIError
+            else:
+                self.logger.debug("- deleted {}".format(gw_name))
+
+        # gateways removed, so lets delete the objects from the UI tree
+        self.reset()
+        self.logger.info('ok')
 
     def refresh(self):
 
@@ -263,6 +324,13 @@ class Target(UIGroup):
         self.target_iqn = target_iqn
         self.gateway_group = GatewayGroup(self)
         self.client_group = Clients(self)
+
+
+
+
+
+
+
 
     def summary(self):
         return "Gateways: {}".format(len(self.gateway_group.children)), None
