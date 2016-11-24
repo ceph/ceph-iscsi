@@ -119,7 +119,8 @@ class Disks(UIGroup):
                         raise GatewayAPIError(api.response.json()['message'])
 
         else:
-            raise GatewayLIOError("- Error defining the rbd image to the local gateway")
+            self.logger.error(api.response.json()['message'])
+            raise GatewayError("Error defining the rbd image to the local gateway")
 
         ceph_pools = self.parent.ceph.pools
         ceph_pools.refresh()
