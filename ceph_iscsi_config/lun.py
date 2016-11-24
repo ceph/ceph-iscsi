@@ -46,11 +46,6 @@ class RBDDev(object):
 
         size_bytes = convert_2_bytes(self.size)
 
-        # build the required feature settings into an int
-        feature_int = 0
-        for feature in RBDDev.rbd_feature_list:
-            feature_int += getattr(rbd, feature)
-
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 rbd_inst = rbd.RBD()
@@ -58,7 +53,7 @@ class RBDDev(object):
                     rbd_inst.create(ioctx,
                                     self.image,
                                     size_bytes,
-                                    features=feature_int,
+                                    features=RBDDev.supported_features(),
                                     old_format=False)
 
                 except (rbd.ImageExists, rbd.InvalidArgument) as err:
@@ -199,8 +194,6 @@ class RBDDev(object):
                 continue
             print rbdmap_entry.strip()
 
-
-
     def get_rbd_map(self):
         """
         Set objects rbd_map attribute based on the rbd showmapped command
@@ -261,12 +254,41 @@ class RBDDev(object):
                 rbd_names = rbd_inst.list(ioctx)
         return rbd_names
 
+    def _valid_rbd(self):
+
+        valid_state = True
+        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+            ioctx = cluster.open_ioctx(self.pool)
+            with rbd.Image(ioctx, self.image) as rbd_image:
+
+                if rbd_image.features() != RBDDev.supported_features():
+                    valid_state = False
+
+        return valid_state
+
+    @classmethod
+    def supported_features(cls):
+        """
+        Return an int representing the supported features for LIO export
+        :return: int
+        """
+        # build the required feature settings into an int
+        feature_int = 0
+        for feature in RBDDev.rbd_feature_list:
+            feature_int += getattr(rbd, feature)
+
+        return feature_int
+
     size_bytes = property(_get_size_bytes,
                           doc="return the current size of the rbd in bytes "
                               "from sysfs")
 
     rbd_id = property(_get_rbd_id,
                       doc="return the mapped rbd name for this rbd")
+
+    valid = property(_valid_rbd,
+                     doc="check the rbd is valid for export through LIO"
+                         " (boolean)")
 
 
 class LUN(object):
@@ -480,9 +502,24 @@ class LUN(object):
                                           "for rbd to show up")
                         return
         else:
-            # requested image is defined to ceph, so ensure it's in the config
-            if self.config_key not in self.config.config['disks']:
-                self.config.add_item('disks', self.config_key)
+            # requested image is already defined to ceph
+
+            if rbd_image.valid:
+
+                # rbd image is OK to use, so ensure it's in the config
+                # object
+                if self.config_key not in self.config.config['disks']:
+                    self.config.add_item('disks', self.config_key)
+
+            else:
+                # rbd image is not valid for export, so abort
+                self.error = True
+                self.error_msg = ("(LUN.allocate) rbd '{}' is not compatible "
+                                  "with LIO\nOnly image features {} are"
+                                  " supported".format(self.image,
+                                                      ','.join(RBDDev.rbd_feature_list)))
+                self.logger.error(self.error_msg)
+                return
 
         # make sure the rbd is mapped. this will also ensure the
         # RBDDEV object will hold a valid dm_device attribute
