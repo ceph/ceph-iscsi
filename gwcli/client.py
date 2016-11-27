@@ -30,6 +30,10 @@ class Clients(UIGroup):
         UIGroup.__init__(self, 'hosts', parent)
         self.logger = self.parent.logger
 
+        # lun_map dict is indexed by the rbd name, pointing to a list
+        # of clients that have that rbd allocated.
+        self.lun_map = {}
+
     def load(self, client_info):
         for client_iqn, client_settings in client_info.iteritems():
             Client(self, client_iqn, client_settings)
@@ -171,9 +175,45 @@ class Clients(UIGroup):
 
             self.logger.debug("- '{}' removed from local gateway, "
                               "configuration updated".format(client_iqn))
+
+            # remove any rbd maps from the lun_map for this client
+            rbds_mapped = [lun.rbd_name for lun in client.children]
+            for rbd in rbds_mapped:
+                self.update_lun_map('remove', rbd, client_iqn)
+
             self.delete(client)
 
         self.logger.info('ok')
+
+    def update_lun_map(self, action, rbd_path, client_iqn):
+        """
+        Update the lun_map lookup dict
+        :param action: add or remove
+        :param rbd_path: disk name (str) i.e. <pool>.<rbd_image>
+        :param client_iqn: client IQN (str)
+        :return: None
+        """
+
+        if action == 'add':
+            if rbd_path in self.lun_map:
+                self.lun_map[rbd_path].add(client_iqn)
+            else:
+                self.lun_map[rbd_path] = {client_iqn}
+        else:
+            if rbd_path in self.lun_map:
+                try:
+                    self.lun_map[rbd_path].remove(client_iqn)
+                except KeyError:
+                    # client not in set
+                    pass
+                else:
+                    if len(self.lun_map[rbd_path]) == 0:
+                        del self.lun_map[rbd_path]
+            else:
+                # delete requested for an rbd that is not in lun_map?
+                # twilight zone moment
+                raise ValueError("Clients.update_lun_map : Attempt to delete "
+                                 "rbd from lun_map that is not defined")
 
 
     def delete(self, child):
@@ -198,6 +238,7 @@ class Client(UINode):
 
         for rbd_path in self.luns.keys():
             lun_id = self.luns[rbd_path]['lun_id']
+            self.parent.update_lun_map('add', rbd_path, self.client_iqn)
             MappedLun(self, rbd_path, lun_id)
 
     def _get_logged_in_state(self):
@@ -434,6 +475,12 @@ class Client(UINode):
                     # update the objects lun list (so ui info cmd picks
                     # up the change
                     self.luns[disk] = {'lun_id': lun_id}
+                    self.parent.update_lun_map('add', disk, self.client_iqn)
+                    active_maps = len(self.parent.lun_map[disk]) - 1
+                    if active_maps > 0:
+                        self.logger.warning("Warning: '{}' mapped to {} other "
+                                            "client(s)".format(disk,
+                                                               active_maps))
 
                 else:
                     raise GatewayAPIError(api.response.json()['message'])
@@ -447,6 +494,7 @@ class Client(UINode):
                         if lun.rbd_name == disk][0]
                 self.remove_child(mlun)
                 del self.luns[disk]
+                self.parent.update_lun_map('remove', disk, self.client_iqn)
 
             self.logger.debug("- local environment updated")
 
