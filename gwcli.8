@@ -184,11 +184,18 @@ refreshes the ceph information present in the UI
 .TP
 \fBinfo\fR
 when run at the root of the shell (/), info will show you configuration settings such as http mode, API port, local ceph cluster name and 2ndary API trusted IP addresses.
+.TP
+\fBgoto [ hosts | gateways | 'bookmark']\fR
+to ease navigation within the UI, gwcli automatically creates bookmarks for hosts and gateways. This allows you to switch to those sub-trees in the UI by simply using '\fBgoto hosts\fR'. The 'goto' command will also work for any other bookmarks you create.
 .PP
 .SH FILES
 .TP
 \fB~/gwcli.log\fR
-log file maintained by gwcli, recording all changes made via the shell interface.
+log file maintained by gwcli, recording all changes made via the shell interface in a timestamped format.
+.TP
+\fB~/.gwcli/history.txt
+log containing a record of all commands executed within the gwcli shell on this system.
+
 .SH AUTHOR
 Written by Paul Cuzner (pcuzner@redhat.com)
 .SH REPORTING BUGS
