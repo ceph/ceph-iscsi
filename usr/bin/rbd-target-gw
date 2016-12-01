@@ -13,6 +13,7 @@ import os
 import threading
 import ssl
 from OpenSSL import SSL
+from rpm import labelCompare
 
 import ceph_iscsi_config.settings as settings
 
@@ -22,7 +23,8 @@ from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.lio import LIO, Gateway
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
-                                     gen_file_hash)
+                                     gen_file_hash, valid_rpm,
+                                     ConfFile)
 
 from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError, normalize_wwn
@@ -97,6 +99,14 @@ class APISysInfo(Resource):
 
             local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.conf')
             return make_response(jsonify(data=local_hash), 200)
+
+        elif query_type == 'checkversions':
+
+            config_errors = pre_reqs_errors()
+            if config_errors:
+                return make_response(jsonify(data=config_errors), 500)
+            else:
+                return make_response(jsonify(data='checks passed'), 200)
 
         else:
             # Request Unknown
@@ -512,6 +522,67 @@ class APIClient(APIClientHandler):
         else:
             abort(405,
                   "Invalid Request - client does not exist")
+
+
+def pre_reqs_errors():
+    """
+    function to check pre-req rpms are installed and at the relevant versions
+    and also check that multipath.conf and lvm.conf have the required
+    changes applied
+    :return: list of configuration errors detected
+    """
+
+    required_rpms = [
+        {"name": "device-mapper-multipath",
+         "version": "0.4.9",
+         "release": "99.el7"},
+        {"name": "python-rtslib",
+         "version": "2.1.fb57",
+         "release": "5.el7"}
+    ]
+
+    k_vers = '3.10.0'
+    k_rel = '503.el7'
+
+    errors_found = []
+    # first check rpm versions are OK
+    for rpm in required_rpms:
+        if not valid_rpm(rpm):
+            logger.error("RPM check for {} failed")
+            errors_found.append("{} rpm must be installed at >= "
+                                "{}-{}".format(rpm['name'],
+                                              rpm['version'],
+                                              rpm['release']))
+
+
+    # check the running kernel is OK (required kernel has patches to rbd.ko)
+    os_info = os.uname()
+    this_arch = os_info[-1]
+    this_kernel = os_info[2].replace(".{}".format(this_arch), '')
+    this_ver, this_rel = this_kernel.split('-')
+
+    # use labelCompare from the rpm module to handle the comparison
+    if labelCompare(('1', this_ver, this_rel), ('1', k_vers, k_rel)) < 0:
+        logger.error("Kernel version check failed")
+        errors_found.append("Kernel version too old - {}-{} "
+                            "or above needed".format(k_vers,
+                                                     k_rel))
+
+    # now check configuration files have the right settings in place
+    conf = ConfFile('/etc/multipath.conf')
+    if conf.defaults.skip_kpartx != "yes" or \
+          conf.defaults.user_friendly_names != 'no' or \
+          conf.defaults.find_multipaths != 'no':
+        logger.error("/etc/multipath.conf 'defaults' settings are incorrect")
+        errors_found.append('multipath.conf defaults section is incorrect')
+
+
+    conf = ConfFile('/etc/lvm/lvm.conf')
+    if conf.devices.global_filter != '[ "r|^/dev/mapper/[0-255]-.*|" ]':
+        logger.error("/etc/lvm/lvm.conf global_filter is missing/invalid")
+        errors_found.append('lvm.conf is missing global_filter settings')
+
+    return errors_found
 
 
 def ceph_rm_blacklist(blacklisted_ip):
