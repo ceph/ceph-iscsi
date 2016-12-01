@@ -325,13 +325,6 @@ class Target(UIGroup):
         self.gateway_group = GatewayGroup(self)
         self.client_group = Clients(self)
 
-
-
-
-
-
-
-
     def summary(self):
         return "Gateways: {}".format(len(self.gateway_group.children)), None
 
@@ -380,12 +373,13 @@ class GatewayGroup(UIGroup):
         gateway_name ... should resolve to the hostname of the gateway
         ip_address ..... is the IP v4 address of the interface the iscsi
                          portal should use
-        nosync ......... by default new gateway's are sync'd with the
-                         configuration within the cli. By specifying nosync
+        nosync ......... by default new gateways are sync'd with the
+                         existing configuration by cli. By specifying nosync
                          the sync step is bypassed - so the new gateway
                          will need to have it's rbd-target-gw daemon
                          restarted to apply the current configuration
         """
+
         # where possible, validation is done against the local ui tree elements
         # as opposed to multiple calls to the API - in order to to keep the UI
         # as responsive as possible
@@ -448,7 +442,7 @@ class GatewayGroup(UIGroup):
                    "code".format(gateway_name, api.response.status_code))
 
             self.logger.error(msg)
-            raise GatewayAPIError(msg)
+            return
 
         # compare the hash of the new gateways conf file with the local one
         local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.conf')
@@ -457,6 +451,16 @@ class GatewayGroup(UIGroup):
             self.logger.error("/etc/ceph/iscsi-gateway.conf on {} does "
                               "not match the local version. Correct and "
                               "retry".format(gateway_name))
+            return
+
+        api = APIRequest(gw_api + '/sysinfo/checkversions')
+        api.get()
+        if api.response.status_code !=200:
+            errors = api.response.json()['data']
+            self.logger.error("{} failed rpm/file validation "
+                              "checks".format(gateway_name))
+            for err_desc in errors:
+                self.logger.error("- {}".format(err_desc))
             return
 
         local_gw = this_host()
@@ -468,12 +472,13 @@ class GatewayGroup(UIGroup):
             first_gateway = False
 
         if gateway_name != local_gw and len(current_gateways) == 0:
-            # the first gateway defined must be the local machine. By doing this
-            # the initial create uses 127.0.0.1, and places it's portal IP in the
-            # gateway ip list. Once the gateway ip list is defined, the api server
-            # can resolve against the gateways - until the list is defined only a
-            # request from 127.0.0.1 is acceptable to the api
-            self.logger.error("The first gateway defined must be the local machine")
+            # the first gateway defined must be the local machine. By doing
+            # this the initial create uses 127.0.0.1, and places it's portal IP
+            # in the gateway ip list. Once the gateway ip list is defined, the
+            # api server can resolve against the gateways - until the list is
+            # defined only a request from 127.0.0.1 is acceptable to the api
+            self.logger.error("The first gateway defined must be the local "
+                              "machine")
             return
 
         if local_gw in current_gateways:
@@ -482,8 +487,8 @@ class GatewayGroup(UIGroup):
         config = self.parent.parent.parent._get_config()
         if not config:
             self.logger.error("Unable to refresh local config"
-                              " over API - sync aborted, restart"
-                              " rbd-target-gw on {} to sync".format(gateway_name))
+                              " over API - sync aborted, restart rbd-target-gw"
+                              " on {} to sync".format(gateway_name))
 
 
         current_disks = config['disks']
@@ -499,7 +504,8 @@ class GatewayGroup(UIGroup):
         for endpoint in gateway_ip_list:
             if first_gateway:
                 endpoint = '127.0.0.1'
-            self.logger.debug("processing endpoint {} for {}".format(endpoint, gateway_name))
+            self.logger.debug("processing endpoint {} for {}".format(endpoint,
+                                                                     gateway_name))
             api_endpoint = '{}://{}:{}/api'.format(self.http_mode,
                                                    endpoint,
                                                    settings.config.api_port)
@@ -538,9 +544,10 @@ class GatewayGroup(UIGroup):
                     api.put()
                     if api.response.status_code != 200:
                         msg = api.response.json()['message']
-                        self.logger.error("Failed to add {} to {} new tpg : {}".format(disk_key,
-                                                                                       endpoint,
-                                                                                       msg))
+                        self.logger.error("Failed to add {} to {} new "
+                                          "tpg : {}".format(disk_key,
+                                                            endpoint,
+                                                            msg))
                         raise GatewayAPIError(msg)
 
                     cnt += 1
@@ -548,8 +555,8 @@ class GatewayGroup(UIGroup):
                 if self.interactive:
                     print("")
 
-            # Adding a gateway introduces a new tpg - each tpg MUST have the luns
-            # defined so a RTPG call can be responded to correctly, so
+            # Adding a gateway introduces a new tpg - each tpg MUST have the
+            # luns defined so a RTPG call can be responded to correctly, so
             # we need to sync the disks to the new tpg's
 
             if len(current_disks.keys()) > 0:
