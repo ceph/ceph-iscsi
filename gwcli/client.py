@@ -34,6 +34,14 @@ class Clients(UIGroup):
         # of clients that have that rbd allocated.
         self.lun_map = {}
 
+        # record the shortcut
+        shortcut = self.shell.prefs['bookmarks'].get('hosts', None)
+        if not shortcut or shortcut is not self.path:
+            self.shell.prefs['bookmarks']['hosts'] = self.path
+            self.shell.prefs.save()
+            self.shell.log.debug("Bookmarked %s as %s."
+                                 % (self.path, 'hosts'))
+
     def load(self, client_info):
         for client_iqn, client_settings in client_info.iteritems():
             Client(self, client_iqn, client_settings)

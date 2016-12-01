@@ -82,7 +82,8 @@ class ISCSIRoot(UIRoot):
 
         else:
             # Unable to get the config, tell the user and exit the cli
-            self.logger.critical("Unable to access the configuration object : {}".format(self.error_msg))
+            self.logger.critical("Unable to access the configuration "
+                                 "object : {}".format(self.error_msg))
             raise GatewayError
 
 
@@ -106,7 +107,8 @@ class ISCSIRoot(UIRoot):
             return api.response.json()
         else:
             self.error = True
-            self.error_msg = "REST API failure, code : {}".format(api.response.status_code)
+            self.error_msg = "REST API failure, code : " \
+                             "{}".format(api.response.status_code)
             return {}
 
 
@@ -125,7 +127,9 @@ class ISCSIRoot(UIRoot):
         ansible_vars.append("# rbd device definitions")
         ansible_vars.append("rbd_devices:")
 
-        disk_template = "  - {{ pool: '{}', image: '{}', size: '{}', host: '{}', state: 'present' }}"
+        disk_template = ("  - {{ pool: '{}', image: '{}', size: '{}', "
+                         "host: '{}', state: 'present' }}")
+
         for disk in self.disks.children:
 
             ansible_vars.append(disk_template.format(disk.pool,
@@ -134,11 +138,14 @@ class ISCSIRoot(UIRoot):
                                                      this_gw))
         ansible_vars.append("# client connections")
         ansible_vars.append("client_connections:")
-        client_template = "  - {{ client: '{}', image_list: '{}', chap:'{}', status: 'present' }}"
+        client_template = ("  - {{ client: '{}', image_list: '{}', "
+                           "chap:'{}', status: 'present' }}")
+
         for client in sorted(config['clients'].keys()):
             client_metadata = config['clients'][client]
             lun_data = client_metadata['luns']
-            sorted_luns = [s[0] for s in sorted(lun_data.iteritems(), key=lambda (x, y): y['lun_id'])]
+            sorted_luns = [s[0] for s in sorted(lun_data.iteritems(),
+                                                key=lambda (x, y): y['lun_id'])]
             ansible_vars.append(client_template.format(client,
                                                        ','.join(sorted_luns),
                                                        client_metadata['auth']['chap']))
@@ -147,7 +154,8 @@ class ISCSIRoot(UIRoot):
 
     def export_copy(self, config):
 
-        fmtd_config = json.dumps(config, sort_keys=True, indent=4, separators=(',', ': '))
+        fmtd_config = json.dumps(config, sort_keys=True,
+                                 indent=4, separators=(',', ': '))
         print(fmtd_config)
 
 
@@ -201,14 +209,16 @@ class ISCSITarget(UIGroup):
         local_lio = root.RTSRoot()
         current_target_names = [tgt.wwn for tgt in local_lio.targets]
         if current_target_names:
-            self.logger.error("Local LIO instance already has LIO configured with a target - unable to continue")
+            self.logger.error("Local LIO instance already has LIO configured "
+                              "with a target - unable to continue")
             raise GatewayError
 
         # OK - this request is valid, lets make sure the iqn is also valid :P
         try:
             valid_iqn = normalize_wwn(['iqn'], target_iqn)
         except RTSLibError:
-            self.logger.error("IQN name '{}' is not valid for iSCSI".format(target_iqn))
+            self.logger.error("IQN name '{}' is not valid for "
+                              "iSCSI".format(target_iqn))
             return
 
 
@@ -227,7 +237,9 @@ class ISCSITarget(UIGroup):
             Target(target_iqn, self)
         else:
             self.logger.error("Failed to create the target on the local node")
-            raise GatewayAPIError("iSCSI target creation failed - {}".format(api.response.json()['message']))
+
+            raise GatewayAPIError("iSCSI target creation failed - "
+                                  "{}".format(api.response.json()['message']))
 
     def ui_command_clearconfig(self, confirm=None):
         """
@@ -298,6 +310,10 @@ class ISCSITarget(UIGroup):
 
         # gateways removed, so lets delete the objects from the UI tree
         self.reset()
+
+        # remove any bookmarks stored in the prefs.bin file
+        del self.shell.prefs['bookmarks']
+
         self.logger.info('ok')
 
     def refresh(self):
@@ -320,7 +336,6 @@ class Target(UIGroup):
     def __init__(self, target_iqn, parent):
         UIGroup.__init__(self, target_iqn, parent)
         self.logger = self.parent.logger
-        # self.gateways = [ gw for gw in gateway_group if isinstance(gateway_group[gw], dict)]
         self.target_iqn = target_iqn
         self.gateway_group = GatewayGroup(self)
         self.client_group = Clients(self)
@@ -350,14 +365,20 @@ class GatewayGroup(UIGroup):
 
         UIGroup.__init__(self, 'gateways', parent)
         self.logger = self.parent.logger
-        # gateway_list = [gw for gw in gateway_group if isinstance(gateway_group[gw], dict)]
-        # for gateway_name in gateway_list:
-        #     Gateway(self, gateway_name, gateway_group[gateway_name])
 
+        # record the shortcut
+        shortcut = self.shell.prefs['bookmarks'].get('gateways', None)
+        if not shortcut or shortcut is not self.path:
+
+            self.shell.prefs['bookmarks']['gateways'] = self.path
+            self.shell.prefs.save()
+            self.shell.log.debug("Bookmarked %s as %s."
+                                 % (self.path, 'gateways'))
 
     def load(self, gateway_group):
         # define the host entries from the gateway_group dict
-        gateway_list = [gw for gw in gateway_group if isinstance(gateway_group[gw], dict)]
+        gateway_list = [gw for gw in gateway_group
+                        if isinstance(gateway_group[gw], dict)]
         for gateway_name in gateway_list:
             Gateway(self, gateway_name, gateway_group[gateway_name])
 
@@ -423,8 +444,10 @@ class GatewayGroup(UIGroup):
             self.logger.error("ipv4_addresses query to {} failed - check"
                               "rbd-target-gw log, is the API server "
                               "running?".format(gateway_name))
-            raise GatewayAPIError("API call to {}, returned status {}".format(gateway_name,
-                                                                              api.response.status_code))
+
+            raise GatewayAPIError("API call to {}, returned status "
+                                  "{}".format(gateway_name,
+                                              api.response.status_code))
 
         target_ips = api.response.json()['data']
         if ip_address not in target_ips:
@@ -504,8 +527,11 @@ class GatewayGroup(UIGroup):
         for endpoint in gateway_ip_list:
             if first_gateway:
                 endpoint = '127.0.0.1'
-            self.logger.debug("processing endpoint {} for {}".format(endpoint,
-                                                                     gateway_name))
+
+            self.logger.debug("processing endpoint {} for "
+                              "{}".format(endpoint,
+                                          gateway_name))
+
             api_endpoint = '{}://{}:{}/api'.format(self.http_mode,
                                                    endpoint,
                                                    settings.config.api_port)
@@ -520,8 +546,11 @@ class GatewayGroup(UIGroup):
             if api.response.status_code != 200:
                 # GW creation failed
                 msg = api.response.json()['message']
-                self.logger.error("Failed to create gateway {} - {}".format(gateway_name,
-                                                                            msg))
+
+                self.logger.error("Failed to create gateway {} - "
+                                  "{}".format(gateway_name,
+                                              msg))
+
                 raise GatewayAPIError(msg)
 
             # for the new gateway, when sync is selected we need to run the
@@ -599,8 +628,9 @@ class GatewayGroup(UIGroup):
                         api.put()
                         if api.response.status_code != 200:
                             msg = api.response.json()['message']
-                            self.logger.error("Problem adding client {} - {}".format(client_iqn,
-                                                                                     api.response.json()['message']))
+                            self.logger.error("Problem adding client {} - "
+                                              "{}".format(client_iqn,
+                                                          api.response.json()['message']))
                             raise GatewayAPIError(msg)
                         cnt += 1
 
