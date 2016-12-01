@@ -4,10 +4,22 @@ __author__ = 'pcuzner@redhat.com'
 from configshell_fb import ConfigNode
 
 
-class UIGroup(ConfigNode):
+class UICommon(ConfigNode):
 
     def __init__(self, name, parent=None, shell=None):
         ConfigNode.__init__(self, name, parent, shell)
+
+    def ui_command_goto(self, shortcut='/'):
+        if shortcut in self.shell.prefs['bookmarks']:
+            return self.ui_command_cd(self.shell.prefs['bookmarks'][shortcut])
+        else:
+            pass
+
+
+class UIGroup(UICommon):
+
+    def __init__(self, name, parent=None, shell=None):
+        UICommon.__init__(self, name, parent, shell)
         self.http_mode = self.parent.http_mode
 
     def reset(self):
@@ -59,7 +71,7 @@ class UINode(UIGroup):
 
 
 
-class UIRoot(ConfigNode):
+class UIRoot(UICommon):
     """
     The gwcli hierarchy root node.
     """
