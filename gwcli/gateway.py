@@ -139,7 +139,7 @@ class ISCSIRoot(UIRoot):
         ansible_vars.append("# client connections")
         ansible_vars.append("client_connections:")
         client_template = ("  - {{ client: '{}', image_list: '{}', "
-                           "chap:'{}', status: 'present' }}")
+                           "chap: '{}', status: 'present' }}")
 
         for client in sorted(config['clients'].keys()):
             client_metadata = config['clients'][client]
