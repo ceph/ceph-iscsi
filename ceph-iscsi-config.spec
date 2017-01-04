@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        1.5
+Version:        2.0
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -14,6 +14,8 @@ Requires:  python-rbd
 Requires:  python-netaddr
 Requires:  python-netifaces
 Requires:  python-rtslib
+Requires:  python2-flask-restful
+Requires:  python-flask
 
 BuildRequires:  python-devel
 BuildRequires:  python-setuptools
@@ -50,6 +52,11 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Fri Dec 02 2016 Paul Cuzner <pcuzner@redhat.com> - 2.0-1
+- rbd-target-gw now includes API server (based on flask)
+- updated rpm requirements to include flask-restful
+- daemon now watches the config object for changes, and reloads (for API)
+
 * Fri Nov 04 2016 Paul Cuzner <pcuzner@redhat.com> - 1.5-1
 - fix - catch config errors at rbd-target-gw startup
 - config.lun - trap unwanted rbd map stderr messages
