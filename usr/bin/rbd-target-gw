@@ -938,7 +938,9 @@ class APIServer(threading.Thread):
             context.use_certificate_file('/etc/ceph/iscsi-gateway.crt')
 
             # context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-            # context.load_cert_chain('/etc/ceph/iscsi-gateway.crt', '/etc/ceph/iscsi-gateway.key')
+            # context.load_cert_chain('/etc/ceph/iscsi-gateway.crt',
+            # '/etc/ceph/iscsi-gateway.key')
+            
         else:
             context = None
 
