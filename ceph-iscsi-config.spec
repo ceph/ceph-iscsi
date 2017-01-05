@@ -9,13 +9,11 @@ Source0:        https://github.com/pcuzner/ceph-iscsi-config/archive/%{version}/
 
 BuildArch:  noarch
 
-Requires:  python-rados
-Requires:  python-rbd
-Requires:  python-netaddr
-Requires:  python-netifaces
-Requires:  python-rtslib
-Requires:  python2-flask-restful
-Requires:  python-flask
+Requires:  python-rados >= 10.2.2
+Requires:  python-rbd >= 10.2.2
+Requires:  python-netaddr >= 0.7.5
+Requires:  python-netifaces >= 0.10.4
+Requires:  python-rtslib >= 2.1
 
 BuildRequires:  python-devel
 BuildRequires:  python-setuptools
@@ -23,9 +21,14 @@ BuildRequires:  systemd
 
 %description
 Python package providing the modules used to handle the configuration of an
-iSCSI gateway, backed by ceph/kRBD. The modules are consumed by custom Ansible
-modules and may also be used independently to manage the configuration once the
-environment is installed.
+iSCSI gateway, backed by ceph/RBD. The rpm installs configuration management
+logic (ceph_iscsi_config modules) and an rbd-target-gw systemd service.
+
+The configuration management modules may be are consumed by custom Ansible
+playbooks, and API server available from a separate rpm.
+
+The rbd-target-gw service is responsible for startup and shutdown actions,
+replacing the 'target' service used in standalone LIO implementations.
 
 %prep
 %setup -q
@@ -34,11 +37,10 @@ environment is installed.
 %{__python2} setup.py build
 
 %install
-%{__python2} setup.py install -O1 --skip-build --root %{buildroot}
+%{__python2} setup.py install -O1 --skip-build --root %{buildroot}  --install-scripts %{_bindir}
 mkdir -p %{buildroot}%{_unitdir}
-mkdir -p %{buildroot}/usr/bin
 install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
-install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
+
 
 %post
 /bin/systemctl --system daemon-reload &> /dev/null || :
@@ -52,9 +54,7 @@ install -m 0755 usr/bin/rbd-target-gw %{buildroot}/usr/bin
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
-* Fri Dec 02 2016 Paul Cuzner <pcuzner@redhat.com> - 2.0-1
-- rbd-target-gw now includes API server (based on flask)
-- updated rpm requirements to include flask-restful
+* Thu Jan 05 2017 Paul Cuzner <pcuzner@redhat.com> - 2.0-1
 - daemon now watches the config object for changes, and reloads (for API)
 
 * Fri Nov 04 2016 Paul Cuzner <pcuzner@redhat.com> - 1.5-1
