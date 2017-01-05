@@ -16,10 +16,10 @@ The gwcli shell is similar to the targetcli interface, and is also based on 'con
 
 Invoke gwcli as root to enter the interactive shell, or supply a command to execute without entering the shell. Within the shell, us \fBls\fR to list nodes beneath the current path. Moving around the tree is done using the \fBcd\fR command, or by simply entering the 'path' of the new location/node directly. Use \fBhelp <cmd>\fR for specific help information. The shell provides tab completion for commands and command arguments.
 .PP
-Configuration state is persisted within a rados object stored in the 'rbd' pool. The CLI implements changes across all gateways, and persists any changes to the configuration object once the change to the underlying LIO subsystem is complete. Although 'targetcli' is available, it can only really provide a view of the local LIO configuration.
+Configuration state is persisted within a rados object stored in the 'rbd' pool. gwcli orchestrates changes across all iscsi gateways via the rbd-target-api service running on each gateway. Once the change to the local LIO subsystem is complete, the change is committed to the rados configuration object. Although 'targetcli' is available, it can only really provide a view of the local LIO configuration.
 
 .SH QUICKSTART
-gwcli interacts with an API service provided by each iSCSI gateway's rbd-target-gw daemon. This API server is off by default, so in order to use 'gwcli', you'll need to update '/etc/ceph/iscsi-gateway.conf' with the following;
+gwcli interacts with an API service provided by each iSCSI gateway's rbd-target-api daemon. The API service is installed with the cli, but in order to use 'gwcli', you'll need to update '/etc/ceph/iscsi-gateway.conf' with the following;
 .PP
 .RS 3
 \fBapi_enabled = true\fR
@@ -39,9 +39,9 @@ Additional overrides may be provided to change the way the API server and CLI to
 .RE
 .PD 1
 .PP
-By default the API service is not running with TLS, so for a more secure environment ensure iscsi-gateway.conf has "api_secure = true" defined. When using secure mode you will need to create the appropriate certificate and private key, and place them in /etc/ceph as 'iscsi-gateway.crt' and 'iscsi-gateway.key' on each gateway node.
+By default the API service is not running with TLS, so for a more secure environment ensure iscsi-gateway.conf has "api_secure = true" defined. When using secure mode you will need to create the appropriate certificate and private key files, and place them in /etc/ceph as 'iscsi-gateway.crt' and 'iscsi-gateway.key' on \fBeach\fR gateway node.
 .PP
-Once these files are inplace across the nodes, stop and start the rbd-target-gw service. Check that the API service is enabled and in the correct mode by looking at the output of 'systemctl status rbd-target-gw'. You should see a message similar to
+Once these files are inplace across the nodes, the rbd-target-api service can be started. Check that the API service is enabled and in the correct mode by looking at the output of 'systemctl status rbd-target-api'. You should see a message similar to
 .PP
 .RS 3
 \fB* Running on https://0.0.0.0:5001/\fR.
