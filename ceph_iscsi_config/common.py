@@ -50,7 +50,7 @@ class Config(object):
                     "disks": {},
                     "gateways": {},
                     "clients": {},
-                    "version": 1,
+                    "version": 2,
                     "epoch": 0,
                     "created": '',
                     "updated": ''
