@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 
-__author__ = 'pcuzner@redhat.com'
-
 import os
 import socket
 import json
+
+import rados
+import rbd
 
 from gwcli.node import UIGroup, UINode
 
@@ -20,6 +21,9 @@ import ceph_iscsi_config.settings as settings
 
 # FIXME - this ignores the warning issued when verify=False is used
 from requests.packages import urllib3
+
+__author__ = 'pcuzner@redhat.com'
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
@@ -282,7 +286,7 @@ class Disks(UIGroup):
 class Disk(UINode):
 
     display_attributes = ["image", "pool", "wwn", "size_h", "size",
-                          "features", "owner", "dm_device"]
+                          "features", "owner"]
 
     def __init__(self, parent, image_id, image_config):
         """
@@ -300,6 +304,7 @@ class Disk(UINode):
         self.logger = self.parent.logger
         self.size = 0
         self.size_h = ''
+        self.features = 0
 
         disk_map = self.parent.disk_info
         if image_id not in disk_map:
@@ -310,16 +315,38 @@ class Disk(UINode):
             disk_map[image_id][k] = v
             self.__setattr__(k, v)
 
-        # Size/features are not stored in the config, since it can be changed by a number
-        # of different means, so we get them dynamically on the CLI host
-        self.get_meta_data()
+        # Size/features are not stored in the config, since it can be changed
+        # outside of this tool-chain, so we get them dynamically
+        self.get_meta_data_tcmu()
 
     def summary(self):
-        msg = [self.dm_device, "({})".format(self.size_h)]
+        msg = [self.image, "({})".format(self.size_h)]
 
         return " ".join(msg), True
 
-    def get_meta_data(self):
+    def get_meta_data_tcmu(self):
+        """
+        query the rbd to get the features and size of the rbd
+        :return:
+        """
+        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+            with cluster.open_ioctx(self.pool) as ioctx:
+                with rbd.Image(ioctx, self.image) as rbd_image:
+                    self.size = rbd_image.size()
+                    self.size_h = human_size(self.size)
+                    self.features = rbd_image.features()
+
+        # update the parent's disk info map
+        disk_map = self.parent.disk_info
+
+        disk_map[self.image_id]['size'] = self.size
+        disk_map[self.image_id]['size_h'] = self.size_h
+
+    def get_meta_data_krbd(self):
+        """
+        KRBD based method to get size and rbd features information
+        :return:
+        """
         # image_path is a symlink to the actual /dev/rbdX file
         image_path = "/dev/rbd/{}/{}".format(self.pool, self.rbd_image)
         dev_id = os.path.realpath(image_path)[8:]
@@ -333,7 +360,7 @@ class Disk(UINode):
             # back from the API is out of step with the physical configuration
             # this can happen after a purge_gateways ansible playbook run if
             # the gateways do not have there rbd-target-gw daemons reloaded
-            error_msg = "The API has returned disks that are not on this server...reload rbd-target-gw?"
+            error_msg = "The API has returned disks that are not on this server...reload rbd-target-api?"
             self.logger.critical(error_msg)
             raise GatewayError(error_msg)
         else:
@@ -395,7 +422,7 @@ class Disk(UINode):
         if api.response.status_code == 200:
             # rbd resize request successful, so update the local information
             self.logger.debug("- LUN resize complete")
-            self.get_meta_data()
+            self.get_meta_data_tcmu()
 
             self.logger.debug("Processing other gateways")
             for gw in other_gateways:
