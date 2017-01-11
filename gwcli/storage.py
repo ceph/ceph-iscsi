@@ -324,6 +324,28 @@ class Disk(UINode):
 
         return " ".join(msg), True
 
+    def _get_features(self):
+        """
+        return a human readable list of features for this rbd
+        :return: (list) of feature names from the feature code
+        """
+        rbd_features = {getattr(rbd, f): f for f in rbd.__dict__ if
+                        'RBD_FEATURE_' in f}
+        feature_idx = sorted(rbd_features)
+
+        disk_features = []
+
+        b_num = bin(self.features).replace('0b', '')
+        ptr = len(b_num) - 1
+        key_ptr = 0
+        while ptr >= 0:
+            if b_num[ptr] == '1':
+                disk_features.append(rbd_features[feature_idx[key_ptr]])
+            key_ptr += 1
+            ptr -= 1
+
+        return disk_features
+
     def get_meta_data_tcmu(self):
         """
         query the rbd to get the features and size of the rbd
@@ -335,6 +357,7 @@ class Disk(UINode):
                     self.size = rbd_image.size()
                     self.size_h = human_size(self.size)
                     self.features = rbd_image.features()
+                    self.feature_list = self._get_features()
 
         # update the parent's disk info map
         disk_map = self.parent.disk_info
