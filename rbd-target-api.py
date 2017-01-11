@@ -5,38 +5,37 @@ import os
 import signal
 import logging
 import logging.handlers
-from OpenSSL import SSL
+import ssl
 import threading
 import time
+import inspect
+
+from functools import wraps
 from rpm import labelCompare
+import rados
+
+from flask import Flask, jsonify, make_response, request, abort
+from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
-# from ceph_iscsi_config.lio import LIO, Gateway
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
                                      gen_file_hash, valid_rpm,
                                      ConfFile)
 
-# from rtslib_fb import root
-from rtslib_fb.utils import RTSLibError, normalize_wwn
+__author__ = "pcuzner@redhat.com"
 
-from functools import wraps
-
-# requires - python-flask-restful
-# flask is in RHEL7 repos
-from flask import Flask, jsonify, make_response, request, abort
-
-# flask_restful is NOT! Install with pip from EPEL
-# (i.e. yum install python-pip && pip install flask-restful)
-from flask_restful import Resource, Api
-
-import rados
+app = Flask(__name__)
 
 
 def requires_basic_auth(f):
+    """
+    wrapper function to check authentication credentials are valid
+    """
+
     @wraps(f)
     def decorated(*args, **kwargs):
 
@@ -55,6 +54,11 @@ def requires_basic_auth(f):
 
 
 def requires_restricted_auth(f):
+    """
+    Wrapper function which checks both auth credentials and source IP
+    address to validate the request
+    """
+
     @wraps(f)
     def decorated(*args, **kwargs):
 
@@ -82,38 +86,70 @@ def requires_restricted_auth(f):
     return decorated
 
 
-class APISysInfo(Resource):
-
-    @requires_basic_auth
-    def get(self, query_type):
-
-        if query_type == 'ipv4_addresses':
-
-            return make_response(jsonify(data=ipv4_addresses()), 200)
-
-        elif query_type == 'checkconf':
-
-            local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.conf')
-            return make_response(jsonify(data=local_hash), 200)
-
-        elif query_type == 'checkversions':
-
-            config_errors = pre_reqs_errors()
-            if config_errors:
-                return make_response(jsonify(data=config_errors), 500)
-            else:
-                return make_response(jsonify(data='checks passed'), 200)
-
+@app.route('/api')
+def get_api_info():
+    """
+    Display the available API endpoints
+    :return:
+    """
+    links = []
+    for rule in app.url_map.iter_rules():
+        url = rule.rule
+        if rule.endpoint == 'static':
+            continue
         else:
-            # Request Unknown
-            abort(404,
-                  "Unknown query")
+            func_doc = inspect.getdoc(globals()[rule.endpoint])
+            if func_doc:
+                doc = func_doc.split('\n')[0]
+            else:
+                doc = ''
+        links.append((url, doc))
+
+    return make_response(jsonify(api=links), 200)
 
 
-class APITarget(Resource):
+@app.route('/api/sysinfo/<query_type>')
+@requires_basic_auth
+def sys_info(query_type=None):
+    """
+    Provide system information based on the query_type
+    """
 
-    @requires_restricted_auth
-    def put(self, target_iqn):
+    if query_type == 'ipv4_addresses':
+
+        return make_response(jsonify(data=ipv4_addresses()), 200)
+
+    elif query_type == 'checkconf':
+
+        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.conf')
+        return make_response(jsonify(data=local_hash), 200)
+
+    elif query_type == 'checkversions':
+
+        config_errors = pre_reqs_errors()
+        if config_errors:
+            return make_response(jsonify(data=config_errors), 500)
+        else:
+            return make_response(jsonify(data='checks passed'), 200)
+
+    else:
+        # Request Unknown
+        abort(404,
+              "Unknown query")
+
+
+@app.route('/api/target/<target_iqn>', methods=['PUT'])
+@requires_restricted_auth
+def target(target_iqn=None):
+    """
+    Handle the definition of the iscsi target name
+
+    The target is added to the configuration object, seeding the configuration
+    for ALL gateways
+    :param target_iqn: IQN of the target each gateway will use
+    :return: None
+    """
+    if request.method == 'PUT':
 
         gateway_ip_list = []
 
@@ -135,25 +171,52 @@ class APITarget(Resource):
 
         return make_response(jsonify(
                              {"message": "Target defined successfully"}), 200)
+        pass
+    else:
+        # return unrecognised request
+        abort(405)
 
 
-class APIGatewayConfig(Resource):
+@app.route('/api/config')
+@requires_restricted_auth
+def get_config():
+    """
+    Return the complete config object to the caller - must be authenticated
 
-    @requires_restricted_auth
-    def get(self):
-
+    Contents will include any defined CHAP credentials
+    :return:
+    """
+    if request.method == 'GET':
         return make_response(jsonify(config.config), 200)
+    else:
+        abort(403)
 
 
-class APIGateways(Resource):
-    @requires_restricted_auth
-    def get(self):
+@app.route('/api/gateways')
+@requires_restricted_auth
+def get_gateways():
+    """
+    Return the gateway subsection of the config object to the caller
+    """
+    if request.method == 'GET':
         return make_response(jsonify(config.config['gateways']), 200)
+    else:
+        abort(403)
 
 
-class APIGateway(Resource):
-    @requires_restricted_auth
-    def get(self, gateway_name):
+@app.route('/api/gateway/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
+@requires_restricted_auth
+def manage_gateway(gateway_name=None):
+    """
+    Manage the gateway definition lifecycle
+
+    Gateways maye be added(PUT), queried (GET) or deleted (DELETE) from
+    the configuration
+    :param gateway_name: (str) gateway name, normally the DNS name
+    :return:
+    """
+
+    if request.method == 'GET':
 
         if gateway_name in config.config['gateways']:
 
@@ -162,10 +225,7 @@ class APIGateway(Resource):
         else:
             abort(404,
                   "this isn't the droid you're looking for")
-
-    @requires_restricted_auth
-    def put(self, gateway_name):
-
+    elif request.method == 'PUT':
         # the parameters need to be cast to str for compatibility
         # with the comparison logic in common.config.add_item
         gateway_ips = str(request.form['gateway_ip_list'])
@@ -205,10 +265,8 @@ class APIGateway(Resource):
 
         return make_response(jsonify(
                              {"message": "Gateway defined/mapped"}), 200)
-
-    @requires_restricted_auth
-    def delete(self, gateway_name):
-
+    else:
+        # DELETE gateway request
         gateway = GWTarget(logger,
                            config.config['gateways']['iqn'],
                            '')
@@ -228,77 +286,43 @@ class APIGateway(Resource):
                 {"message": "Gateway removed successfully"}), 200)
 
 
-class APIDisks(Resource):
-    @requires_restricted_auth
-    def get(self):
-        # if valid_request(request.remote_addr):
-        disk_names = config.config['disks'].keys()
-        response = {"disks": disk_names}
+@app.route('/api/disks')
+@requires_restricted_auth
+def get_disks():
+    """
+    Show the rbd disks defined to the gateways
+    """
 
-        return make_response(jsonify(response), 200)
+    disk_names = config.config['disks'].keys()
+    response = {"disks": disk_names}
+
+    return make_response(jsonify(response), 200)
 
 
+@app.route('/api/disk/<image_id>', methods=['GET', 'PUT', 'DELETE'])
+@requires_restricted_auth
+def manage_disk(image_id):
+    """
+    Manage a disk definition across the gateways
 
-class APIDisk(Resource):
+    Disks can be created and added to each gateway, or deleted through this
+    call
+    :param image_id: (str) of the form pool.image_name
+    :return:
+    """
 
-    @requires_restricted_auth
-    def delete(self, image_id):
-
-        # let's assume that the request has been validated by the caller
-
-        # if valid_request(request.remote_addr):
-        purge_host = request.form['purge_host']
-
-        pool, image = image_id.split('.', 1)
-
-        lun = LUN(logger,
-                  pool,
-                  image,
-                  '0G',
-                  purge_host)
-
-        if lun.error:
-            # problem defining the LUN instance
-            abort(500,
-                  "Error initialising the LUN ({})".format(lun.error_msg))
-
-        lun.remove_lun()
-        if lun.error:
-            if 'allocated to' in lun.error_msg:
-                # attempted to remove rbd that is still allocated to a client
-                status_code = 400
-            else:
-                status_code = 500
-
-            abort(status_code,
-                  "Error removing the LUN ({})".format(lun.error_msg))
-
-        config.refresh()
-
-        return make_response(jsonify(
-                             {"message": "LUN removed".format(lun.error_msg)}), 200)
-
-    @requires_restricted_auth
-    def get(self, image_id):
-
+    if request.method == 'GET':
 
         if image_id in config.config['disks']:
-            return make_response(jsonify(config.config["disks"][image_id]), 200)
+            return make_response(jsonify(config.config["disks"][image_id]),
+                                 200)
         else:
             abort(404,
-                  "rbd image {} not found in the configuration".format(image_id))
+                  "rbd image {} not found".format(image_id))
 
-
-    @requires_restricted_auth
-    def put(self, image_id):
+    elif request.method == 'PUT':
         # A put is for either a create or a resize
         # put('http://127.0.0.1:5000/api/disk/rbd.ansible3',data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
-
-        # FIXME - MUST have a gateway before luns can be created
-        # the gateway must exist, since the workflow for mapping a lun will
-        # map the lun to TPG's and perform alua setup
-
-        # if valid_request(request.remote_addr):
 
         rqst_fields = set(request.form.keys())
         if rqst_fields.issuperset(("pool", "size", "owner", "mode")):
@@ -315,7 +339,7 @@ class APIDisk(Resource):
 
             lun.allocate()
             if lun.error:
-                logger.error("LUN allocation problem - {}".format(lun.error_msg))
+                logger.error("LUN alloc problem - {}".format(lun.error_msg))
                 abort(418,
                       lun.error_msg)
 
@@ -351,114 +375,157 @@ class APIDisk(Resource):
             abort(400,
                   "Invalid Request - need to provide pool, size and owner")
 
+    else:
+        # DELETE request
+        # let's assume that the request has been validated by the caller
 
-class APIClients(Resource):
-    @requires_restricted_auth
-    def get(self):
         # if valid_request(request.remote_addr):
-        client_list = config.config['clients'].keys()
-        response = {"clients": client_list}
+        purge_host = request.form['purge_host']
 
-        return make_response(jsonify(response), 200)
+        pool, image = image_id.split('.', 1)
+
+        lun = LUN(logger,
+                  pool,
+                  image,
+                  '0G',
+                  purge_host)
+
+        if lun.error:
+            # problem defining the LUN instance
+            abort(500,
+                  "Error initialising the LUN ({})".format(lun.error_msg))
+
+        lun.remove_lun()
+        if lun.error:
+            if 'allocated to' in lun.error_msg:
+                # attempted to remove rbd that is still allocated to a client
+                status_code = 400
+            else:
+                status_code = 500
+
+            abort(status_code,
+                  "Error removing the LUN ({})".format(lun.error_msg))
+
+        config.refresh()
+
+        return make_response(jsonify(
+                             {"message": "LUN removed".format(lun.error_msg)}), 200)
 
 
-class APIClientHandler(Resource):
-    def update(self, client_iqn, images, chap, committing_host):
+@app.route('/api/clients')
+@requires_restricted_auth
+def get_clients():
+    """
+    List clients defined to the configuration.
 
-        # convert the comma separated image_list string into a list for GWClient
-        if images:
-            image_list = str(images).split(',')
-        else:
-            image_list = []
+    This information will include auth information, hence the
+    restricted_auth wrapper
+    :return:
+    """
 
-        client = GWClient(logger, client_iqn, image_list, chap)
+    client_list = config.config['clients'].keys()
+    response = {"clients": client_list}
 
-        if client.error:
-            return 500, "GWClient create failed : {}".format(client.error_msg)
-
-        client.manage('present', committer=committing_host)
-        if client.error:
-            return 500, "Client update failed: {}".format(client.error_msg)
-        else:
-            config.refresh()
-            return 200, "Client configured successfully"
+    return make_response(jsonify(response), 200)
 
 
-class APIClientAuth(APIClientHandler):
-    @requires_restricted_auth
-    def get(self, client_iqn):
+def _update_client(**kwargs):
+    """
+    Handler function to apply the changes to a specific client definition
+    :param args:
+    :return:
+    """
+    # convert the comma separated image_list string into a list for GWClient
+    if kwargs['images']:
+        image_list = str(kwargs['images']).split(',')
+    else:
+        image_list = []
 
+    client = GWClient(logger,
+                      kwargs['client_iqn'],
+                      image_list,
+                      kwargs['chap'])
+
+    if client.error:
+        return 500, "GWClient create failed : {}".format(client.error_msg)
+
+    client.manage('present', committer=kwargs['committing_host'])
+    if client.error:
+        return 500, "Client update failed: {}".format(client.error_msg)
+    else:
+        config.refresh()
+        return 200, "Client configured successfully"
+
+
+@app.route('/api/clientauth/<client_iqn>', methods=['GET', 'PUT'])
+@requires_restricted_auth
+def manage_client_auth(client_iqn):
+    """
+    Manage client authentication credentials
+
+    :param client_iqn: IQN of the client
+    :return:
+    """
+
+    if request.method == 'GET':
         abort(403)
-
-
-    @requires_restricted_auth
-    def put(self, client_iqn):
-        """
-        Handle auth request
-        """
-
+    else:
+        # PUT request to define/change authentication
         image_list = request.form['image_list']
         chap = request.form['chap']
         committing_host = request.form['committing_host']
 
-        status_code, status_text = self.update(client_iqn,
-                                               image_list,
-                                               chap,
-                                               committing_host)
+        status_code, status_text = _update_client(client_iqn=client_iqn,
+                                                  images=image_list,
+                                                  chap=chap,
+                                                  committing_host=committing_host)
+
 
         return make_response(jsonify({"message": status_text}), status_code)
 
-    @requires_restricted_auth
-    def delete(self, client_iqn):
-        abort(405)
 
+@app.route('/api/clientlun/<client_iqn>', methods=['GET', 'PUT'])
+@requires_restricted_auth
+def manage_client_luns(client_iqn):
+    """
+    Manage the addition/removal of disks from a client
+    """
 
-class APIClientLUN(APIClientHandler):
+    if request.method == 'GET':
 
-    @requires_restricted_auth
-    def get(self, client_iqn):
-        """
-        return the LUNs allocated to this client, straight from the config
-        object
-        """
-
-        disk = request.form['disk']
         if client_iqn in config.config['clients']:
             lun_config = config.config['clients'][client_iqn]['luns']
 
             return make_response(jsonify({"message": lun_config}), 200)
         else:
-            abort(404, "client does not exist")
+            abort(404, "Client does not exist")
+    else:
+        # PUT request = new/updated disks for this client
 
-    @requires_restricted_auth
-    def put(self, client_iqn):
-        """
-        handle the addition or removal of a lun for a given client
-        the image_list provided is used by the GWClient code to determine the
-        action to take rather than any specific logic here
-        """
-
-        # convert the comma separated image_list string into a list for GWClient
         image_list = request.form['image_list']
 
         chap = request.form['chap']
         committing_host = request.form['committing_host']
 
-        status_code, status_text = self.update(client_iqn,
-                                               image_list,
-                                               chap,
-                                               committing_host)
+        status_code, status_text = _update_client(client_iqn=client_iqn,
+                                                  images=image_list,
+                                                  chap=chap,
+                                                  committing_host=committing_host)
 
         return make_response(jsonify({"message": status_text}), status_code)
 
 
-class APIClient(APIClientHandler):
-    '''
-    Handle the definition of a client to the local LIO instance
-    '''
+@app.route('/api/client/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
+@requires_restricted_auth
+def manage_client(client_iqn):
+    """
+    Manage a client definition to this node's LIO
 
-    @requires_restricted_auth
-    def get(self, client_iqn):
+    :param client_iqn: iscsi name for the client
+    :return:
+    """
+
+    if request.method == 'GET':
 
         if client_iqn in config.config['clients']:
             return make_response(jsonify(
@@ -466,14 +533,7 @@ class APIClient(APIClientHandler):
         else:
             abort(404,
                   "Client '{}' does not exist".format(client_iqn))
-
-    @requires_restricted_auth
-    def put(self, client_iqn):
-        """
-        The put request needs the client_iqn as a minimum to get
-        the client defined. However, image_list and chap can also
-        be provided to define the client fully in one pass
-        """
+    elif request.method == 'PUT':
 
         try:
             valid_iqn = normalize_wwn(['iqn'], client_iqn)
@@ -487,16 +547,15 @@ class APIClient(APIClientHandler):
 
         chap = request.form.get('chap', '')
 
-        status_code, status_text = self.update(client_iqn,
-                                               image_list,
-                                               chap,
-                                               committing_host)
+        status_code, status_text = _update_client(client_iqn=client_iqn,
+                                                  images=image_list,
+                                                  chap=chap,
+                                                  committing_host=committing_host)
 
         return make_response(jsonify({"message": status_text}), status_code)
 
-    @requires_restricted_auth
-    def delete(self, client_iqn):
-
+    else:
+        # DELETE request
         committing_host = request.form['committing_host']
 
         # Make sure the delete request is for a client we have defined
@@ -516,8 +575,8 @@ class APIClient(APIClientHandler):
                 return make_response(jsonify(
                                      {"message": "client deleted"}), 200)
         else:
-            abort(405,
-                  "Invalid Request - client does not exist")
+            abort(404,
+                  "Client does not exist")
 
 
 def pre_reqs_errors():
@@ -529,9 +588,9 @@ def pre_reqs_errors():
     """
 
     required_rpms = [
-        {"name": "device-mapper-multipath",
-         "version": "0.4.9",
-         "release": "99.el7"},
+        # {"name": "device-mapper-multipath",
+        #  "version": "0.4.9",
+        #  "release": "99.el7"},
         {"name": "python-rtslib",
          "version": "2.1.fb57",
          "release": "5.el7"}
@@ -564,19 +623,19 @@ def pre_reqs_errors():
                             "or above needed".format(k_vers,
                                                      k_rel))
 
-    # now check configuration files have the right settings in place
-    conf = ConfFile('/etc/multipath.conf')
-    if conf.defaults.skip_kpartx != "yes" or \
-          conf.defaults.user_friendly_names != 'no' or \
-          conf.defaults.find_multipaths != 'no':
-        logger.error("/etc/multipath.conf 'defaults' settings are incorrect")
-        errors_found.append('multipath.conf defaults section is incorrect')
-
-
-    conf = ConfFile('/etc/lvm/lvm.conf')
-    if conf.devices.global_filter != '[ "r|^/dev/mapper/[0-255]-.*|" ]':
-        logger.error("/etc/lvm/lvm.conf global_filter is missing/invalid")
-        errors_found.append('lvm.conf is missing global_filter settings')
+    # # now check configuration files have the right settings in place
+    # conf = ConfFile('/etc/multipath.conf')
+    # if conf.defaults.skip_kpartx != "yes" or \
+    #       conf.defaults.user_friendly_names != 'no' or \
+    #       conf.defaults.find_multipaths != 'no':
+    #     logger.error("/etc/multipath.conf 'defaults' settings are incorrect")
+    #     errors_found.append('multipath.conf defaults section is incorrect')
+    #
+    #
+    # conf = ConfFile('/etc/lvm/lvm.conf')
+    # if conf.devices.global_filter != '[ "r|^/dev/mapper/[0-255]-.*|" ]':
+    #     logger.error("/etc/lvm/lvm.conf global_filter is missing/invalid")
+    #     errors_found.append('lvm.conf is missing global_filter settings')
 
     return errors_found
 
@@ -639,21 +698,6 @@ def main():
     config_watcher = ConfigWatcher()
     config_watcher.start()
 
-    app = Flask(__name__)
-    api = Api(app)
-
-    api.add_resource(APIGatewayConfig, '/api/config')
-    api.add_resource(APIGateways, '/api/gateways')
-    api.add_resource(APIGateway, '/api/gateway/<gateway_name>')
-    api.add_resource(APIDisks, '/api/disks')
-    api.add_resource(APIDisk, '/api/disk/<image_id>')
-    api.add_resource(APIClients, '/api/clients')
-    api.add_resource(APIClient, '/api/client/<client_iqn>')
-    api.add_resource(APIClientAuth, '/api/clientauth/<client_iqn>')
-    api.add_resource(APIClientLUN, '/api/clientlun/<client_iqn>')
-    api.add_resource(APITarget, '/api/target/<target_iqn>')
-    api.add_resource(APISysInfo, '/api/sysinfo/<query_type>')
-
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.DEBUG)
 
@@ -663,16 +707,16 @@ def main():
 
     if settings.config.api_secure:
 
-        # FIXME - ideally this should be TLSv1_2 !
-        context = SSL.Context(SSL.TLSv1_METHOD)
+        # # FIXME - ideally this should be TLSv1_2 !
+        # context = SSL.Context(SSL.TLSv1_METHOD)
+        #
+        # # Use these self-signed crt and key files
+        # context.use_privatekey_file('/etc/ceph/iscsi-gateway.key')
+        # context.use_certificate_file('/etc/ceph/iscsi-gateway.crt')
 
-        # Use these self-signed crt and key files
-        context.use_privatekey_file('/etc/ceph/iscsi-gateway.key')
-        context.use_certificate_file('/etc/ceph/iscsi-gateway.crt')
-
-        # context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-        # context.load_cert_chain('/etc/ceph/iscsi-gateway.crt',
-        # '/etc/ceph/iscsi-gateway.key')
+        context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        context.load_cert_chain('/etc/ceph/iscsi-gateway.crt',
+                                '/etc/ceph/iscsi-gateway.key')
 
     else:
         context = None
@@ -690,11 +734,16 @@ def signal_stop(*args):
     sys.exit(0)
 
 
+def signal_reload(*args):
+    logger.info("Refreshing local copy of the Gateway configuration")
+    config.refresh()
+
+
 if __name__ == '__main__':
 
     # Setup signal handlers for interaction with systemd
     signal.signal(signal.SIGTERM, signal_stop)
-    # signal.signal(signal.SIGHUP, signal_reload)
+    signal.signal(signal.SIGHUP, signal_reload)
 
     # setup syslog handler to help diagnostics
     logger = logging.getLogger('rbd-target-api')
@@ -717,10 +766,11 @@ if __name__ == '__main__':
 
     settings.init()
 
-    # config is set in the outer scope, so it's easily accessible to the
-    # api classes
+    # config is set in the outer scope, so it's easily accessible to all
+    # api functions
     config = Config(logger)
     if config.error:
+        logger.error(config.error_msg)
         halt("Unable to open/read the configuration object")
     else:
         main()
