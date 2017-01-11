@@ -47,18 +47,20 @@ def get_other_gateways(gw_objects):
     :param gw_objects: set of objects to search
     :return: gateway names (list)
     """
+    other_gateways = []
 
     local_gw = this_host()
 
     gws_root = list(gw_objects)  # children returns a set, so need to
                                                   # cast to a list
-    gw_group = [obj for obj in gws_root[0].children if obj.name == 'gateways']
-    gw_list = list(gw_group[0].children)        # list of Gateway objects
-    other_gateways = []
-    for gw in gw_list:
-        if gw.name == local_gw:
-            continue
-        other_gateways.append(gw.name)
+    if len(gws_root) > 0:
+        gw_group = [obj for obj in gws_root[0].children if obj.name == 'gateways']
+        gw_list = list(gw_group[0].children)        # list of Gateway objects
+
+        for gw in gw_list:
+            if gw.name == local_gw:
+                continue
+            other_gateways.append(gw.name)
 
     return other_gateways
 
