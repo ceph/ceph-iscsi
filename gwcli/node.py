@@ -1,7 +1,9 @@
 #!/usr/bin/env python
-__author__ = 'pcuzner@redhat.com'
 
 from configshell_fb import ConfigNode
+from gwcli.utils import console_message
+
+__author__ = 'pcuzner@redhat.com'
 
 
 class UICommon(ConfigNode):
@@ -48,17 +50,18 @@ class UINode(UIGroup):
             if isinstance(attr_value, dict):
 
                 if attr_value:
-                    print attr_label
+                    console_message(attr_label)
                     max_dict_field = len(max(attr_value.keys(), key=len))
                     for dict_key in sorted(attr_value):
 
                         if isinstance(attr_value[dict_key], dict):
                             inner_dict = attr_value[dict_key]
                             display_value = ", ".join(["=".join([key, str(val)]) for key, val in inner_dict.items()])
-                            print "- {} .. {}".format(dict_key, display_value)
+                            console_message("- {} .. {}".format(dict_key,
+                                                                display_value))
                         else:
-                            print "- {} .. {}".format(dict_key,
-                                                      attr_value[dict_key])
+                            console_message("- {} .. {}".format(dict_key,
+                                                                attr_value[dict_key]))
 
                     continue
                 else:
@@ -67,7 +70,9 @@ class UINode(UIGroup):
             if isinstance(attr_value, list):
                 attr_value = [str(s) for s in attr_value]
 
-            print "{:<{}} .. {}".format(attr_label, max_field_size, attr_value)
+            console_message("{:<{}} .. {}".format(attr_label,
+                                                  max_field_size,
+                                                  attr_value))
 
 
 
@@ -77,7 +82,7 @@ class UIRoot(UICommon):
     """
 
     def __init__(self, shell, as_root=False):
-        ConfigNode.__init__(self, '/', shell=shell)
+        UICommon.__init__(self, '/', shell=shell)
         self.as_root = as_root
 
 
