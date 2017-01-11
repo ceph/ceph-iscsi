@@ -1,4 +1,4 @@
-__author__ = 'pcuzner@redhat.com'
+#!/usr/bin/env python
 
 import sys
 import json
@@ -25,7 +25,11 @@ from gwcli.ceph import Ceph
 # disabled - so this disable_warnings stops the user interface from being
 # bombed
 from requests.packages import urllib3
+
+__author__ = 'pcuzner@redhat.com'
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 class ISCSIRoot(UIRoot):
 
