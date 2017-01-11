@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-__author__ = 'pcuzner@redhat.com'
 
 # import ceph_iscsi_config.settings as settings
 import socket
@@ -8,6 +7,8 @@ import requests
 import sys
 
 import ceph_iscsi_config.settings as settings
+
+__author__ = 'pcuzner@redhat.com'
 
 class Colors(object):
 
@@ -108,9 +109,15 @@ class APIRequest(object):
     response = property(_get_response,
                         doc="get http response output")
 
+
 def progress_message(text, color='green'):
 
     sys.stdout.write("{}{}{}\r".format(Colors.map[color],
                                        text,
                                        '\x1b[0m'))
     sys.stdout.flush()
+
+def console_message(text, color='green'):
+    print("{}{}{}".format(Colors.map[color],
+                          text,
+                          '\x1b[0m'))
