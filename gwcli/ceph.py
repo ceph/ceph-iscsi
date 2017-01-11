@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 
-__author__ = 'pcuzner@redhat.com'
-
 from .node import UIGroup, UINode
 import json
 import rados
 from gwcli.utils import human_size
 import ceph_iscsi_config.settings as settings
+
+__author__ = 'pcuzner@redhat.com'
 
 
 class Ceph(UIGroup):

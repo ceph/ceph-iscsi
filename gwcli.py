@@ -3,8 +3,6 @@
 # prep for python 3
 from __future__ import print_function
 
-__author__ = 'pcuzner@redhat.com'
-
 # requires python2-requests/python3-requests
 
 import logging
@@ -17,6 +15,8 @@ from configshell_fb import ConfigShell, ExecutionError
 from gwcli.gateway import ISCSIRoot
 
 import ceph_iscsi_config.settings as settings
+
+__author__ = 'pcuzner@redhat.com'
 
 
 class GatewayCLI(ConfigShell):

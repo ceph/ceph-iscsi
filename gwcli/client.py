@@ -1,24 +1,24 @@
 #!/usr/bin/env python
 
-__author__ = 'pcuzner@redhat.com'
-
 import json
 import re
 
 from gwcli.node import UIGroup, UINode
 
 from gwcli.utils import (human_size, get_other_gateways,
-                    GatewayAPIError, GatewayLIOError,
-                    this_host, APIRequest)
+                         GatewayAPIError, GatewayLIOError,
+                         this_host, APIRequest)
 
 import ceph_iscsi_config.settings as settings
-
 
 import rtslib_fb.root as root
 from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 # FIXME - this ignores the warning issued when verify=False is used
 from requests.packages import urllib3
+
+__author__ = 'pcuzner@redhat.com'
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class Clients(UIGroup):
