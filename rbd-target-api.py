@@ -6,6 +6,7 @@ import signal
 import logging
 import logging.handlers
 import ssl
+import OpenSSL
 import threading
 import time
 import inspect
@@ -14,6 +15,7 @@ from functools import wraps
 from rpm import labelCompare
 import rados
 
+import werkzeug
 from flask import Flask, jsonify, make_response, request, abort
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 
@@ -692,6 +694,36 @@ class ConfigWatcher(threading.Thread):
                                                     obj_epoch))
                     config.refresh()
 
+def get_ssl_context():
+
+    # Use these self-signed crt and key files
+    cert_files = ['/etc/ceph/iscsi-gateway.crt',
+                  '/etc/ceph/iscsi-gateway.key']
+
+    if not all([os.path.exists(crt_file) for crt_file in cert_files]):
+        return None
+
+    ver, rel, mod = werkzeug.__version__.split('.')
+    if int(rel) > 9:
+        logger.info("API server using TLSv1.2")
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        context.load_cert_chain(cert_files[0],
+                                cert_files[1])
+
+    else:
+        logger.info("API server using TLSv1 (older version of werkzeug)")
+
+        context = OpenSSL.SSL.Context(OpenSSL.SSL.TLSv1_METHOD)
+        try:
+            context.use_certificate_file(cert_files[0])
+            context.use_privatekey_file(cert_files[1])
+        except OpenSSL.SSL.Error as err:
+            logger.critical("SSL Error : {}".format(err))
+            return None
+
+    return context
+
 
 def main():
 
@@ -707,16 +739,13 @@ def main():
 
     if settings.config.api_secure:
 
-        # # FIXME - ideally this should be TLSv1_2 !
-        # context = SSL.Context(SSL.TLSv1_METHOD)
-        #
-        # # Use these self-signed crt and key files
-        # context.use_privatekey_file('/etc/ceph/iscsi-gateway.key')
-        # context.use_certificate_file('/etc/ceph/iscsi-gateway.crt')
-
-        context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-        context.load_cert_chain('/etc/ceph/iscsi-gateway.crt',
-                                '/etc/ceph/iscsi-gateway.key')
+        context = get_ssl_context()
+        if context is None:
+            logger.critical(
+                "Secure API requested but the crt/key files "
+                "missing/incompatible?")
+            logger.critical("Unable to start")
+            sys.exit(16)
 
     else:
         context = None
