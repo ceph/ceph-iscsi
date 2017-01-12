@@ -68,7 +68,17 @@ class UINode(UIGroup):
                     attr_value = 'UNDEFINED'
 
             if isinstance(attr_value, list):
-                attr_value = [str(s) for s in attr_value]
+                item_1 = True
+                attr_string = ''
+                for item in attr_value:
+                    if item_1:
+                        attr_string = "{}\n".format(str(item))
+                        item_1 = False
+                    else:
+                        attr_string += "{}{}\n".format(" "*(max_field_size + 4),
+                                                       str(item))
+
+                attr_value = attr_string[:-1]
 
             console_message("{:<{}} .. {}".format(attr_label,
                                                   max_field_size,
