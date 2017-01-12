@@ -286,7 +286,7 @@ class Disks(UIGroup):
 class Disk(UINode):
 
     display_attributes = ["image", "pool", "wwn", "size_h", "size",
-                          "features", "owner"]
+                          "features", "feature_list", "owner"]
 
     def __init__(self, parent, image_id, image_config):
         """
@@ -305,6 +305,7 @@ class Disk(UINode):
         self.size = 0
         self.size_h = ''
         self.features = 0
+        self.feature_list = []
 
         disk_map = self.parent.disk_info
         if image_id not in disk_map:
