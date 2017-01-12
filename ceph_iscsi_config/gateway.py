@@ -1,20 +1,23 @@
 #!/usr/bin/env python
 
-__author__ = 'paul'
 import os
-import socket
+# import socket
+# from socket import gethostname
 
 from rtslib_fb.target import Target, TPG, NetworkPortal, LUN
 from rtslib_fb.fabric import ISCSIFabricModule
 from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError
+from rtslib_fb.alua import ALUATargetPortGroup
 
-from ceph_iscsi_config.alua import ALUATargetPortGroup
-from ceph_iscsi_config.utils import ipv4_addresses, get_pool_name, this_host
+# from ceph_iscsi_config.alua import ALUATargetPortGroup
+from ceph_iscsi_config.utils import ipv4_addresses, this_host
 from ceph_iscsi_config.common import Config
-import ceph_iscsi_config.settings as settings
 
-from socket import gethostname
+# import ceph_iscsi_config.settings as settings
+
+__author__ = 'pcuzner@redhat.com'
+
 
 class GWTarget(object):
     """
@@ -310,13 +313,14 @@ class GWTarget(object):
                                  "group id {}".format(stg_object.name, tpg.tag))
                 group_name = "ao"
                 alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
-                alua_tpg.alua_access_state = 0
+                # alua_tpg.alua_access_state = 0
+                alua_tpg.preferred = 1
             else:
                 self.logger.info("setting {} to ALUA/ActiveNONOptimised "
                                  "group id {}".format(stg_object.name, tpg.tag))
                 group_name = "ano{}".format(tpg.tag)
                 alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
-                alua_tpg.alua_access_state = 1
+                # alua_tpg.alua_access_state = 1
         except RTSLibError as err:
                 self.logger.info("ALUA group id {} for stg obj {} lun {} "
                                  "already made".format(tpg.tag, stg_object, lun))
@@ -330,16 +334,30 @@ class GWTarget(object):
                 # drop down in case we are restarting due to error and we
                 # were not able to bind to a lun last time.
 
-        alua_tpg.alua_access_type = 1
+        # alua_tpg.alua_access_type = 1
+
+        # start ports in Standby, and let the initiator drive the initial
+        # transition to AO.
+        self.logger.debug("ALUA defined, updating state")
+        alua_tpg.alua_access_state = 2
+        alua_tpg.alua_access_type = 2
+
         alua_tpg.alua_support_offline = 0
         alua_tpg.alua_support_unavailable = 0
-        alua_tpg.alua_support_standby = 0
+        alua_tpg.alua_support_standby = 1
         alua_tpg.nonop_delay_msecs = 0
-        alua_tpg.bind_to_lun(lun)
+
+
+        # alua_tpg.bind_to_lun(lun)
+        self.logger.debug("Setting Luns tg_pt_gp to {}".format(group_name))
+        lun.alua_tg_pt_gp_name = group_name
+        self.logger.debug("Bound {} on tpg{} to {}".format(stg_object.name,
+                                                           tpg.tag,
+                                                           group_name))
 
     def map_luns(self, config):
         """
-        LIO will have blockstorage objects already defined by the lun module,
+        LIO will have objects already defined by the lun module,
         so this method, brings those objects into the gateways TPG
         """
 
@@ -349,10 +367,14 @@ class GWTarget(object):
         for stg_object in lio_root.storage_objects:
 
             for tpg in self.tpg_list:
+                self.logger.debug("processing tpg{}".format(tpg.tag))
 
                 if not self.lun_mapped(tpg, stg_object):
+                    self.logger.debug("{} needed mapping to "
+                                      "tpg{}".format(stg_object.name,
+                                                     tpg.tag))
 
-                    lun_id = int(stg_object._path.split('/')[-2].split('_')[1])
+                    lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
 
                     try:
                         mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
