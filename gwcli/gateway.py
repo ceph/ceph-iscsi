@@ -165,6 +165,9 @@ class ISCSIRoot(UIRoot):
 
     def ui_command_export(self, mode='ansible'):
 
+
+        self.logger.debug("CMD: export mode={}".format(mode))
+
         current_config = self._get_config()
 
         if mode == "ansible":
@@ -173,6 +176,8 @@ class ISCSIRoot(UIRoot):
             self.export_copy(current_config)
 
     def ui_command_info(self):
+        self.logger.debug("CMD: info")
+
         print("HTTP mode         : {}".format(self.http_mode))
         print("Rest API port     : {}".format(settings.config.api_port))
         print("Local endpoint    : {}".format(self.local_api))
@@ -203,6 +208,8 @@ class ISCSITarget(UIGroup):
 
         Only ONE target is supported, at this time.
         """
+
+        self.logger.debug("CMD: /iscsi create {}".format(target_iqn))
 
         defined_targets = [tgt.name for tgt in self.children]
         if len(defined_targets) > 0:
@@ -256,6 +263,8 @@ class ISCSITarget(UIGroup):
         In order to run the clearconfig command, all clients and disks *must*
         have already have been removed.
         """
+
+        self.logger.debug("CMD: clearconfig confirm={}".format(confirm))
 
         confirm = self.ui_eval_param(confirm, 'bool', False)
         if not confirm:
@@ -387,6 +396,9 @@ class GatewayGroup(UIGroup):
             Gateway(self, gateway_name, gateway_group[gateway_name])
 
     def ui_command_info(self):
+
+        self.logger.debug("CMD: ../gateways/ info")
+
         for child in self.children:
             print(child)
 
@@ -404,6 +416,11 @@ class GatewayGroup(UIGroup):
                          will need to have it's rbd-target-gw daemon
                          restarted to apply the current configuration
         """
+
+        self.logger.debug("CMD: ../gateways/ create {} {} "
+                          "nosync={}".format(gateway_name,
+                                             ip_address,
+                                             nosync))
 
         # where possible, validation is done against the local ui tree elements
         # as opposed to multiple calls to the API - in order to to keep the UI

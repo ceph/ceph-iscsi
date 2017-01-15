@@ -56,6 +56,7 @@ class Clients(UIGroup):
         > create <client_iqn>
 
         """
+        self.logger.debug("CMD: ../hosts/ create {}".format(client_iqn))
 
         # to be able to create a host/client, we need to ensure that there are
         # gateways defined
@@ -124,6 +125,9 @@ class Clients(UIGroup):
         > delete <client_iqn>
 
         """
+
+        self.logger.debug("CMD: ../hosts/ delete {}".format(client_iqn))
+
         # check the iqn given matches one of the child objects
         # - i.e. it's valid
         client_names = [child.name for child in self.children]
@@ -329,6 +333,9 @@ class Client(UINode):
                      special characters !,&,_
 
         """
+
+        self.logger.debug("CMD: ../hosts/<client_iqn> auth *")
+
         if nochap:
             chap = ''
 
@@ -408,6 +415,10 @@ class Client(UINode):
         Removing a disk will preserve existing lun id allocations
 
         """
+
+        self.logger.debug("CMD: ../hosts/<client_iqn> disk action={}"
+                          "disk={}".format(action,
+                                           disk))
 
         valid_actions = ['add', 'remove']
 
