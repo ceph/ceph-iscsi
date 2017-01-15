@@ -11,7 +11,7 @@ from gwcli.node import UIGroup, UINode
 
 from gwcli.client import Clients
 
-from gwcli.utils import (human_size, readcontents,
+from gwcli.utils import (human_size, readcontents, console_message,
                          GatewayAPIError, GatewayLIOError, GatewayError,
                          this_host, get_other_gateways, APIRequest)
 
@@ -45,6 +45,7 @@ class Disks(UIGroup):
     def __init__(self, parent):
         UIGroup.__init__(self, 'disks', parent)
         self.disk_info = {}
+        self.disk_lookup = {}
         self.logger = self.parent.logger
 
     def refresh(self, disk_info):
@@ -68,6 +69,12 @@ class Disks(UIGroup):
         by either M, G or T (representing the allocation unit)
         """
         # NB the text above is shown on a help create request in the CLI
+
+        self.logger.debug("CMD: /disks/ create pool={} "
+                          "image={} size={}".format(pool,
+                                                    image,
+                                                    size))
+
 
         if not self._valid_request(pool, image, size):
             return
@@ -159,6 +166,47 @@ class Disks(UIGroup):
 
         return disk_users
 
+    def ui_command_resize(self, image_id=None, size=None):
+        """
+        The resize command allows you to increase the size of an
+        existing rbd image. Attempting to decrease the size of an
+        rbd will be ignored.
+
+        image_id: disk name (pool.image format)
+        size: new size including unit suffix e.g. 300G
+        """
+        self.logger.debug("CMD: /disks/ resize {} {}".format(image_id,
+                                                             size))
+        if image_id and size:
+            if image_id in self.disk_lookup:
+                disk = self.disk_lookup[image_id]
+                disk.resize(size)
+                return
+            else:
+                self.logger.error("the disk '{}' does not exist in this "
+                                  "configuration".format(image_id))
+
+                return
+
+        else:
+            self.logger.error("resize needs the disk image name and new size")
+            return
+
+    def ui_command_info(self, image_id):
+        """
+        Provide disk configuration information (rbd and LIO details are
+        provided)
+        """
+        self.logger.debug("CMD: /disks/ info {}".format(image_id))
+        if image_id in self.disk_lookup:
+            disk = self.disk_lookup[image_id]
+            text = disk.get_info()
+            console_message(text)
+        else:
+            self.logger.error("disk name provided does not exist")
+
+
+
     def ui_command_delete(self, image_id):
         """
         Delete a given rbd image from the configuration and ceph. This is a
@@ -171,20 +219,23 @@ class Disks(UIGroup):
         the rbd image is, the longer the delete will take to run.
 
         """
+        self.logger.debug("CMD: /disks delete {}".format(image_id))
 
         # 1st does the image id given exist?
         rbd_list = [disk.name for disk in self.children]
         if image_id not in rbd_list:
-            self.logger.error("- the disk '{}' does not exist in this configuration".format(image_id))
+            self.logger.error("- the disk '{}' does not exist in this "
+                              "configuration".format(image_id))
             return
 
-        # Although the LUN class will check that the lun is unallocated before attempting
-        # a delete, it seems cleaner and more responsive to check through the object model
-        # here before sending a delete request
+        # Although the LUN class will check that the lun is unallocated before
+        # attempting a delete, it seems cleaner and more responsive to check
+        # through the local object model here before sending a delete request
 
         disk_users = self.disk_in_use(image_id)
         if disk_users:
-            self.logger.error("- Unable to delete '{}', it is currently allocated to:".format(image_id))
+            self.logger.error("- Unable to delete '{}', it is currently "
+                              "allocated to:".format(image_id))
 
             for client in disk_users:
                 self.logger.error("  - {}".format(client))
@@ -228,7 +279,8 @@ class Disks(UIGroup):
                                                           settings.config.api_port,
                                                           image_id)
 
-        self.logger.debug("- removing '{}' from the local machine".format(image_id))
+        self.logger.debug("- removing '{}' from the local "
+                          "machine".format(image_id))
 
         api = APIRequest(disk_api, data=api_vars)
         api.delete()
@@ -239,8 +291,10 @@ class Disks(UIGroup):
                            if disk.name == image_id][0]
             self.remove_child(disk_object)
             del self.disk_info[image_id]
+            del self.disk_lookup[image_id]
         else:
-            raise GatewayLIOError("--> Failed to remove the device from the local machine")
+            raise GatewayLIOError("--> Failed to remove the device from the "
+                                  "local machine")
 
         ceph_pools = self.parent.ceph.pools
         ceph_pools.refresh()
@@ -256,7 +310,8 @@ class Disks(UIGroup):
         :return: boolean, indicating whether the parameters may be used or not
         """
         state = True
-        discovered_pools = [rados_pool.name for rados_pool in self.parent.ceph.pools.children]
+        discovered_pools = [rados_pool.name for rados_pool in
+                            self.parent.ceph.pools.children]
         existing_rbds = self.disk_info.keys()
 
         storage_key = "{}.{}".format(pool, image)
@@ -310,6 +365,9 @@ class Disk(UINode):
         disk_map = self.parent.disk_info
         if image_id not in disk_map:
             disk_map[image_id] = {}
+
+        if image_id not in self.parent.disk_lookup:
+            self.parent.disk_lookup[image_id] = self
 
         # set the remaining attributes based on the fields in the dict
         for k, v in image_config.iteritems():
@@ -384,7 +442,8 @@ class Disk(UINode):
             # back from the API is out of step with the physical configuration
             # this can happen after a purge_gateways ansible playbook run if
             # the gateways do not have there rbd-target-gw daemons reloaded
-            error_msg = "The API has returned disks that are not on this server...reload rbd-target-api?"
+            error_msg = "The API has returned disks that are not on this " \
+                        "server...reload rbd-target-api?"
             self.logger.critical(error_msg)
             raise GatewayError(error_msg)
         else:
@@ -397,32 +456,32 @@ class Disk(UINode):
             disk_map[self.image_id]['size'] = self.size
             disk_map[self.image_id]['size_h'] = self.size_h
 
-    def ui_command_resize(self, size=None):
+    def resize(self, size=None):
         """
-        The resize command allows you to increase the size of an
-        existing rbd image. Attempting to decrease the size of an
-        rbd will be ignored.
-
-        size: new size including unit suffix e.g. 300G
-
+        Perform the resize operation, and sync the disk size across each of the
+        gateways
+        :param size: (int) new size for the rbd image
+        :return:
         """
-
         # resize is actually managed by the same lun and api endpoint as
         # create so this logic is very similar to a 'create' request
 
         if not size:
-            self.logger.error("Specify a size value (current size is {})".format(self.size_h))
+            self.logger.error("Specify a size value (current size "
+                              "is {})".format(self.size_h))
             return
 
         size_rqst = size.upper()
         if not valid_size(size_rqst):
-            self.logger.error("Size parameter value is not valid syntax (must be of the form 100G, or 1T)")
+            self.logger.error("Size parameter value is not valid syntax "
+                              "(must be of the form 100G, or 1T)")
             return
 
         new_size = convert_2_bytes(size_rqst)
         if self.size >= new_size:
             # current size is larger, so nothing to do
-            self.logger.error("New size isn't larger than the current image size, ignoring request")
+            self.logger.error("New size isn't larger than the current "
+                              "image size, ignoring request")
             return
 
         # At this point the size request needs to be honoured
@@ -437,7 +496,8 @@ class Disk(UINode):
                                                           settings.config.api_port,
                                                           self.image_id)
 
-        api_vars = {'pool': self.pool, 'size': size_rqst, 'owner': local_gw, 'mode': 'resize'}
+        api_vars = {'pool': self.pool, 'size': size_rqst,
+                    'owner': local_gw, 'mode': 'resize'}
 
         self.logger.debug("Processing local LIO instance")
         api = APIRequest(disk_api, data=api_vars)
@@ -458,7 +518,8 @@ class Disk(UINode):
                 api.put()
 
                 if api.response.status_code == 200:
-                    self.logger.debug("- LUN resize registered on {}".format(gw))
+                    self.logger.debug("- LUN resize registered on "
+                                      "{}".format(gw))
                 else:
                     raise GatewayAPIError(api.response.json()['message'])
 
@@ -466,3 +527,15 @@ class Disk(UINode):
             raise GatewayAPIError(api.response.json()['message'])
 
         self.logger.info('ok')
+
+    def ui_command_resize(self, size=None):
+        """
+        The resize command allows you to increase the size of an
+        existing rbd image. Attempting to decrease the size of an
+        rbd will be ignored.
+
+        size: new size including unit suffix e.g. 300G
+
+        """
+
+        self.resize(size)
