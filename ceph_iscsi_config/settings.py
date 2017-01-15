@@ -21,7 +21,7 @@ class Settings(object):
                 "api_port": 5000,
                 "api_secure": "true",
                 "loop_delay": 2,
-                "trusted_ip_list": '',                  # comma separate list of IPs
+                "trusted_ip_list": '',          # comma separate list of IPs
                 "api_enabled": 'true',
                 "api_user": "admin",
                 "api_password": "admin",
@@ -30,10 +30,9 @@ class Settings(object):
                 "minimum_gateways": 2
                 }
 
-    def __init__(self, conffile='/etc/ceph/iscsi-gateway.conf'):
+    def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):
 
         self.size_suffixes = ['M', 'G', 'T']
-        self.rbd_map_file = '/etc/ceph/rbdmap'
 
         self.error = False
         self.error_msg = ''
