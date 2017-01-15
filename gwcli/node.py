@@ -39,6 +39,25 @@ class UINode(UIGroup):
         self.http_mode = self.parent.http_mode
 
     def ui_command_info(self):
+        """
+        Generic handler showing the attributes of the current object
+        :return: None
+        """
+
+        text = self.get_info()
+
+        console_message(text)
+
+    def get_info(self):
+        """
+        extract the relevant display fields from the object and format
+        ready for printing
+        :return: (str) object meta data based on object's display_attributes
+                 list
+        """
+
+
+        display_text = ''
 
         field_list = self.display_attributes if self.display_attributes else []
         max_field_size = len(max(field_list, key=len))
@@ -50,22 +69,23 @@ class UINode(UIGroup):
             if isinstance(attr_value, dict):
 
                 if attr_value:
-                    console_message(attr_label)
+                    display_text += "{}\n".format(attr_label)
                     max_dict_field = len(max(attr_value.keys(), key=len))
                     for dict_key in sorted(attr_value):
 
                         if isinstance(attr_value[dict_key], dict):
                             inner_dict = attr_value[dict_key]
                             display_value = ", ".join(["=".join([key, str(val)]) for key, val in inner_dict.items()])
-                            console_message("- {} .. {}".format(dict_key,
-                                                                display_value))
+                            display_text += ("- {} .. {}\n".format(dict_key,
+                                                                   display_value))
+
                         else:
-                            console_message("- {} .. {}".format(dict_key,
-                                                                attr_value[dict_key]))
+                            display_text += ("- {} .. {}\n".format(dict_key,
+                                                                   attr_value[dict_key]))
 
                     continue
                 else:
-                    attr_value = 'UNDEFINED'
+                    attr_value = 'UNDEFINED\n'
 
             if isinstance(attr_value, list):
                 item_1 = True
@@ -80,11 +100,12 @@ class UINode(UIGroup):
 
                 attr_value = attr_string[:-1]
 
-            console_message("{:<{}} .. {}".format(attr_label,
-                                                  max_field_size,
-                                                  attr_value))
+            display_text += ("{:<{}} .. {}\n".format(attr_label,
+                                                     max_field_size,
+                                                     attr_value))
 
 
+        return display_text
 
 class UIRoot(UICommon):
     """
