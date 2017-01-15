@@ -66,6 +66,10 @@ gzip %{buildroot}%{_mandir}/man8/gwcli.8
 - api updated to remove python-flask-restful
 - api now documents it's entry points - get /api to show available API calls
 - spec updated for pyOpenSSL dependency (used by API)
+- added feature text to disk info command instead of just a feature code (int)
+- automatically select TLS version based on version of werkzeug
+- disk resize and info now available from the upper level 'disks' section
+- requested commands echo'd to the log file improving audit record
 
 * Thu Jan 5 2017 Paul Cuzner <pcuzner@redhat.com> 2.0-1
 - initial rpm packaging
