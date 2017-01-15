@@ -19,7 +19,7 @@ Invoke gwcli as root to enter the interactive shell, or supply a command to exec
 Configuration state is persisted within a rados object stored in the 'rbd' pool. gwcli orchestrates changes across all iscsi gateways via the rbd-target-api service running on each gateway. Once the change to the local LIO subsystem is complete, the change is committed to the rados configuration object. Although 'targetcli' is available, it can only really provide a view of the local LIO configuration.
 
 .SH QUICKSTART
-gwcli interacts with an API service provided by each iSCSI gateway's rbd-target-api daemon. The API service is installed with the cli, but in order to use 'gwcli', you'll need to update '/etc/ceph/iscsi-gateway.conf' with the following;
+gwcli interacts with an API service provided by each iSCSI gateway's rbd-target-api daemon. The API service is installed with the cli, but in order to use 'gwcli', you'll need to update '/etc/ceph/iscsi-gateway.cfg' with the following;
 .PP
 .RS 3
 \fBapi_enabled = true\fR
@@ -39,7 +39,7 @@ Additional overrides may be provided to change the way the API server and CLI to
 .RE
 .PD 1
 .PP
-By default the API service is not running with TLS, so for a more secure environment ensure iscsi-gateway.conf has "api_secure = true" defined. When using secure mode you will need to create the appropriate certificate and private key files, and place them in /etc/ceph as 'iscsi-gateway.crt' and 'iscsi-gateway.key' on \fBeach\fR gateway node.
+By default the API service is not running with TLS, so for a more secure environment ensure iscsi-gateway.cfg has "api_secure = true" defined. When using secure mode you will need to create the appropriate certificate and private key files, and place them in /etc/ceph as 'iscsi-gateway.crt' and 'iscsi-gateway.key' on \fBeach\fR gateway node.
 .PP
 Once these files are inplace across the nodes, the rbd-target-api service can be started. Check that the API service is enabled and in the correct mode by looking at the output of 'systemctl status rbd-target-api'. You should see a message similar to
 .PP
@@ -56,29 +56,29 @@ $ sudo gwcli
 /> ls
 .PP
 .nf
+/> ls
 o- / ............................................................. [...]
- o- ceph ................................................... [HEALTH_OK]
- | o- pools ................................................. [Pools: 2]
- | | o- iscsi ..........[Commit: 0b, Avail: 20G, Used: 36b, Commit%: 0%]
- | | o- rbd ............[Commit: 3G, Avail: 20G, Used: 4K, Commit%: 15%]
- | o- topology ....................................... [OSDs: 3,MONs: 3]
- o- disks ............................................... [3G, Disks: 3]
- | o- rbd.mydisk_1 ................. [/dev/mapper/0-23c4e112200854 (1G)]
- | o- rbd.mydisk_2 ................. [/dev/mapper/0-23c4f6515f007c (1G)]
- | o- rbd.mydisk_3 ................. [/dev/mapper/0-23c4d412200854 (1G)]
- o- iscsi-target .......................................... [Targets: 1]
-   o- iqn.2003-01.com.redhat.iscsi-gw:ceph-igw ........... [Gateways: 2]
-    o- gateways ........................................... [Portals: 2]
-    | o- ceph-1 ...................................... [192.168.122.101]
-    | o- ceph-2 ...................................... [192.168.122.102]
-    o- hosts ................................................ [Hosts: 3]
-      o- iqn.1994-05.com.redhat:rh7-client1 . [Auth: CHAP, Disks: 2(2G)]
-      | o- lun 0 ......................[rbd.mydisk_1(1G), Owner: ceph-1]
-      | o- lun 1 ......................[rbd.mydisk_2(1G), Owner: ceph-2]
-      o- iqn.1994-05.com.redhat:rh7-client2 . [Auth: None, Disks: 2(2G)]
-      | o- lun 0 ......................[rbd.mydisk_1(1G), \fBOwner: ceph-1]\fR
-      | o- lun 1 ......................[rbd.mydisk_2(1G), \fBOwner: ceph-2]\fR
-      o- iqn.1994-05.com.redhat:rh7-client3 ..[Auth: None, Disks: 0(0b)]
+  o- ceph .................................................. [HEALTH_OK]
+  | o- pools ................................................ [Pools: 2]
+  | | o- iscsi ........ [Commit: 0b, Avail: 20G, Used: 18b, Commit%: 0%]
+  | | o- rbd ......... [Commit: 14G, Avail: 20G, Used: 4K, Commit%: 70%]
+  | o- topology ...................................... [OSDs: 3,MONs: 3]
+  o- disks ............................................. [14G, Disks: 3]
+  | o- rbd.ansible1 .................................... [ansible1 (6G)]
+  | o- rbd.ansible2 .................................... [ansible2 (5G)]
+  | o- rbd.ansible3 .................................... [ansible3 (3G)]
+  o- iscsi-target ......................................... [Targets: 1]
+    o- iqn.2003-01.com.redhat.iscsi-gw:ceph-gw ........... [Gateways: 2]
+      o- gateways ......................................... [Portals: 2]
+      | o- rh7-gw1 .................................... [192.168.122.69]
+      | o- rh7-gw2 ................................... [192.168.122.104]
+      o- hosts .............................................. [Hosts: 3]
+        o- iqn.1994-05.com.redhat:myhost .... [Auth: CHAP, Disks: 1(6G)]
+        | o- lun 0 .................. [rbd.ansible1(6G), \fBOwner: rh7-gw2]\fR
+        o- iqn.1994-05.com.redhat:myhost2 ... [Auth: None, Disks: 1(5G)]
+        | o- lun 0 .................. [rbd.ansible2(5G), \fBOwner: rh7-gw1]\fR
+        o- iqn.1994-05.com.redhat:myhost3 ... [Auth: None, Disks: 1(3G)]
+          o- lun 0 .................. [rbd.ansible3(3G), Owner: rh7-gw2]
 .fi
 .PD 1
 .PP
@@ -91,8 +91,12 @@ In order to manage rbd images (disks) within the environment there are several c
 Using the create command ensure the image features are applied correctly. You can also choose to create your rbd images by some other means, in which case the 'create' command will effectively 'import' the rbd into the configuration leaving any data already on the device, intact.
 .PP
 .TP
+.PD 0
 \fB/disks/<disk_name>/ resize <N>g\fR
+.TP
+\fB/disks resize <disk_name> <new_size>\fR
 Use the resize command to increase the capacity of a specific rbd image.
+.PD 1
 .PP
 .TP
 \fB/disks/ delete <disk_name>\fR
