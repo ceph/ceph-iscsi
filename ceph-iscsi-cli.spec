@@ -70,6 +70,7 @@ gzip %{buildroot}%{_mandir}/man8/gwcli.8
 - automatically select TLS version based on version of werkzeug
 - disk resize and info now available from the upper level 'disks' section
 - requested commands echo'd to the log file improving audit record
+- add gateways refresh command and determine iscsi up/down using port 3260
 
 * Thu Jan 5 2017 Paul Cuzner <pcuzner@redhat.com> 2.0-1
 - initial rpm packaging
