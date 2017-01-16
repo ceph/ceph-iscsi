@@ -332,6 +332,7 @@ class ISCSITarget(UIGroup):
 
     def refresh(self):
 
+        self.logger.debug("Refreshing gateway & client information")
         self.reset()
         if 'iqn' in self.gateway_group:
             tgt = Target(self.gateway_group['iqn'], self)
@@ -731,6 +732,9 @@ class Gateway(UINode):
         self.refresh()
 
     def refresh(self):
+
+        self.parent.logger.debug("- checking iSCSI port is accessible on "
+                                 "{}".format(self.name))
         self.state = self._get_state()
 
     def _get_state(self):

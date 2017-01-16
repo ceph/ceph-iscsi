@@ -49,6 +49,7 @@ class Disks(UIGroup):
         self.logger = self.parent.logger
 
     def refresh(self, disk_info):
+        self.logger.debug("Refreshing disk information from the config object")
         self.disk_info = disk_info
         # Load the disk configuration
         for image_id in disk_info:
