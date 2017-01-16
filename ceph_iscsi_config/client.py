@@ -29,10 +29,10 @@ class GWClient(object):
     def __init__(self, logger, client_iqn, image_list, chap):
         """
         Instantiate an instance of an LIO client
-        :param client_iqn: iscsi iqn string
-        :param image_list: list of rbd images (pool/image) to attach to this
-                           client
-        :param chap: chap credentials in the format 'user/password'
+        :param client_iqn: (str) iscsi iqn string
+        :param image_list: (list) list of rbd images (pool/image) to attach
+                           to this client
+        :param chap: (str) chap credentials in the format 'user/password'
         :return:
         """
 
@@ -57,17 +57,23 @@ class GWClient(object):
 
         self.logger = logger
         self.current_config = {}
+        self.error = False
+        self.error_msg = ''
 
         try:
             valid_iqn = normalize_wwn(['iqn'], client_iqn)
         except RTSLibError as err:
             self.error = True
             self.error_msg = "Invalid client name for iSCSI - {}".format(err)
-        else:
-            self.error = False
-            self.error_msg = ''
 
-
+        # Validate the images list doesn't contain duplicate entries
+        dup_images = set([rbd for rbd in image_list
+                          if image_list.count(rbd) >= 2])
+        if len(dup_images) > 0:
+            self.error = True
+            dup_string = ','.join(dup_images)
+            self.error_msg = ("Client's image list contains duplicate rbd's:"
+                              " : {}".format(dup_string))
 
     def setup_luns(self):
         """
