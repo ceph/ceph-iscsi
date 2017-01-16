@@ -123,7 +123,7 @@ def sys_info(query_type=None):
 
     elif query_type == 'checkconf':
 
-        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.conf')
+        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
         return make_response(jsonify(data=local_hash), 200)
 
     elif query_type == 'checkversions':
