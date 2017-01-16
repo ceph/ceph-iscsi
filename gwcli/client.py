@@ -530,6 +530,11 @@ class Client(UINode):
                     continue
                 else:
                     raise GatewayAPIError(api.response.json()['message'])
+
+        elif api.response.status_code == 400:
+            self.logger.error(api.response.json()['message'])
+            return
+
         else:
             raise GatewayAPIError(api.response.json()['message'])
 

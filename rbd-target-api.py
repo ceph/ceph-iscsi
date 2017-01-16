@@ -449,7 +449,7 @@ def _update_client(**kwargs):
                       kwargs['chap'])
 
     if client.error:
-        return 500, "GWClient create failed : {}".format(client.error_msg)
+        return 400, "Invalid request - {}".format(client.error_msg)
 
     client.manage('present', committer=kwargs['committing_host'])
     if client.error:
