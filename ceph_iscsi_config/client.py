@@ -72,8 +72,8 @@ class GWClient(object):
         if len(dup_images) > 0:
             self.error = True
             dup_string = ','.join(dup_images)
-            self.error_msg = ("Client's image list contains duplicate rbd's:"
-                              " : {}".format(dup_string))
+            self.error_msg = ("Client's image list contains duplicate rbd's"
+                              ": {}".format(dup_string))
 
     def setup_luns(self):
         """
