@@ -2,6 +2,7 @@
 
 import sys
 import json
+import socket
 
 from gwcli.node import UIGroup, UINode, UIRoot
 # from requests import delete, put, get, ConnectionError
@@ -402,6 +403,18 @@ class GatewayGroup(UIGroup):
         for child in self.children:
             print(child)
 
+    def ui_command_refresh(self):
+        """
+        refresh allows you to refresh the connection status of each of the
+        configured gateways (i.e. check the up/down state).
+        """
+
+        if len(self.children) > 0:
+            for gw in self.children:
+                gw.refresh()
+        else:
+            self.logger.error("No gateways to refresh")
+
     def ui_command_create(self, gateway_name, ip_address, nosync=False):
         """
         Define a gateway to the gateway group for this iscsi target. The
@@ -674,7 +687,14 @@ class GatewayGroup(UIGroup):
 
     def summary(self):
 
-        return "Portals: {}".format(len(self.children)), True
+        up_count = len([gw.state for gw in self.children if gw.state == 'UP'])
+        gw_count = len(self.children)
+
+        return ("Up: {}/{}, Portals: {}".format(up_count,
+                                                gw_count,
+                                                gw_count),
+                up_count == gw_count)
+
 
     def _interactive_shell(self):
         return self.parent.parent.parent.interactive
@@ -693,6 +713,8 @@ class Gateway(UINode):
                           "active_luns",
                           "tpgs"]
 
+    TCP_PORT = 3260
+
     def __init__(self, parent, gateway_name, gateway_config):
         """
         Create the LIO element
@@ -702,8 +724,35 @@ class Gateway(UINode):
         """
 
         UINode.__init__(self, gateway_name, parent)
+
         for k, v in gateway_config.iteritems():
             self.__setattr__(k, v)
 
+        self.refresh()
+
+    def refresh(self):
+        self.state = self._get_state()
+
+    def _get_state(self):
+        """
+        determine whether the iscsi port is open based on port 3260 being
+        accessible
+        :return:
+        """
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        socket.setdefaulttimeout(1)
+        result = sock.connect_ex((self.portal_ip_address, Gateway.TCP_PORT))
+        if result == 0:
+            sock.close()
+        return "UP" if result == 0 else "DOWN"
+
+
+
+
     def summary(self):
-        return self.portal_ip_address, True
+
+        state = self.state
+        return "{} ({})".format(self.portal_ip_address,
+                                state), (state == "UP")
+
