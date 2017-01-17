@@ -422,16 +422,6 @@ class Client(UINode):
 
         valid_actions = ['add', 'remove']
 
-        lun_list = [(lun.rbd_name, lun.lun_id) for lun in self.children]
-        current_luns = Client.get_srtd_names(lun_list)
-
-        if action == 'add':
-
-            valid_disk_names = [defined_disk.image_id
-                                for defined_disk in self.parent.parent.parent.parent.disks.children]
-        else:
-            valid_disk_names = current_luns
-
         if not disk:
             self.logger.critical("You must supply a disk name to add/remove "
                                  "from this client")
@@ -441,6 +431,24 @@ class Client(UINode):
             self.logger.error("you can only add and remove disks - {} is "
                               "invalid ".format(action))
             return
+
+        lun_list = [(lun.rbd_name, lun.lun_id) for lun in self.children]
+        current_luns = Client.get_srtd_names(lun_list)
+
+        if action == 'add':
+
+            if disk not in current_luns:
+
+                valid_disk_names = [defined_disk.image_id
+                                    for defined_disk in self.parent.parent.parent.parent.disks.children]
+            else:
+                # disk provided is already mapped, so remind the user
+                self.logger.error("Disk {} already mapped".format(disk))
+                return
+        else:
+            valid_disk_names = current_luns
+
+
 
         if disk not in valid_disk_names:
             self.logger.critical("the request to {} disk '{}' is "
