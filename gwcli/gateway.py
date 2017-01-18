@@ -19,7 +19,7 @@ from ceph_iscsi_config.utils import get_ip, ipv4_addresses, gen_file_hash
 from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
 
-from gwcli.ceph import Ceph
+from gwcli.ceph import CephGroup
 
 # FIXME - code is using a self signed cert common across all gateways
 # the embedded urllib3 package will issue warnings when ssl cert validation is
@@ -38,7 +38,7 @@ class ISCSIRoot(UIRoot):
 
     def __init__(self, shell, logger, endpoint=None):
         UIRoot.__init__(self, shell)
-        self.config = {}
+
         self.error = False
         self.error_msg = ''
         self.interactive = True           # default interactive mode
@@ -55,10 +55,11 @@ class ISCSIRoot(UIRoot):
         else:
             self.local_api = endpoint
 
+        self.config = {}
         # Establish the root nodes within the UI, for the different components
 
         self.disks = Disks(self)
-        self.ceph = Ceph(self)
+        self.ceph = CephGroup(self)
         self.target = ISCSITarget(self)
 
     def refresh(self):

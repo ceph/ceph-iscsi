@@ -3,13 +3,16 @@
 from .node import UIGroup, UINode
 import json
 import rados
+import glob
+import os
+
 from gwcli.utils import human_size
 import ceph_iscsi_config.settings as settings
 
 __author__ = 'pcuzner@redhat.com'
 
 
-class Ceph(UIGroup):
+class CephGroup(UIGroup):
     """
     define an object to represent the ceph cluster. The methods use librados
     which means the host will need a valid ceph.conf and a valid keyring.
@@ -28,17 +31,135 @@ class Ceph(UIGroup):
                  the pool(s), together with the current over-commit percentage.
                  '''
 
-    ceph_conf = '/etc/ceph/ceph.conf'
+
+    ceph_config_dir = '/etc/ceph'
+    default_ceph_conf = '{}/ceph.conf'.format(ceph_config_dir)
 
     def __init__(self, parent):
-        UIGroup.__init__(self, 'ceph', parent)
+        UIGroup.__init__(self, 'clusters', parent)
+        self.cluster_map = self.get_clusters()
+        self.local_ceph = None
+        self.logger = self.parent.logger
+
+        for cluster_name in self.cluster_map.keys():
+
+            keyring = self.cluster_map[cluster_name]['keyring']
+            if cluster_name == settings.config.cluster_name:
+
+                if settings.config.gateway_keyring:
+                    keyring = settings.config.gateway_keyring
+                    self.cluster_map[cluster_name]['keyring'] = keyring
+
+            # define the cluster object
+            self.logger.debug("Adding ceph cluster '{}' to the UI".format(cluster_name))
+            cluster = CephCluster(self,
+                                  cluster_name,
+                                  self.cluster_map[cluster_name]['conf_file'],
+                                  keyring)
+
+            self.cluster_map[cluster_name]['object'] = cluster
+            if self.cluster_map[cluster_name]['local']:
+                self.local_ceph = cluster
+
+    def get_clusters(self):
+        """
+        Look at the /etc/ceph dir to generate a dict of clusters that are
+        defined/known to the gateway
+        :return: (dict) ceph_name -> conf_file, keyring
+        """
+
+        clusters = {}       # dict ceph_name -> conf_file, keyring
+
+        conf_files = glob.glob(os.path.join(CephGroup.ceph_config_dir,
+                               '*.conf'))
+
+        valid_conf_files = [conf for conf in conf_files
+                            if CephGroup.valid_conf(conf)]
+        for conf in valid_conf_files:
+            name = os.path.basename(conf).split('.')[0]
+            keyring = glob.glob(os.path.join(CephGroup.ceph_config_dir,
+                                             '{}*.keyring'.format(name)))
+            if not keyring:
+                # cluster has a keyring
+                self.logger.debug("Skipping {} - no keyring found".format(conf))
+                continue
+
+            local = True if name == settings.config.cluster_name else False
+
+            clusters[name] = {'conf_file': conf,
+                              'keyring': keyring[0],
+                              'name': name,
+                              'local': local}
+
+        return clusters
+
+    @staticmethod
+    def valid_conf(config_file):
+        """
+        check whether the given file is a valid conf file for a cluster
+        :param self:
+        :return:
+        """
+        return True
+
+    def ui_command_refresh(self):
+        """
+        refresh command updates the health and capacity state of the ceph
+        meta data shown within the interface
+        """
+        # pass
+        self.refresh()
+
+    # def update_state(self):
+    #     with rados.Rados(conffile=self.conf) as cluster:
+    #         cmd = {'prefix': 'status', 'format': 'json'}
+    #         ret, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
+    #
+    #     self.ceph_status = json.loads(buf_s)
+    #     self.health_status = self.ceph_status['health']['overall_status']
+
+    def refresh(self):
+
+        for cluster in self.children:
+            cluster.update_state()
+            cluster.pools.refresh()
+
+
+    def summary(self):
+        """
+        return the number of clusters
+        :return:
+        """
+        return "Clusters: {}".format(len(self.children)), None
+
+    # def _get_healthy_mon(self):
+    #
+    #     healthy_mon = 'UNKNOWN'
+    #
+    #     if 'health' in self.ceph_status:
+    #         mons = self.ceph_status['health']['timechecks']['mons']
+    #         for mon in mons:
+    #             if mon['health'] == 'HEALTH_OK':
+    #                 healthy_mon = mon['name']
+    #                 break
+    #
+    #     return healthy_mon
+    #
+    # healthy_mon = property(_get_healthy_mon,
+    #                        doc="Return the first mon in a healthy state")
+
+class CephCluster(UIGroup):
+
+    def __init__(self, parent, cluster_name, conf_file, keyring):
+
+        self.conf = conf_file
+        self.keyring = keyring
+        UIGroup.__init__(self, cluster_name, parent)
+
+        self.logger = self.parent.logger
+
         self.ceph_status = {}
         self.health_status = ''
-
-        if settings.config.cephconf:
-            self.conf = settings.config.cephconf
-        else:
-            self.conf = Ceph.ceph_conf
 
         self.pools = CephPools(self)
 
@@ -86,7 +207,6 @@ class Ceph(UIGroup):
     healthy_mon = property(_get_healthy_mon,
                            doc="Return the first mon in a healthy state")
 
-
 class CephPools(UIGroup):
     help_intro = '''
                  Each pool within the ceph cluster is shown with the following
@@ -118,6 +238,9 @@ class CephPools(UIGroup):
 
     def __init__(self, parent):
         UIGroup.__init__(self, 'pools', parent)
+
+        self.logger = self.parent.logger
+
         self.pool_lookup = {}  # pool_name -> pool object hash
         self.populate()
 
@@ -134,6 +257,9 @@ class CephPools(UIGroup):
                     self.pool_lookup[pool_name] = new_pool
 
     def refresh(self):
+
+        self.logger.debug("Gathering pool stats for "
+                          "'{}'".format(self.parent.name))
 
         # unfortunately the rados python api does not expose all the needed
         # metrics through an ioctx call - specifically pool size is missing,
@@ -162,13 +288,14 @@ class RadosPool(UINode):
         UINode.__init__(self, pool_name, parent)
 
     def _calc_overcommit(self):
-        root = self.parent.parent.parent
+        root = self.parent.parent.parent.parent
         potential_demand = 0
         for child in root.disks.children:
             if child.pool == self.name:
                 potential_demand += child.size
 
-        return potential_demand, int(
+        self.commit = potential_demand
+        self.overcommit_PCT = int(
             (potential_demand / float(self.max_bytes)) * 100)
 
     def update(self, pool_metadata):
@@ -176,7 +303,7 @@ class RadosPool(UINode):
         self.max_bytes = pool_metadata['stats']['max_avail']
         self.used_bytes = pool_metadata['stats']['bytes_used']
 
-        self.commit, self.overcommit_PCT = self._calc_overcommit()
+        self._calc_overcommit()
 
     def summary(self):
         msg = ["Commit: {}".format(human_size(self.commit))]
