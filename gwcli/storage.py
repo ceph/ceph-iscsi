@@ -341,8 +341,8 @@ class Disks(UIGroup):
 
 class Disk(UINode):
 
-    display_attributes = ["image", "pool", "wwn", "size_h", "size",
-                          "features", "feature_list", "owner"]
+    display_attributes = ["image", "ceph_cluster", "pool", "wwn", "size_h",
+                          "feature_list", "owner"]
 
     def __init__(self, parent, image_id, image_config):
         """
@@ -362,6 +362,7 @@ class Disk(UINode):
         self.size_h = ''
         self.features = 0
         self.feature_list = []
+        self.ceph_cluster = self.parent.parent.ceph.local_ceph.name
 
         disk_map = self.parent.disk_info
         if image_id not in disk_map:
@@ -527,7 +528,25 @@ class Disk(UINode):
         else:
             raise GatewayAPIError(api.response.json()['message'])
 
+        # at this point the resize request was successful, so we need to
+        # update the pool commit values
+        self._update_pool()
+
         self.logger.info('ok')
+
+    def _update_pool(self):
+        """
+        use the object model to track back from the disk to the relevant pool
+        in the local ceph cluster and update the commit stats
+        """
+        root = self.parent.parent
+        ceph_group = root.ceph
+        cluster = ceph_group.local_ceph
+        pool = cluster.pools.pool_lookup.get(self.pool)
+
+        if pool:
+            # update the pool commit numbers
+            pool._calc_overcommit()
 
     def ui_command_resize(self, size=None):
         """
