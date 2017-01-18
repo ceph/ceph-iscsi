@@ -554,21 +554,24 @@ class Client(UINode):
 
 class MappedLun(UINode):
 
-    display_attributes = ["rbd_path", "owner", "size", "size_h", "lun_id"]
+    display_attributes = ["rbd_name", "owner", "size", "size_h", "lun_id"]
 
     def __init__(self, parent, name, lun_id):
         self.rbd_name = name
         UINode.__init__(self, 'lun {}'.format(lun_id), parent)
-        disk_group = self.parent.parent.parent.parent.parent.disks.disk_info
-        self.owner = disk_group[name]['owner']
-        self.size = 0
+
+        # navigate back through the object model to pick up the disks
+        disk_lookup = self.parent.parent.parent.parent.parent.disks.disk_lookup
+
+        self.disk = disk_lookup[name]
+        self.owner = self.disk.owner
+        self.size = self.disk.size
+        self.size_h = self.disk.size_h
         self.lun_id = lun_id
 
-        disk_map = self.parent.parent.parent.parent.parent.disks.disk_info
-        self.size = disk_map[self.rbd_name]['size']
-        self.size_h = disk_map[self.rbd_name]['size_h']
-
     def summary(self):
+        self.owner = self.disk.owner
+        self.size_h = self.disk.size_h
         return "{}({}), Owner: {}".format(self.rbd_name,
                                           self.size_h,
                                           self.owner), True
