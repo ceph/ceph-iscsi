@@ -134,7 +134,7 @@ class Disks(UIGroup):
             self.logger.error(api.response.json()['message'])
             raise GatewayError("Error defining the rbd image to the local gateway")
 
-        ceph_pools = self.parent.ceph.pools
+        ceph_pools = self.parent.ceph.local_ceph.pools
         ceph_pools.refresh()
 
         self.logger.info('ok')
@@ -297,7 +297,7 @@ class Disks(UIGroup):
             raise GatewayLIOError("--> Failed to remove the device from the "
                                   "local machine")
 
-        ceph_pools = self.parent.ceph.pools
+        ceph_pools = self.parent.ceph.local_ceph.pools
         ceph_pools.refresh()
 
         self.logger.info('ok')
@@ -312,7 +312,7 @@ class Disks(UIGroup):
         """
         state = True
         discovered_pools = [rados_pool.name for rados_pool in
-                            self.parent.ceph.pools.children]
+                            self.parent.ceph.local_ceph.pools.children]
         existing_rbds = self.disk_info.keys()
 
         storage_key = "{}.{}".format(pool, image)
