@@ -9,6 +9,7 @@ from gwcli.utils import (human_size, get_other_gateways,
                          GatewayAPIError, GatewayLIOError,
                          this_host, APIRequest)
 
+from ceph_iscsi_config.client import CHAP
 import ceph_iscsi_config.settings as settings
 
 import rtslib_fb.root as root
@@ -247,6 +248,11 @@ class Client(UINode):
 
         for k, v in client_settings.iteritems():
             self.__setattr__(k, v)
+
+        # decode the password if necessary
+        if 'chap' in self.auth:
+            self.chap = CHAP(self.auth['chap'])
+            self.auth['chap'] = self.chap.chap_str
 
         for rbd_path in self.luns.keys():
             lun_id = self.luns[rbd_path]['lun_id']
