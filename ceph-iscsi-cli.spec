@@ -61,7 +61,7 @@ gzip %{buildroot}%{_mandir}/man8/gwcli.8
 %{_mandir}/man8/gwcli.8.gz
 
 %changelog
-* Fri Jan 12 2017 Paul Cuzner <pcuzner@redhat.com> 2.1-1
+* Sat Jan 21 2017 Paul Cuzner <pcuzner@redhat.com> 2.1-1
 - updated for TCMU support (krbd/device mapper support removed)
 - api updated to remove python-flask-restful
 - api now documents it's entry points - get /api to show available API calls
@@ -71,6 +71,10 @@ gzip %{buildroot}%{_mandir}/man8/gwcli.8
 - disk resize and info now available from the upper level 'disks' section
 - requested commands echo'd to the log file improving audit record
 - add gateways refresh command and determine iscsi up/down using port 3260
+- fix: disk resize now changes all related entries in the tree
+- ceph clusters are populated automatically through presence in /etc/ceph
+- added ceph cluster name to disk info output
+- 'ansible' mode exports decrypt chap passwords automatically
 
 * Thu Jan 5 2017 Paul Cuzner <pcuzner@redhat.com> 2.0-1
 - initial rpm packaging
