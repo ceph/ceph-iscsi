@@ -8,7 +8,7 @@ from gwcli.node import UIGroup, UINode, UIRoot
 # from requests import delete, put, get, ConnectionError
 
 from gwcli.storage import Disks
-from gwcli.client import Clients, Client
+from gwcli.client import Clients, Client, CHAP
 from gwcli.utils import (this_host, get_other_gateways,
                          GatewayAPIError, GatewayError,
                          APIRequest, progress_message)
@@ -123,7 +123,7 @@ class ISCSIRoot(UIRoot):
 
         this_gw = this_host()
         ansible_vars = []
-        ansible_vars.append("seed_monitor: {}".format(self.ceph.healthy_mon))
+        ansible_vars.append("seed_monitor: {}".format(self.ceph.local_ceph.healthy_mon))
         ansible_vars.append("cluster_name: {}".format(settings.config.cluster_name))
         ansible_vars.append("gateway_keyring: {}".format(settings.config.gateway_keyring))
         ansible_vars.append("deploy_settings: true")
@@ -152,9 +152,10 @@ class ISCSIRoot(UIRoot):
             lun_data = client_metadata['luns']
             sorted_luns = [s[0] for s in sorted(lun_data.iteritems(),
                                                 key=lambda (x, y): y['lun_id'])]
+            chap = CHAP(client_metadata['auth']['chap'])
             ansible_vars.append(client_template.format(client,
                                                        ','.join(sorted_luns),
-                                                       client_metadata['auth']['chap']))
+                                                       chap.chap_str))
         for var in ansible_vars:
             print(var)
 
