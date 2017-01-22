@@ -10,17 +10,20 @@ import subprocess
 import time
 import sys
 import os
+import rados
+import rbd
+
+
+from rtslib_fb import root
 
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.lun import LUN
-from ceph_iscsi_config.client import GWClient
+from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.lio import LIO, Gateway
-from ceph_iscsi_config.utils import this_host
-
-from rtslib_fb import root
+from ceph_iscsi_config.utils import this_host, human_size
 
 
 def ceph_rm_blacklist(blacklisted_ip):
@@ -52,7 +55,12 @@ def signal_stop(*args):
     handler by default
     :param args: ignored/unused
     """
-    logger.info("rbd-target-gw stop received")
+    logger.info("rbd-target-gw stop received, refreshing local state")
+    config.refresh()
+    if config.error:
+        logger.critical("Problems accessing config object"
+                        " - {}".format(config.error_msg))
+        sys.exit(16)
 
     local_gw = this_host()
 
@@ -75,13 +83,17 @@ def signal_stop(*args):
     # This will fail incoming IO, but wait on outstanding IO to
     # complete normally. We rely on the initiator multipath layer
     # to handle retries like a normal path failure.
+    logger.debug("Removing iSCSI target from LIO")
     gw.drop_target(local_gw)
     if gw.error:
         logger.error("rbd-target-gw failed to remove target objects")
 
+    logger.debug("Removing LUNs from LIO")
     lio.drop_lun_maps(config, False)
     if lio.error:
         logger.error("rbd-target-gw failed to remove lun objects")
+
+    logger.info("Active gateway configuration removed")
     sys.exit(0)
 
 
@@ -106,45 +118,6 @@ def signal_reload(*args):
     else:
         logger.warning("Admin attempted to reload the config during an active "
                        "reload process - skipped, try later")
-
-
-def map_rbd(rbd_path):
-    """
-    Attempt to map a given rbd device to the current system
-    :param rbd_path: pool/image name for the rbd device to add to this system
-    :return: None or the /dev/rbdX response from the rbd map command
-    """
-
-    try:
-        cmd = "rbd map {} -o noshare".format(rbd_path)
-        map_output = subprocess.check_output(cmd, shell=True)
-    except subprocess.CalledProcessError:
-        return None
-    else:
-        return map_output.strip()
-
-
-def rbd_ready(disk):
-    """
-    determine whether the given disk is ready for allocation to LIO ...
-    i.e. it's mapped and has a device mapper entry
-    :param disk: disk record (dict)
-    :return: Boolean indicating whether the rbd device is usable
-    """
-
-    rbd_path = "{}/{}".format(disk['pool'], disk['image'])
-    dm_device = disk['dm_device']
-    if os.path.exists(dm_device):
-        return True
-
-    # Path doesn't exist, so map it
-    map_state = map_rbd(rbd_path)
-    if map_state is None:
-        logger.error("Unable to map {}".format(rbd_path))
-        return False
-
-    # return the dm state using the 'wait' function
-    return LUN.dm_wait_for_device(dm_device)
 
 
 def osd_blacklist_cleanup():
@@ -275,46 +248,60 @@ def apply_config():
         halt("Error creating the iSCSI target (target, TPGs, Portals)")
 
     logger.info("Processing LUN configuration")
+    # sort the disks dict keys, so the disks are registered in a specific
+    # sequence
+    disks = config.config['disks']
+    srtd_disks = sorted(disks)
+    pools = {disks[disk_key]['pool'] for disk_key in srtd_disks}
 
-    # LUN management
-    # disk_key ... pool.rbd_image
-    for disk_key in config.config['disks']:
+    if pools:
+        with rados.Rados(conffile=settings.config.cephconf) as cluster:
 
-        disk = config.config['disks'][disk_key]
-        dm_path = disk['dm_device']
-        if rbd_ready(disk):
+            for pool in pools:
 
-            # disk size (4th parameter) is not important here since this
-            # is just registration of the devices and disk resize is not
-            # supported on boot-up anyway
-            lun = LUN(logger, disk['pool'], disk['image'], '0G', local_gw)
-            if lun.error:
-                halt("Error defining rbd image {}".format(disk_key))
+                logger.debug("Processing rbd's in '{}' pool".format(pool))
 
-            lun.allocate()
-            if lun.error:
-                halt("Error unable to register {} with LIO - "
-                     "{}".format(disk_key, lun.error_msg))
+                with cluster.open_ioctx(pool) as ioctx:
 
-        else:
+                    pool_disks = [disk_key for disk_key in srtd_disks
+                                  if disk_key.startswith(pool)]
+                    for disk_key in pool_disks:
 
-            halt("Unable to attach to the dm device {} for "
-                 "image {}".format(dm_path, disk_key))
+                        pool, image_name = disk_key.split('.')
 
-    # Gateway Mapping : Map the LUN's registered to all tpg's within the
-    # LIO target
-    gateway.manage('map')
-    if gateway.error:
-        halt("Error mapping the LUNs to the tpg's within the iscsi Target")
+                        with rbd.Image(ioctx, image_name) as rbd_image:
+                            image_bytes = rbd_image.size()
+                            image_size_h = human_size(image_bytes)
+
+                            lun = LUN(logger, pool, image_name,
+                                      image_size_h, local_gw)
+                            if lun.error:
+                                halt("Error defining rbd image {}".format(
+                                    disk_key))
+
+                            lun.allocate()
+                            if lun.error:
+                                halt("Error unable to register {} with LIO - "
+                                     "{}".format(disk_key, lun.error_msg))
+
+        # Gateway Mapping : Map the LUN's registered to all tpg's within the
+        # LIO target
+        gateway.manage('map')
+        if gateway.error:
+            halt("Error mapping the LUNs to the tpg's within the iscsi Target")
+
+    else:
+        logger.info("No LUNs to export")
 
     logger.info("Processing client configuration")
 
     # Client configurations (NodeACL's)
     for client_iqn in config.config['clients']:
         client_metadata = config.config['clients'][client_iqn]
-        chap = client_metadata['auth']['chap']
+        client_chap = CHAP(client_metadata['auth']['chap'])
+
         image_list = client_metadata['luns'].keys()
-        client = GWClient(logger, client_iqn, image_list, chap)
+        client = GWClient(logger, client_iqn, image_list, client_chap.chap_str)
         client.manage('present')  # ensure the client exists
 
     if not portals_active:
