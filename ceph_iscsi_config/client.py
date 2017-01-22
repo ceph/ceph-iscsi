@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
-__author__ = 'pcuzner@redhat.com'
-
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+from base64 import b64encode, b64decode
 import os
+
 import rtslib_fb.root as lio_root
 
 from socket import gethostname
@@ -12,7 +14,9 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config, ansible_control
-from ceph_iscsi_config.utils import get_pool_name
+from ceph_iscsi_config.utils import encryption_available
+
+__author__ = 'pcuzner@redhat.com'
 
 
 class GWClient(object):
@@ -24,7 +28,6 @@ class GWClient(object):
                      "auth": {"chap": ''},
                      "luns": {}
                      }
-
 
     def __init__(self, logger, client_iqn, image_list, chap):
         """
@@ -176,12 +179,15 @@ class GWClient(object):
         :return:
         """
 
+
         if '/' in credentials:
             client_username, client_password = credentials.split('/', 1)
         elif not credentials:
             client_username = ''
             client_password = ''
             credentials = "/"
+
+        self.logger.debug("configuring auth {}".format(credentials))
 
         if auth_type == 'chap':
 
@@ -196,9 +202,20 @@ class GWClient(object):
                 # caller so update the acl definition
                 try:
                     if auth_type == 'chap':
+                        self.logger.debug("Updating the ACL")
                         self.acl.chap_userid = client_username
                         self.acl.chap_password = client_password
-                        self.metadata['auth']['chap'] = credentials
+
+                        new_chap = CHAP(credentials)
+                        self.logger.debug("chap object set to: {},{},{},{}".format(new_chap.chap_str,
+                                                                       new_chap.user,
+                                                                       new_chap.password,
+                                                                       new_chap.password_str))
+
+                        new_chap.chap_str = "{}/{}".format(client_username,
+                                                           client_password)
+                        self.logger.debug("Updating config object meta data")
+                        self.metadata['auth']['chap'] = new_chap.chap_str
 
                 except RTSLibError as err:
                     self.error = True
@@ -366,7 +383,10 @@ class GWClient(object):
 
                 #
                 # Does the request match the current config?
-                if self.chap == self.metadata['auth']['chap'] and \
+
+                # create chap_str from metadata
+                config_chap = CHAP(self.metadata['auth']['chap'])
+                if self.chap == config_chap.chap_str and \
                    config_image_list == sorted(self.requested_images):
                     self.commit_enabled = False
             else:
@@ -517,3 +537,75 @@ class GWClient(object):
                                     "mapped_lun": None,
                                     "tpg_lun": m_lun}
         return luns_mapped
+
+
+class CHAP(object):
+
+    def __init__(self, chap_str):
+
+        self.error = False
+        self.error_msg = ''
+
+        if '/' in chap_str:
+            self.user, self.password_str = chap_str.split('/', 1)
+
+            if len(self.password_str) > 16 and encryption_available():
+                self.password = self._decrypt()
+            else:
+                self.password = self.password_str
+        else:
+            self.user = ''
+            self.password = ''
+
+    def _get_chap_str(self):
+        if len(self.password) > 0:
+            return '{}/{}'.format(self.user,
+                                  self.password)
+        else:
+            return ''
+
+    def _set_chap_str(self, chap_str):
+
+        username, self.password_str = chap_str.split('/', 1)
+
+        if encryption_available() and len(self.password_str) > 0:
+            self.password = self._encrypt()
+        else:
+            self.password = self.password_str
+
+    def _decrypt(self):
+
+        key_path = os.path.join(settings.config.ceph_config_dir,
+                                settings.config.priv_key)
+        try:
+            key = RSA.importKey(open(key_path))
+
+            cipher = PKCS1_OAEP.new(key)
+            plain_pw = cipher.decrypt(b64decode(self.password_str))
+        except:
+            self.error = True
+            self.error_msg = 'Problems decoding the encrypted password'
+            raise
+            # return None
+        else:
+            return plain_pw
+
+    def _encrypt(self):
+        key_path = os.path.join(settings.config.ceph_config_dir,
+                                settings.config.pub_key)
+        try:
+            key = RSA.importKey(open(key_path))
+            cipher = PKCS1_OAEP.new(key)
+            encrypted_pw = b64encode(cipher.encrypt(self.password_str))
+        except:
+            self.error = True
+            self.error_msg = 'Encoding password failed'
+            raise
+            # return None
+        else:
+            return encrypted_pw
+
+
+    chap_str = property(_get_chap_str,
+                        _set_chap_str,
+                        doc="get/set the chap string (user/password)")
