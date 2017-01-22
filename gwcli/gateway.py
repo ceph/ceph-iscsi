@@ -11,7 +11,8 @@ from gwcli.storage import Disks
 from gwcli.client import Clients, Client, CHAP
 from gwcli.utils import (this_host, get_other_gateways,
                          GatewayAPIError, GatewayError,
-                         APIRequest, progress_message)
+                         APIRequest, progress_message,
+                         console_message)
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import get_ip, ipv4_addresses, gen_file_hash
@@ -181,15 +182,16 @@ class ISCSIRoot(UIRoot):
     def ui_command_info(self):
         self.logger.debug("CMD: info")
 
-        print("HTTP mode         : {}".format(self.http_mode))
-        print("Rest API port     : {}".format(settings.config.api_port))
-        print("Local endpoint    : {}".format(self.local_api))
-        print("Ceph Cluster Name : {}".format(settings.config.cluster_name))
         if settings.config.trusted_ip_list:
             display_ips = ','.join(settings.config.trusted_ip_list)
         else:
             display_ips = 'None'
-        print("2ndary API IP's   : {}".format(display_ips))
+
+        console_message("HTTP mode          : {}".format(self.http_mode))
+        console_message("Rest API port      : {}".format(settings.config.api_port))
+        console_message("Local endpoint     : {}".format(self.local_api))
+        console_message("Local Ceph Cluster : {}".format(settings.config.cluster_name))
+        console_message("2ndary API IP's    : {}".format(display_ips))
 
 
 class ISCSITarget(UIGroup):
