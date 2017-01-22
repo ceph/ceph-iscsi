@@ -505,7 +505,7 @@ class GatewayGroup(UIGroup):
             return
 
         # compare the hash of the new gateways conf file with the local one
-        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.conf')
+        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
         remote_hash = str(api.response.json()['data'])
         if local_hash != remote_hash:
             self.logger.error("/etc/ceph/iscsi-gateway.conf on {} does "
