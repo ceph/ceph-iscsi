@@ -25,8 +25,7 @@ from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
-                                     gen_file_hash, valid_rpm,
-                                     ConfFile)
+                                     gen_file_hash, valid_rpm)
 
 __author__ = "pcuzner@redhat.com"
 
@@ -625,23 +624,7 @@ def pre_reqs_errors():
                             "or above needed".format(k_vers,
                                                      k_rel))
 
-    # # now check configuration files have the right settings in place
-    # conf = ConfFile('/etc/multipath.conf')
-    # if conf.defaults.skip_kpartx != "yes" or \
-    #       conf.defaults.user_friendly_names != 'no' or \
-    #       conf.defaults.find_multipaths != 'no':
-    #     logger.error("/etc/multipath.conf 'defaults' settings are incorrect")
-    #     errors_found.append('multipath.conf defaults section is incorrect')
-    #
-    #
-    # conf = ConfFile('/etc/lvm/lvm.conf')
-    # if conf.devices.global_filter != '[ "r|^/dev/mapper/[0-255]-.*|" ]':
-    #     logger.error("/etc/lvm/lvm.conf global_filter is missing/invalid")
-    #     errors_found.append('lvm.conf is missing global_filter settings')
-
     return errors_found
-
-
 
 
 def halt(message):
