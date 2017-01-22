@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-__author__ = 'pcuzner@redhat.com'
 
 import socket
 import netaddr
@@ -14,15 +13,7 @@ import rpm
 
 import ceph_iscsi_config.settings as settings
 
-class Defaults(object):
-    pass
-    # size_suffixes = ['M', 'G', 'T']
-    # time_out = 30
-    # loop_delay = 2
-    # ceph_conf = '/etc/ceph/ceph.conf'
-    # keyring = '/etc/ceph/ceph.client.admin.keyring'
-    # ceph_user = 'admin'
-    # rbd_map_file = '/etc/ceph/rbdmap'
+__author__ = 'pcuzner@redhat.com'
 
 
 def shellcommand(command_string):
@@ -33,6 +24,7 @@ def shellcommand(command_string):
         return None
     else:
         return response
+
 
 def get_ip(addr):
     """
@@ -59,6 +51,7 @@ def get_ip(addr):
 
 
     return converted_addr
+
 
 def valid_ip(ip, port=22):
     """
@@ -198,6 +191,20 @@ def convert_2_bytes(disk_size):
     return _bytes
 
 
+def human_size(num):
+    """
+    convert a bytes value into a more human readable format
+    :param num(int): bytes
+    :return: Size as M/G/T suffixed
+    """
+    for unit, precision in [('b', 0), ('K', 0), ('M', 0), ('G', 0), ('T', 0),
+                            ('P', 1), ('E', 2), ('Z', 2)]:
+        if abs(num) < 1024.0:
+            return "{0:.{1}f}{2}".format(num, precision, unit)
+        num /= 1024.0
+    return "{0:.2f}{1}".format(num, "Y")
+
+
 def get_pool_id(conf=None, pool_name='rbd'):
     """
     Query Rados to get the pool id of a given pool name
@@ -243,6 +250,7 @@ def this_host():
     """
     return socket.gethostname().split('.')[0]
 
+
 def gen_file_hash(filename, hash_type='sha256'):
     """
     generate a hash(default sha256) of a file and return the result
@@ -265,183 +273,6 @@ def gen_file_hash(filename, hash_type='sha256'):
             h.update(chunk)
 
     return h.hexdigest()
-
-
-class ConfigData(object):
-    """
-    base class with generic methods inherited by the upper level
-    classes ConfFile, ConfSection and ConfSubsection
-    """
-
-    def __init__(self, name='root'):
-        self._name = name
-        self._children = []
-
-    def __repr__(self):
-        return "{} - {}".format(self.__class__.__name__,
-                                self._name)
-
-    def _get_items(self):
-        return [attribute for attribute in self.__dict__.keys()
-                if not attribute.startswith('_')]
-
-    def _num_children(self):
-        return len(self._children)
-
-    def _get_sections(self):
-        return [section for section in self._children]
-
-    def _get_children(self):
-        return self._children
-
-    children = property(_get_children,
-                        doc="return a list of subsection objects")
-    sections = property(_get_sections,
-                        doc="return list of parsed sections in the conf file")
-    items = property(_get_items,
-                     doc="return a list of field names")
-    num_sections = property(_num_children,
-                            doc="return a count of child objects")
-
-
-class ConfFile(ConfigData):
-    """
-    Configuration File Handler class allowing the files parameters and
-    sections to be inspected. The expected file format uses {} to
-    enclose sections, and has been tested against lvm.conf and multipath.conf
-
-    """
-
-    # list that defines names that would clash with python internal names
-    restricted_sections = {'global': '_global_'}
-
-    def __init__(self, file_name):
-
-        self._file_name = file_name
-
-        ConfigData.__init__(self)
-        with open(file_name) as conf_file:
-            self._config_file = conf_file.read().splitlines()
-
-        self._parse_conf()
-
-    def _parse_conf(self):
-
-        # current_section stores the breadcrumbs for section/subsection
-        # being processed
-        current_section = []
-        for line in self._config_file:
-
-            line = line.rstrip()
-
-            if line.strip().startswith('#') or \
-                    not line:
-                continue
-
-            if line.endswith('{'):
-                section_name = line.split('{')[0].strip()
-                section_name = ConfFile.restricted_sections.get(section_name,
-                                                                section_name)
-                current_section.append(section_name)
-
-                if len(current_section) == 1:
-                    current = getattr(self, section_name, None)
-                    if not current:
-
-                        setattr(self,
-                                section_name,
-                                ConfSection(section_name,
-                                            self))
-
-                        current = getattr(self, section_name)
-
-                else:
-                    parent = getattr(self, current_section[-2])
-                    subsection = ConfSubsection(section_name)
-                    parent._children.append(subsection)
-                    current = subsection
-
-            elif line.endswith('}'):
-                del current_section[-1]
-
-            else:
-                if not line:
-                    continue
-                line = line.strip()
-
-                if '=' in line :
-                    fields = line.split('=')
-                else:
-                    fields = line.split()
-
-                key = fields[0].strip()
-                value = fields[-1].lstrip()
-                # print "*{}* = *{}*".format(key, value)
-                setattr(current, key, value)
-
-    def get(self, section_name, attribute):
-        """
-        get method similar to the ConfigParser get method
-        :param section_name: config file section
-        :param attribute: attribute to extract
-        :return: value of attribute or None
-        """
-
-        section = getattr(self, section_name, None)
-
-        if not section:
-            raise ValueError("{} section not in {}".format(section_name,
-                                                           self._file_name))
-
-        return getattr(section, attribute, None)
-
-    def items(self, section_name):
-        """
-        similar method to ConfigParser items, returning a list
-        of attributes for the current specified section
-        :param section_name: configuration section
-        :return: list of attributes present in the configuration section
-        """
-        section = getattr(self, section_name, None)
-
-        if not section:
-            raise ValueError("{} section not in {}".format(section_name,
-                                                           self._file_name))
-
-        return section.items
-
-    def __str__(self):
-        out = "Filename : {}\n".format(self._file_name)
-        for s in self._children:
-            out += "Section: {}, {} attributes\n".format(s._name,
-                                                         len(s.items))
-        return out
-
-    def _valid_config(self):
-        return True if len(self._children) > 0 else False
-
-    valid = property(_valid_config,
-                     doc="Config object validity(boolean)")
-
-class ConfSection(ConfigData):
-    def __init__(self, name, parent):
-        # print "created section {}".format(name)
-        ConfigData.__init__(self, name)
-        self._parent = parent
-        self._parent._children.append(self)
-
-    def __str__(self):
-        attr_list = self.items
-        out = ''
-        for i in attr_list:
-            out += " {}={}\n".format(i,getattr(self,i))
-        return out
-
-
-class ConfSubsection(ConfigData):
-    def __init__(self, name):
-        # print "created subsection {}".format(name)
-        ConfigData.__init__(self, name)
 
 
 def valid_rpm(in_rpm):
@@ -469,3 +300,20 @@ def valid_rpm(in_rpm):
     else:
         # rpm not installed
         return False
+
+
+def encryption_available():
+    """
+    Determine whether encryption is available by looking for the relevant
+    keys
+    :return: (bool) True if all keys are present, else False
+    """
+    encryption_keys = list([settings.config.priv_key,
+                           settings.config.pub_key])
+
+
+    config_dir = settings.config.ceph_config_dir
+    keys = [os.path.join(config_dir, key_name)
+            for key_name in encryption_keys]
+
+    return all([os.path.exists(key) for key in keys])
