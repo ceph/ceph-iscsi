@@ -214,6 +214,11 @@ class GWClient(object):
 
                         new_chap.chap_str = "{}/{}".format(client_username,
                                                            client_password)
+                        if new_chap.error:
+                            self.error = True
+                            self.error_msg = new_chap.error_msg
+                            return
+
                         self.logger.debug("Updating config object meta data")
                         self.metadata['auth']['chap'] = new_chap.chap_str
 
@@ -384,9 +389,15 @@ class GWClient(object):
                 #
                 # Does the request match the current config?
 
-                # create chap_str from metadata
+                # extract the chap_str from the config object entry
                 config_chap = CHAP(self.metadata['auth']['chap'])
-                if self.chap == config_chap.chap_str and \
+                chap_str = config_chap.chap_str
+                if config_chap.error:
+                    self.error = True
+                    self.error_msg = config_chap.error_msg
+                    return
+
+                if self.chap == chap_str and \
                    config_image_list == sorted(self.requested_images):
                     self.commit_enabled = False
             else:
@@ -423,8 +434,6 @@ class GWClient(object):
                 self.configure_auth('chap', self.chap)
                 if self.error:
                     return
-
-                # else:
 
             else:
                 # request for images to map to this client that haven't been
@@ -585,8 +594,7 @@ class CHAP(object):
         except:
             self.error = True
             self.error_msg = 'Problems decoding the encrypted password'
-            raise
-            # return None
+            return None
         else:
             return plain_pw
 
@@ -600,8 +608,7 @@ class CHAP(object):
         except:
             self.error = True
             self.error_msg = 'Encoding password failed'
-            raise
-            # return None
+            return None
         else:
             return encrypted_pw
 
