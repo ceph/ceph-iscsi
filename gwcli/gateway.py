@@ -415,8 +415,8 @@ class GatewayGroup(UIGroup):
         """
 
         if len(self.children) > 0:
+            self.logger.debug("{} gateways to refresh".format(len(self.children)))
             for gw in self.children:
-                self.logger.debug("Refreshing {}".format(gw.name))
                 gw.refresh()
         else:
             self.logger.error("No gateways to refresh")
