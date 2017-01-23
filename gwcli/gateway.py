@@ -416,6 +416,7 @@ class GatewayGroup(UIGroup):
 
         if len(self.children) > 0:
             for gw in self.children:
+                self.logger.debug("Refreshing {}".format(gw.name))
                 gw.refresh()
         else:
             self.logger.error("No gateways to refresh")
@@ -748,15 +749,14 @@ class Gateway(UINode):
         :return:
         """
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         socket.setdefaulttimeout(1)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
         result = sock.connect_ex((self.portal_ip_address, Gateway.TCP_PORT))
-        if result == 0:
-            sock.close()
+        sock.shutdown(socket.SHUT_RDWR)
+        sock.close()
+
         return "UP" if result == 0 else "DOWN"
-
-
-
 
     def summary(self):
 
