@@ -2,7 +2,8 @@
 Description=Ceph iscsi target configuration API
 
 Requires=sys-kernel-config.mount
-After=sys-kernel-config.mount network-online.target
+After=sys-kernel-config.mount network-online.target rbd-target-gw.service
+BindsTo=rbd-target-gw.service
 Wants=network-online.target
 
 [Service]
