@@ -412,7 +412,7 @@ class Client(UINode):
 
         return [rbd_name for rbd_name, lun_id in srtd_luns]
 
-    def ui_command_disk(self, action='add', disk=None):
+    def ui_command_disk(self, action='add', disk=None, size=None):
         """
         Disks can be added or removed from the client one at a time using
         the disk sub-command. Note that the disk MUST already be defined
@@ -427,14 +427,14 @@ class Client(UINode):
         """
 
         self.logger.debug("CMD: ../hosts/<client_iqn> disk action={}"
-                          "disk={}".format(action,
+                          " disk={}".format(action,
                                            disk))
 
         valid_actions = ['add', 'remove']
 
         if not disk:
             self.logger.critical("You must supply a disk name to add/remove "
-                                 "from this client")
+                                 "for this client")
             return
 
         if action not in valid_actions:
@@ -448,9 +448,9 @@ class Client(UINode):
         if action == 'add':
 
             if disk not in current_luns:
-
+                ui_root = self.get_ui_root()
                 valid_disk_names = [defined_disk.image_id
-                                    for defined_disk in self.parent.parent.parent.parent.disks.children]
+                                    for defined_disk in ui_root.disks.children]
             else:
                 # disk provided is already mapped, so remind the user
                 self.logger.error("Disk {} already mapped".format(disk))
@@ -458,13 +458,34 @@ class Client(UINode):
         else:
             valid_disk_names = current_luns
 
-
-
         if disk not in valid_disk_names:
-            self.logger.critical("the request to {} disk '{}' is "
-                                 "invalid".format(action,
-                                                  disk))
-            return
+
+            # if this is an add operation, we can create the disk on-the-fly
+            # for the admin
+
+            if action == 'add':
+                ui_root = self.get_ui_root()
+                ui_disks = ui_root.disks
+                if not size:
+                    self.logger.error("To autodefine the disk to the client"
+                                      " you must provide a disk size")
+                    return
+
+                # a disk given here would be of the form pool.image
+                pool, image = disk.split('.')
+                rc = ui_disks.create_disk(pool=pool, image=image, size=size)
+                if rc == 0:
+                    self.logger.debug("disk autodefine successful")
+                else:
+                    self.logger.error("disk autodefine failed({}), try "
+                                      "using the /disks create "
+                                      "command".format(rc))
+                    return
+
+            else:
+                self.logger.error("disk '{}' is not mapped to this "
+                                     "client ".format(disk))
+                return
 
         # At this point we are either in add/remove mode, with a valid disk
         # to act upon
@@ -479,8 +500,8 @@ class Client(UINode):
             current_luns.remove(disk)
 
         image_list = ','.join(current_luns)
-
-        other_gateways = get_other_gateways(self.parent.parent.parent.parent.target.children)
+        ui_root = self.get_ui_root()
+        other_gateways = get_other_gateways(ui_root.target.children)
 
         api_vars = {"committing_host": this_host(),
                     "image_list": image_list,
@@ -571,7 +592,8 @@ class MappedLun(UINode):
         UINode.__init__(self, 'lun {}'.format(lun_id), parent)
 
         # navigate back through the object model to pick up the disks
-        disk_lookup = self.parent.parent.parent.parent.parent.disks.disk_lookup
+        ui_root = self.get_ui_root()
+        disk_lookup = ui_root.disks.disk_lookup
 
         self.disk = disk_lookup[name]
         self.owner = self.disk.owner

@@ -76,22 +76,30 @@ class Disks(UIGroup):
                                                     image,
                                                     size))
 
+        rc = self.create_disk(pool=pool, image=image, size=size)
+
+        if rc == 0:
+            self.logger.info('ok')
+
+    def create_disk(self, pool=None, image=None, size=None, parent=None):
+
+        if not parent:
+            parent = self
 
         if not self._valid_request(pool, image, size):
-            return
+            return 4
 
-        # get pool, image, and size ; use this host as the creator
-        local_gw = this_host()
-        disk_key = "{}.{}".format(pool, image)
-        other_gateways = get_other_gateways(self.parent.target.children)
+        ui_root = self.get_ui_root()
+        other_gateways = get_other_gateways(ui_root.target.children)
         if len(other_gateways) < (settings.config.minimum_gateways - 1):
             self.logger.error("At least {} gateways must be defined before "
                               "disks can be added".format(settings.config.minimum_gateways))
-            return
+            return 8
 
         self.logger.debug("Creating/mapping disk {}/{}".format(pool,
                                                                image))
-
+        local_gw = this_host()
+        disk_key = "{}.{}".format(pool, image)
         # make call to local api server first!
         disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
                                                           settings.config.api_port,
@@ -107,14 +115,14 @@ class Disks(UIGroup):
 
         if api.response.status_code == 200:
             # rbd create and map successful, so request it's details and add
-            # to the gwcli
+            # to the UI
             self.logger.debug("- LUN is ready on local")
             api = APIRequest(disk_api)
             api.get()
 
             if api.response.status_code == 200:
                 image_config = api.response.json()
-                Disk(self, disk_key, image_config)
+                Disk(parent, disk_key, image_config)
 
                 self.logger.debug("Processing other gateways")
                 for gw in other_gateways:
@@ -132,13 +140,13 @@ class Disks(UIGroup):
 
         else:
             self.logger.error(api.response.json()['message'])
-            raise GatewayError("Error defining the rbd image to the local gateway")
+            raise GatewayError(
+                "Error defining the rbd image to the local gateway")
 
         ceph_pools = self.parent.ceph.local_ceph.pools
         ceph_pools.refresh()
 
-        self.logger.info('ok')
-
+        return 0
 
     def find_hosts(self):
         hosts = []
@@ -310,9 +318,11 @@ class Disks(UIGroup):
         :param size: size of the rbd (unit suffixed e.g. 20G)
         :return: boolean, indicating whether the parameters may be used or not
         """
+
+        ui_root = self.get_ui_root()
         state = True
         discovered_pools = [rados_pool.name for rados_pool in
-                            self.parent.ceph.local_ceph.pools.children]
+                            ui_root.ceph.local_ceph.pools.children]
         existing_rbds = self.disk_info.keys()
 
         storage_key = "{}.{}".format(pool, image)
