@@ -117,6 +117,10 @@ class Clients(UIGroup):
 
         self.logger.info('ok')
 
+        # switch the current directory to the nee client for auth or disk
+        # definitions as part of the users workflow
+        return self.ui_command_cd(client_iqn)
+
     def ui_command_delete(self, client_iqn):
         """
         You may delete a client from the configuration, but you must ensure
