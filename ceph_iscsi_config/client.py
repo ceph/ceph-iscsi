@@ -26,7 +26,8 @@ class GWClient(object):
 
     seed_metadata = {
                      "auth": {"chap": ''},
-                     "luns": {}
+                     "luns": {},
+                     "group_name": ""
                      }
 
     def __init__(self, logger, client_iqn, image_list, chap):
