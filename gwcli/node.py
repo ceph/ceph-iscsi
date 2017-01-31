@@ -17,6 +17,14 @@ class UICommon(ConfigNode):
         else:
             pass
 
+    def get_ui_root(self):
+        found = False
+        obj = self
+        while not found:
+            if obj.__class__.__name__ == 'ISCSIRoot':
+                break
+            obj = obj.parent
+        return obj
 
 class UIGroup(UICommon):
 
