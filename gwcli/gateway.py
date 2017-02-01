@@ -12,7 +12,7 @@ from gwcli.client import Clients, Client, CHAP
 from gwcli.utils import (this_host, get_other_gateways,
                          GatewayAPIError, GatewayError,
                          APIRequest, progress_message,
-                         console_message)
+                         console_message, get_port_state)
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import get_ip, ipv4_addresses, gen_file_hash
@@ -717,7 +717,8 @@ class Gateway(UINode):
                           "portal_ip_address",
                           "inactive_portal_ips",
                           "active_luns",
-                          "tpgs"]
+                          "tpgs",
+                          "service_state"]
 
     TCP_PORT = 3260
 
@@ -734,29 +735,46 @@ class Gateway(UINode):
         for k, v in gateway_config.iteritems():
             self.__setattr__(k, v)
 
+        self.logger = parent.logger
+        self.state = "DOWN"
+        self.service_state = {"iscsi": {"state": "DOWN",
+                                        "port": Gateway.TCP_PORT},
+                              "api": {"state": "DOWN",
+                                      "port": settings.config.api_port}
+                              }
         self.refresh()
 
     def refresh(self):
 
-        self.parent.logger.debug("- checking iSCSI port is accessible on "
-                                 "{}".format(self.name))
-        self.state = self._get_state()
+        self.logger.debug("- checking iSCSI/API ports on "
+                          "{}".format(self.name))
+        self._get_state()
+
+        up_count = len([self.service_state[s]["state"] for s in self.service_state
+                        if self.service_state[s]["state"] == "UP"])
+
+        if up_count == len(self.service_state):
+            self.state = "UP"
+        elif up_count == 0:
+            self.state = "DOWN"
+        else:
+            self.state = "PARTIAL"
 
     def _get_state(self):
         """
-        determine whether the iscsi port is open based on port 3260 being
-        accessible
+        Determine iSCSI and gateway API service state
         :return:
         """
 
-        socket.setdefaulttimeout(1)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        for svc in self.service_state:
 
-        result = sock.connect_ex((self.portal_ip_address, Gateway.TCP_PORT))
-        sock.shutdown(socket.SHUT_RDWR)
-        sock.close()
+            result = get_port_state(self.portal_ip_address,
+                                    self.service_state[svc]["port"])
 
-        return "UP" if result == 0 else "DOWN"
+            self.service_state[svc]["state"] = "UP" if result == 0 else "DOWN"
+
+
+
 
     def summary(self):
 
