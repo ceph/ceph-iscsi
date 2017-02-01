@@ -123,3 +123,22 @@ def console_message(text, color='green'):
     print("{}{}{}".format(Colors.map[color],
                           text,
                           '\x1b[0m'))
+
+def get_port_state(ip_address, port):
+    """
+    Determine port state
+    :param ip_address: ipv4 address dotted quad string
+    :param port: port number
+    :return: 0 = port open, !=0 port closed/inaccessible
+    """
+
+    socket.setdefaulttimeout(1)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        result = sock.connect_ex((ip_address, port))
+        sock.shutdown(socket.SHUT_RDWR)
+        sock.close()
+    except socket.error:
+        result = 16
+
+    return result
