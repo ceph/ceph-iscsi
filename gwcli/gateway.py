@@ -406,7 +406,7 @@ class GatewayGroup(UIGroup):
         self.logger.debug("CMD: ../gateways/ info")
 
         for child in self.children:
-            print(child)
+            console_message(child)
 
     def ui_command_refresh(self):
         """
