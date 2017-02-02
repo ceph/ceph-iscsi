@@ -84,8 +84,9 @@ class UINode(UIGroup):
                         if isinstance(attr_value[dict_key], dict):
                             inner_dict = attr_value[dict_key]
                             display_value = ", ".join(["=".join([key, str(val)]) for key, val in inner_dict.items()])
-                            display_text += ("- {} .. {}\n".format(dict_key,
-                                                                   display_value))
+                            display_text += ("- {:<{}} .. {}\n".format(dict_key,
+                                                                       max_dict_field,
+                                                                       display_value))
 
                         else:
                             display_text += ("- {} .. {}\n".format(dict_key,
