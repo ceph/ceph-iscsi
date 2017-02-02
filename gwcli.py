@@ -17,6 +17,7 @@ from gwcli.gateway import ISCSIRoot
 import ceph_iscsi_config.settings as settings
 
 __author__ = 'pcuzner@redhat.com'
+__version__ = '2.1'
 
 
 class GatewayCLI(ConfigShell):
@@ -35,12 +36,6 @@ class GatewayCLI(ConfigShell):
                      'tree_status_mode': True,
                      'tree_round_nodes': True,
                      'tree_show_root': True,
-                     'export_backstore_name_as_model': True,
-                     'auto_enable_tpgt': True,
-                     'auto_add_mapped_luns': True,
-                     'auto_cd_after_create': False,
-                     'auto_save_on_exit': True,
-                     'auto_add_default_portal': True,
                      }
 
 
@@ -68,7 +63,7 @@ def get_options():
                         default=False,
                         help='run with additional debug')
     parser.add_argument('-v', '--version', action='version',
-                        version='%(prog)s 0.1')
+                        version='%(prog)s - {}'.format(__version__))
     parser.add_argument('cli_command', type=str, nargs=argparse.REMAINDER)
 
     # create the opts object
@@ -96,7 +91,9 @@ def main():
     shell = GatewayCLI('~/.gwcli')
 
     root_node = ISCSIRoot(shell, logger)
+
     root_node.interactive = False if options.cli_command else True
+    settings.config.interactive = False if options.cli_command else True
 
     # Load the config to populate the object model
     root_node.refresh()
