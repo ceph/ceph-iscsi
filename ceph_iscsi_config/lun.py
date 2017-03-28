@@ -160,7 +160,8 @@ class RBDDev(object):
             ioctx = cluster.open_ioctx(self.pool)
             with rbd.Image(ioctx, self.image) as rbd_image:
 
-                if rbd_image.features() != RBDDev.supported_features():
+                if rbd_image.features() & RBDDev.supported_features() != \
+                    RBDDev.supported_features():
                     valid_state = False
 
         return valid_state
