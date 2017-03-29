@@ -281,74 +281,76 @@ class GWTarget(object):
         param lun: lun object on the tpg
         param tpg_ip: IP of Network Portal for the lun's tpg.
         """
-        return
+        # return
 
-        # stg_object = lun.storage_object
-        #
-        # owning_gw = config.config['disks'][stg_object.name]['owner']
-        # tpg = lun.parent_tpg
-        #
-        # if tpg_ip_address is None:
-        #     # just need to check one portal
-        #     for ip in tpg.network_portals:
-        #         tpg_ip_address = ip.ip_address
-        #         break
-        #
-        # if tpg_ip_address is None:
-        #     # this is being run during boot so the NP is not setup yet.
-        #     return
-        #
-        # # TODO: The ports in a alua group must export the same state for a LU
-        # # group. For different LUs we are exporting different states, so
-        # # we should be creating different LU groups or creating different
-        # # alua groups for each LU.
-        # try:
-        #     if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
-        #         self.logger.info("setting {} to ALUA/ActiveOptimised "
-        #                          "group id {}".format(stg_object.name, tpg.tag))
-        #         group_name = "ao"
-        #         alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
-        #         # alua_tpg.alua_access_state = 0
-        #         alua_tpg.preferred = 1
-        #     else:
-        #         self.logger.info("setting {} to ALUA/ActiveNONOptimised "
-        #                          "group id {}".format(stg_object.name, tpg.tag))
-        #         group_name = "ano{}".format(tpg.tag)
-        #         alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
-        #         # alua_tpg.alua_access_state = 1
-        # except RTSLibError as err:
-        #         self.logger.info("ALUA group id {} for stg obj {} lun {} "
-        #                          "already made".format(tpg.tag, stg_object, lun))
-        #         # someone mapped a LU then unmapped it without deleting the
-        #         # stg_object, or we are reloading the config.
-        #         alua_tpg = ALUATargetPortGroup(stg_object, group_name)
-        #         if alua_tpg.tpg_id != tpg.tag:
-        #             # ports and owner were rearranged. Not sure we support that.
-        #             raise RTSLibError
-        #
-        #         # drop down in case we are restarting due to error and we
-        #         # were not able to bind to a lun last time.
-        #
-        # # alua_tpg.alua_access_type = 1
-        #
-        # # start ports in Standby, and let the initiator drive the initial
-        # # transition to AO.
-        # self.logger.debug("ALUA defined, updating state")
-        # alua_tpg.alua_access_state = 2
-        # alua_tpg.alua_access_type = 2
-        #
-        # alua_tpg.alua_support_offline = 0
-        # alua_tpg.alua_support_unavailable = 0
-        # alua_tpg.alua_support_standby = 1
-        # alua_tpg.nonop_delay_msecs = 0
-        #
-        #
-        # # alua_tpg.bind_to_lun(lun)
-        # self.logger.debug("Setting Luns tg_pt_gp to {}".format(group_name))
-        # lun.alua_tg_pt_gp_name = group_name
-        # self.logger.debug("Bound {} on tpg{} to {}".format(stg_object.name,
-        #                                                    tpg.tag,
-        #                                                    group_name))
+        stg_object = lun.storage_object
+
+        owning_gw = config.config['disks'][stg_object.name]['owner']
+        tpg = lun.parent_tpg
+
+        if tpg_ip_address is None:
+            # just need to check one portal
+            for ip in tpg.network_portals:
+                tpg_ip_address = ip.ip_address
+                break
+
+        if tpg_ip_address is None:
+            # this is being run during boot so the NP is not setup yet.
+            return
+
+        # TODO: The ports in a alua group must export the same state for a LU
+        # group. For different LUs we are exporting different states, so
+        # we should be creating different LU groups or creating different
+        # alua groups for each LU.
+        try:
+            if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
+                self.logger.info("setting {} to ALUA/ActiveOptimised "
+                                 "group id {}".format(stg_object.name, tpg.tag))
+                group_name = "ao"
+                alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
+                # alua_tpg.alua_access_state = 0
+                alua_tpg.preferred = 1
+            else:
+                self.logger.info("setting {} to ALUA/ActiveNONOptimised "
+                                 "group id {}".format(stg_object.name, tpg.tag))
+                group_name = "ano{}".format(tpg.tag)
+                alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
+                # alua_tpg.alua_access_state = 1
+        except RTSLibError as err:
+                self.logger.info("ALUA group id {} for stg obj {} lun {} "
+                                 "already made".format(tpg.tag, stg_object, lun))
+                # someone mapped a LU then unmapped it without deleting the
+                # stg_object, or we are reloading the config.
+                alua_tpg = ALUATargetPortGroup(stg_object, group_name)
+                if alua_tpg.tpg_id != tpg.tag:
+                    # ports and owner were rearranged. Not sure we support that.
+                    raise RTSLibError
+
+                # drop down in case we are restarting due to error and we
+                # were not able to bind to a lun last time.
+
+        # alua_tpg.alua_access_type = 1
+
+        # start ports in Standby, and let the initiator drive the initial
+        # transition to AO.
+        self.logger.debug("ALUA defined, updating state")
+        alua_tpg.alua_access_state = 2
+        alua_tpg.alua_access_type = 3
+
+        alua_tpg.alua_support_offline = 0
+        alua_tpg.alua_support_unavailable = 0
+        alua_tpg.alua_support_standby = 1
+        alua_tpg.alua_support_transitioning = 1
+        alua_tpg.implicit_trans_secs = 60
+        alua_tpg.nonop_delay_msecs = 0
+
+
+        # alua_tpg.bind_to_lun(lun)
+        self.logger.debug("Setting Luns tg_pt_gp to {}".format(group_name))
+        lun.alua_tg_pt_gp_name = group_name
+        self.logger.debug("Bound {} on tpg{} to {}".format(stg_object.name,
+                                                           tpg.tag,
+                                                           group_name))
 
     def map_luns(self, config):
         """
