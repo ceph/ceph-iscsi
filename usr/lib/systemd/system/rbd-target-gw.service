@@ -2,8 +2,8 @@
 Description=Setup system to export rbd images through LIO
 
 Requires=sys-kernel-config.mount
-After=sys-kernel-config.mount network-online.target multipathd.service
-Wants=network-online.target multipathd.service
+After=sys-kernel-config.mount network-online.target tcmu-runner.service
+Wants=network-online.target tcmu-runner.service
 
 [Service]
 EnvironmentFile=-/etc/sysconfig/ceph
