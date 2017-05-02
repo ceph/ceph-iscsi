@@ -27,10 +27,10 @@ shell (based on configshell) and an API service called rbd-target-api.
 
 The CLI orchestrates iscsi configuration changes through the API service
 running on EACH gateway node. The API service uses the same configuration
-settings file '/etc/ceph/iscsi-gateway.conf' as the rbd-target-gw service.
+settings file '/etc/ceph/iscsi-gateway.cfg' as the rbd-target-gw service.
 
-You should ensure that this 'conf' file is consistent across gateways for
-consistent behaviour.
+You should ensure that the 'cfg' file is consistent across gateways for
+predictable behaviour.
 
 %prep
 %setup -q 
@@ -46,10 +46,15 @@ install -m 0644 .%{_unitdir}/rbd-target-api.service %{buildroot}%{_unitdir}
 mkdir -p %{buildroot}%{_mandir}/man8
 install -m 0644 gwcli.8 %{buildroot}%{_mandir}/man8/
 gzip %{buildroot}%{_mandir}/man8/gwcli.8
+mkdir -p %{buildroot}%{_sysconfdir}/systemd/system/rbd-target-gw.service.d
+install -m 0644 .%{sysconfdir}/systemd/system/rbd-target-gw.service.d/dependencies.conf %{buildroot}%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/
 
 %post
 /bin/systemctl --system daemon-reload &> /dev/null || :
 /bin/systemctl --system enable rbd-target-api &> /dev/null || :
+
+%postun
+/bin/systemctl --system daemon-reload &> /dev/null || :
 
 %files
 %doc README
@@ -57,24 +62,29 @@ gzip %{buildroot}%{_mandir}/man8/gwcli.8
 %{_bindir}/gwcli
 %{_bindir}/rbd-target-api
 %{_unitdir}/rbd-target-api.service
+%{_sysconfdir}/systemd/system/rbd-target-gw.service.d
 %{python2_sitelib}/*
 %{_mandir}/man8/gwcli.8.gz
 
 %changelog
 * Sat Jan 21 2017 Paul Cuzner <pcuzner@redhat.com> 2.1-1
 - updated for TCMU support (krbd/device mapper support removed)
-- api updated to remove python-flask-restful
-- api now documents it's entry points - get /api to show available API calls
+- rbd-target-api restructured to remove python-flask-restful dependency
+- api endpoints available through a get /api call
 - spec updated for pyOpenSSL dependency (used by API)
 - added feature text to disk info command instead of just a feature code (int)
 - automatically select TLS version based on version of werkzeug
 - disk resize and info now available from the upper level 'disks' section
 - requested commands echo'd to the log file improving audit record
-- add gateways refresh command and determine iscsi up/down using port 3260
+- add gateways refresh command
 - fix: disk resize now changes all related entries in the tree
 - ceph clusters are populated automatically through presence in /etc/ceph
 - added ceph cluster name to disk info output
 - 'ansible' mode exports decrypt chap passwords automatically
+- cli installation binds rbd-target-api to the unit state of rbd-target-gw
+- workflow: switch dir to newly created client to speed up client definition
+- workflow: non-existent disk gets autodefined within the client dialog
+- gateway health determined using iscsi port AND api port state
 
 * Thu Jan 5 2017 Paul Cuzner <pcuzner@redhat.com> 2.0-1
 - initial rpm packaging
