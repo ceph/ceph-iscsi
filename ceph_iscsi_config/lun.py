@@ -609,6 +609,7 @@ class LUN(object):
                                               size=self.size_bytes,
                                               wwn=in_wwn)
 
+            new_lun.set_attribute("cmd_time_out", 0);
         except RTSLibError as err:
             self.error = True
             self.error_msg = ("failed to add {} to LIO - "
