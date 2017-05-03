@@ -458,7 +458,7 @@ class GatewayGroup(UIGroup):
             return
 
         # validate that the gateway name isn't already known within the
-        # configuration
+        # configuration by looking at the UI tree
         current_gws = [gw for gw in self.children]
         current_gw_names = [gw.name for gw in current_gws]
         current_gw_portals = [gw.portal_ip_address for gw in current_gws]
@@ -472,6 +472,7 @@ class GatewayGroup(UIGroup):
             self.logger.error("'{}' is already defined within the "
                               "configuration".format(ip_address))
             return
+
         gw_api = '{}://{}:{}/api'.format(self.http_mode,
                                          gateway_name,
                                          settings.config.api_port)
@@ -553,135 +554,33 @@ class GatewayGroup(UIGroup):
                               " over API - sync aborted, restart rbd-target-gw"
                               " on {} to sync".format(gateway_name))
 
+        sync_text = "sync requested" if not nosync else "sync skipped"
+        self.logger.info("Adding gateway, ({})".format(sync_text))
 
-        current_disks = config['disks']
-        current_clients = config['clients']
-        total_objects = (len(current_disks.keys()) +
-                         len(current_clients.keys()))
-        gateway_ip_list = config['gateways'].get('ip_list', [])
-        gateway_ip_list.append(ip_address)
+        gw_api = '{}://{}:{}/api'.format(self.http_mode,
+                                         "127.0.0.1",
+                                         settings.config.api_port)
+        gw_rqst = gw_api + '/all_gateway/{}'.format(gateway_name)
+        gw_vars = {"nosync": nosync,
+                   "ip_address": ip_address}
+        api = APIRequest(gw_rqst, data=gw_vars)
+        api.put()
 
-        if total_objects == 0:
-            nosync = True
+        if api.response.status_code != 200:
+            msg = api.response.json()['message']
 
-        for endpoint in gateway_ip_list:
-            if first_gateway:
-                endpoint = '127.0.0.1'
+            self.logger.error("Failed to create gateway {} - "
+                              "{}".format(gateway_name,
+                                          msg))
+            raise GatewayAPIError(msg)
 
-            self.logger.debug("processing endpoint {} for "
-                              "{}".format(endpoint,
-                                          gateway_name))
+        self.logger.debug("{}".format(api.response.json()['message']))
+        self.logger.debug("Adding gw to UI")
 
-            api_endpoint = '{}://{}:{}/api'.format(self.http_mode,
-                                                   endpoint,
-                                                   settings.config.api_port)
-
-            gateway_rqst = api_endpoint + '/gateway/{}'.format(gateway_name)
-            gw_vars = {"target_iqn": self.parent.target_iqn,
-                        "gateway_ip_list": ",".join(gateway_ip_list),
-                        "mode": "target"}
-
-            api = APIRequest(gateway_rqst, data=gw_vars)
-            api.put()
-            if api.response.status_code != 200:
-                # GW creation failed
-                msg = api.response.json()['message']
-
-                self.logger.error("Failed to create gateway {} - "
-                                  "{}".format(gateway_name,
-                                              msg))
-
-                raise GatewayAPIError(msg)
-
-            # for the new gateway, when sync is selected we need to run the
-            # disk api to register all the rbd's to that gateway
-            if endpoint == ip_address and not nosync:
-                cnt = 1
-                total_disks = len(current_disks.keys())
-                for disk_key in current_disks:
-                    if self.interactive:
-                        progress_message("syncing disks {}/{}".format(cnt,
-                                                                      total_disks))
-                    this_disk = current_disks[disk_key]
-                    lun_rqst = api_endpoint + '/disk/{}'.format(disk_key)
-                    lun_vars = { "pool": this_disk['pool'],
-                                 "size": "0G",
-                                 "owner": this_disk['owner'],
-                                 "mode": "sync"}
-
-                    api = APIRequest(lun_rqst, data=lun_vars)
-                    api.put()
-                    if api.response.status_code != 200:
-                        msg = api.response.json()['message']
-                        self.logger.error("Failed to add {} to {} new "
-                                          "tpg : {}".format(disk_key,
-                                                            endpoint,
-                                                            msg))
-                        raise GatewayAPIError(msg)
-
-                    cnt += 1
-
-                if self.interactive:
-                    print("")
-
-            # Adding a gateway introduces a new tpg - each tpg MUST have the
-            # luns defined so a RTPG call can be responded to correctly, so
-            # we need to sync the disks to the new tpg's
-
-            if len(current_disks.keys()) > 0:
-
-                if endpoint != ip_address or not nosync:
-
-                    gw_vars['mode'] = 'map'
-                    api = APIRequest(gateway_rqst, data=gw_vars)
-                    api.put()
-                    if api.response.status_code != 200:
-                        # FIXME
-                        # GW creation failed - if the failure was severe you'll
-                        # see a json issue here.
-                        msg = api.response.json()['message']
-                        self.logger.error("Failed to map existing disks to new"
-                                          " tpg on {} - ".format(endpoint))
-                        raise GatewayAPIError(msg)
-
-                if endpoint == ip_address and not nosync:
-                    cnt = 1
-                    total_clients = len(current_clients.keys())
-                    for client_iqn in current_clients:
-                        if self.interactive:
-                            progress_message("syncing clients {}/{}".format(cnt,
-                                                                            total_clients))
-                        this_client = current_clients[client_iqn]
-                        client_luns = this_client['luns']
-                        lun_list = [(disk, client_luns[disk]['lun_id'])
-                                    for disk in client_luns]
-                        srtd_list = Client.get_srtd_names(lun_list)
-
-                        # client_iqn, image_list, chap, committing_host
-                        client_vars = {'chap': this_client['auth']['chap'],
-                                       'image_list': ','.join(srtd_list),
-                                       'committing_host': local_gw}
-
-                        api = APIRequest(api_endpoint +
-                                         "/client/{}".format(client_iqn),
-                                         data=client_vars)
-                        api.put()
-                        if api.response.status_code != 200:
-                            msg = api.response.json()['message']
-                            self.logger.error("Problem adding client {} - "
-                                              "{}".format(client_iqn,
-                                                          api.response.json()['message']))
-                            raise GatewayAPIError(msg)
-                        cnt += 1
-
-                    # add a new line, to tidy up the display
-                    if self.interactive:
-                        print("")
-
-        self.logger.debug("Processing complete. Adding gw to UI")
         # Target created OK, get the details back from the gateway and
         # add to the UI. We have to use the new gateway to ensure what
-        # we get back is current (the other gateways will lag)
+        # we get back is current (the other gateways will lag until they see
+        # epoch xattr change on the config object)
         new_gw_endpoint = '{}://{}:{}/api'.format(self.http_mode,
                                                   gateway_name,
                                                   settings.config.api_port)

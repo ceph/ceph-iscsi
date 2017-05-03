@@ -26,6 +26,10 @@ from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
                                      gen_file_hash, valid_rpm)
+from gwcli.utils import (this_host,
+                         APIRequest)
+
+from gwcli.client import Client
 
 __author__ = "pcuzner@redhat.com"
 
@@ -205,11 +209,144 @@ def get_gateways():
         abort(403)
 
 
+@app.route('/api/all_gateway/<gateway_name>', methods=['PUT'])
+@requires_restricted_auth
+def all_gateway(gateway_name=None):
+    """
+    Define iscsi gateway(s) across node(s)
+
+    :param gateway_name: (str) gateway name
+    :return:
+    """
+
+    resp_text = "Gateway added"     # Assume the best!
+    http_mode = 'https' if settings.config.api_secure else 'http'
+
+    ip_address = request.form.get('ip_address')
+    nosync = request.form.get('nosync', False)
+
+    current_disks = config.config['disks']
+    current_clients = config.config['clients']
+    target_iqn = config.config['gateways'].get('iqn')
+
+    total_objects = (len(current_disks.keys()) +
+                     len(current_clients.keys()))
+    if total_objects == 0:
+        nosync = True
+
+    gateway_ip_list = config.config['gateways'].get('ip_list', [])
+    gateway_ip_list.append(ip_address)
+
+    first_gateway = (len(gateway_ip_list) == 1)
+
+    for endpoint in gateway_ip_list:
+        if first_gateway:
+            endpoint = '127.0.0.1'
+
+        logger.debug("Processing GW endpoint {} for {}".format(endpoint,
+                                                               gateway_name))
+
+        api_endpoint = '{}://{}:{}/api'.format(http_mode,
+                                               endpoint,
+                                               settings.config.api_port)
+
+        gw_rqst = api_endpoint + '/gateway/{}'.format(gateway_name)
+        gw_vars = {"target_iqn": target_iqn,
+                   "gateway_ip_list": ",".join(gateway_ip_list),
+                   "mode": "target"}
+
+        logger.debug("Calling API at {} with {}".format(gw_rqst, gw_vars))
+
+        api = APIRequest(gw_rqst, data=gw_vars)
+        api.put()
+        if api.response.status_code != 200:
+            # GW creation failed
+            msg = api.response.json()['message']
+
+            logger.error("Failed to create gateway {}: {}".format(gateway_name,
+                                                                  msg))
+
+            abort(500, msg)
+
+        # for the new gateway, when sync is selected we need to run the
+        # disk api to register all the rbd's to that gateway
+        if endpoint == ip_address and not nosync:
+
+            for disk_key in current_disks:
+
+                this_disk = current_disks[disk_key]
+                lun_rqst = api_endpoint + '/disk/{}'.format(disk_key)
+                lun_vars = {"pool": this_disk['pool'],
+                            "size": "0G",
+                            "owner": this_disk['owner'],
+                            "mode": "sync"}
+
+                api = APIRequest(lun_rqst, data=lun_vars)
+                api.put()
+                if api.response.status_code != 200:
+                    msg = api.response.json()['message']
+                    logger.error("Failed to add disk {} to {} new "
+                                 "tpg : {}".format(disk_key,
+                                                   endpoint,
+                                                   msg))
+                    abort(500, msg)
+
+            resp_text += ", {} disks added".format(len(current_disks))
+
+        # Adding a gateway introduces a new tpg - each tpg MUST have the
+        # luns defined so a RTPG call can be responded to correctly, so
+        # we need to sync the disks to the new tpg's
+        if len(current_disks.keys()) > 0:
+
+            if endpoint != ip_address or not nosync:
+
+                gw_vars['mode'] = 'map'
+                api = APIRequest(gw_rqst, data=gw_vars)
+                api.put()
+                if api.response.status_code != 200:
+                    # GW creation failed - if the failure was severe you'll
+                    # see a json issue here.
+                    msg = api.response.json()['message']
+                    logger.error("Failed to map existing disks to new"
+                                 " tpg on {} - ".format(endpoint))
+                    abort(500, msg)
+
+            if endpoint == ip_address and not nosync:
+
+                for client_iqn in current_clients:
+
+                    this_client = current_clients[client_iqn]
+                    client_luns = this_client['luns']
+                    lun_list = [(disk, client_luns[disk]['lun_id'])
+                                for disk in client_luns]
+                    srtd_list = Client.get_srtd_names(lun_list)
+
+                    # client_iqn, image_list, chap, committing_host
+                    client_vars = {'chap': this_client['auth']['chap'],
+                                   'image_list': ','.join(srtd_list),
+                                   'committing_host': local_gw}
+
+                    api = APIRequest(api_endpoint +
+                                     "/client/{}".format(client_iqn),
+                                     data=client_vars)
+                    api.put()
+                    if api.response.status_code != 200:
+                        msg = api.response.json()['message']
+                        logger.error("Problem adding client {} - "
+                                     "{}".format(client_iqn,
+                                                 api.response.json()['message']))
+                        abort(500, msg)
+
+                resp_text += ", {} clients defined".format(len(current_clients))
+
+    return make_response(jsonify({"message": resp_text}), 200)
+
+
 @app.route('/api/gateway/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
 def manage_gateway(gateway_name=None):
     """
-    Manage the gateway definition lifecycle
+    Manage the local iSCSI gateway definition
 
     Gateways maye be added(PUT), queried (GET) or deleted (DELETE) from
     the configuration
@@ -226,9 +363,12 @@ def manage_gateway(gateway_name=None):
         else:
             abort(404,
                   "this isn't the droid you're looking for")
+
     elif request.method == 'PUT':
         # the parameters need to be cast to str for compatibility
         # with the comparison logic in common.config.add_item
+        logger.debug("Attempting create of gateway {}".format(gateway_name))
+
         gateway_ips = str(request.form['gateway_ip_list'])
         target_iqn = str(request.form['target_iqn'])
         target_mode = str(request.form.get('mode', 'target'))
@@ -298,6 +438,18 @@ def get_disks():
     response = {"disks": disk_names}
 
     return make_response(jsonify(response), 200)
+
+
+@app.route('/api/all_disk/<image_id>', methods=['PUT', 'DELETE'])
+@requires_restricted_auth
+def all_disk(image_id):
+    """
+    define rbd images across the gateway nodes
+
+    :param image_id: (str) rbd image name of the format pool.image
+    :return:
+    """
+    pass
 
 
 @app.route('/api/disk/<image_id>', methods=['GET', 'PUT', 'DELETE'])
@@ -583,8 +735,7 @@ def manage_client(client_iqn):
 def pre_reqs_errors():
     """
     function to check pre-req rpms are installed and at the relevant versions
-    and also check that multipath.conf and lvm.conf have the required
-    changes applied
+
     :return: list of configuration errors detected
     """
 
@@ -634,7 +785,7 @@ def halt(message):
 
 class ConfigWatcher(threading.Thread):
     """
-    A ConfigWatcher checks the epoc attribute of the rados object every 'n'
+    A ConfigWatcher checks the epoc xattr of the rados config object every 'n'
     seconds to determine if a change has been made. If a change has been made
     the local copy of the config object is refreshed
     """
@@ -647,7 +798,7 @@ class ConfigWatcher(threading.Thread):
     def run(self):
 
         logger.info("Started the configuration object watcher")
-        logger.info("Checking for changes every {}s".format(self.interval))
+        logger.info("Checking for config object changes every {}s".format(self.interval))
 
         cluster = rados.Rados(conffile=settings.config.cephconf)
         cluster.connect()
@@ -733,10 +884,12 @@ def main():
     else:
         context = None
 
-    # Start the API server
+    # Start the API server. threaded is enabled to prevent deadlocks when one
+    # request makes further api requests
     app.run(host='0.0.0.0',
             port=settings.config.api_port,
             debug=True,
+            threaded=True,
             use_reloader=False,
             ssl_context=context)
 
