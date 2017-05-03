@@ -1,4 +1,26 @@
-ceph-iscsi-cli installs a targetcli-like interface to allow
-multiple ceph/iscsi gateways to be managed from a single
-interface. The CLI interfaces with the API exposed in the
-rbd-target-gw daemon running on each gateway.
+ceph-iscsi-cli installs a targetcli-like interface to allow multiple ceph/iscsi
+gateways to be managed from a single interface. The CLI interfaces with the API
+exposed in the rbd-target-gw daemon running on each gateway.
+
+The rbd-target-api daemon utilises the flask's internal development server to
+provide the REST api. It is normally not used in a production context, but
+given this specific use case it provides a simple way to provide an admin
+interface - at least for the first release!
+
+API tested with Firefox RESTclient add-on. After importing the self signed cert
+and adding basic auth credentials to match the local api configuration, use the
+REST client as follows;
+
+Add a Header content type for application/x-www-form-urlencoded
+METHOD: PUT        URL: https://192.168.122.69:5001/api/all_gateway/rh7-gw1
+select the urlencoded content type and the basic auth credentials
+add the required variables to the body section in the client ui
+  eg. ip_address=192.168.122.69
+Click 'SEND'
+
+
+Curl examples
+Add a gateway
+curl --insecure --user admin:admin -d "ip_address=192.168.122.104" \
+     -X PUT https://192.168.122.69:5001/api/all_gateway/rh7-gw2
+
