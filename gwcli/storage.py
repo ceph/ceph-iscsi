@@ -80,6 +80,9 @@ class Disks(UIGroup):
 
         if rc == 0:
             self.logger.info('ok')
+        else:
+            self.logger.error('Failed')
+
 
     def create_disk(self, pool=None, image=None, size=None, parent=None):
 
@@ -87,6 +90,7 @@ class Disks(UIGroup):
             parent = self
 
         if not self._valid_request(pool, image, size):
+            self.logger.error("Adding {}.{} is invalid".format(pool, image))
             return 4
 
         ui_root = self.get_ui_root()
@@ -100,23 +104,29 @@ class Disks(UIGroup):
                                                                image))
         local_gw = this_host()
         disk_key = "{}.{}".format(pool, image)
-        # make call to local api server first!
-        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
-                                                          settings.config.api_port,
-                                                          disk_key)
+
+        # make call to local api server's all_ method
+        disk_api = '{}://127.0.0.1:{}/api/all_disk/{}'.format(self.http_mode,
+                                                              settings.config.api_port,
+                                                              disk_key)
 
         api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
                     'mode': 'create'}
 
-        self.logger.debug("Processing local LIO instance")
+        self.logger.debug("Issuing request to local API")
 
         api = APIRequest(disk_api, data=api_vars)
         api.put()
 
         if api.response.status_code == 200:
-            # rbd create and map successful, so request it's details and add
-            # to the UI
-            self.logger.debug("- LUN is ready on local")
+            # rbd create and map successful across all gateways so request
+            # it's details and add to the UI
+            self.logger.debug("- LUN is ready on all gateways")
+
+            ceph_pools = self.parent.ceph.local_ceph.pools
+            ceph_pools.refresh()
+
+            disk_api = disk_api.replace('/all_disk/', '/disk/')
             api = APIRequest(disk_api)
             api.get()
 
@@ -124,29 +134,11 @@ class Disks(UIGroup):
                 image_config = api.response.json()
                 Disk(parent, disk_key, image_config)
 
-                self.logger.debug("Processing other gateways")
-                for gw in other_gateways:
-                    disk_api = '{}://{}:{}/api/disk/{}'.format(self.http_mode,
-                                                               gw,
-                                                               settings.config.api_port,
-                                                               disk_key)
-                    api = APIRequest(disk_api, data=api_vars)
-                    api.put()
-
-                    if api.response.status_code == 200:
-                        self.logger.debug("- LUN is ready on {}".format(gw))
-                    else:
-                        raise GatewayAPIError(api.response.json()['message'])
+            return 0
 
         else:
-            self.logger.error(api.response.json()['message'])
-            raise GatewayError(
-                "Error defining the rbd image to the local gateway")
+            return 16
 
-        ceph_pools = self.parent.ceph.local_ceph.pools
-        ceph_pools.refresh()
-
-        return 0
 
     def find_hosts(self):
         hosts = []
@@ -220,7 +212,7 @@ class Disks(UIGroup):
         """
         Delete a given rbd image from the configuration and ceph. This is a
         destructive action that could lead to data loss, so please ensure
-        the rbd image is correct!
+        the rbd image name is correct!
 
         > delete <rbd_image_name>
 
@@ -240,6 +232,7 @@ class Disks(UIGroup):
         # Although the LUN class will check that the lun is unallocated before
         # attempting a delete, it seems cleaner and more responsive to check
         # through the local object model here before sending a delete request
+        # to the API
 
         disk_users = self.disk_in_use(image_id)
         if disk_users:
@@ -253,49 +246,57 @@ class Disks(UIGroup):
         self.logger.debug("Deleting rbd {}".format(image_id))
 
         local_gw = this_host()
-        other_gateways = get_other_gateways(self.parent.target.children)
+        # other_gateways = get_other_gateways(self.parent.target.children)
 
         api_vars = {'purge_host': local_gw}
-        # process other gateways first
-        for gw_name in other_gateways:
-            disk_api = '{}://{}:{}/api/disk/{}'.format(self.http_mode,
-                                                       gw_name,
+
+        disk_api = '{}://{}:{}/api/all_disk/{}'.format(self.http_mode,
+                                                       local_gw,
                                                        settings.config.api_port,
                                                        image_id)
-
-            self.logger.debug("- removing '{}' from {}".format(image_id,
-                                                               gw_name))
-
-            api = APIRequest(disk_api, data=api_vars)
-            api.delete()
-
-            if api.response.status_code == 200:
-                pass
-            elif api.response.status_code == 400:
-                # 400 means the rbd is still allocated to a client
-                msg = api.response.json()['message']
-                self.logger.error(msg)
-                return
-            else:
-                # delete failed - don't know why, pass the error to the
-                # admin and abort
-                raise GatewayAPIError(api.response.json()['message'])
-
-
-        # at this point the remote gateways are cleaned up, now perform the
-        # purge on the local host which will also purge the rbd
-        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
-                                                          settings.config.api_port,
-                                                          image_id)
-
-        self.logger.debug("- removing '{}' from the local "
-                          "machine".format(image_id))
-
         api = APIRequest(disk_api, data=api_vars)
         api.delete()
 
+        # # process other gateways first
+        # for gw_name in other_gateways:
+        #     disk_api = '{}://{}:{}/api/all_disk/{}'.format(self.http_mode,
+        #                                                    gw_name,
+        #                                                    settings.config.api_port,
+        #                                                    image_id)
+        #
+        #     self.logger.debug("- removing '{}' from {}".format(image_id,
+        #                                                        gw_name))
+        #
+        #     api = APIRequest(disk_api, data=api_vars)
+        #     api.delete()
+        #
+        #     if api.response.status_code == 200:
+        #         pass
+        #     elif api.response.status_code == 400:
+        #         # 400 means the rbd is still allocated to a client
+        #         msg = api.response.json()['message']
+        #         self.logger.error(msg)
+        #         return
+        #     else:
+        #         # delete failed - don't know why, pass the error to the
+        #         # admin and abort
+        #         raise GatewayAPIError(api.response.json()['message'])
+        #
+        #
+        # # at this point the remote gateways are cleaned up, now perform the
+        # # purge on the local host which will also purge the rbd
+        # disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
+        #                                                   settings.config.api_port,
+        #                                                   image_id)
+        #
+        # self.logger.debug("- removing '{}' from the local "
+        #                   "machine".format(image_id))
+        #
+        # api = APIRequest(disk_api, data=api_vars)
+        # api.delete()
+        #
         if api.response.status_code == 200:
-            self.logger.debug("- rbd removed")
+            self.logger.debug("- rbd removed from all gateways, and deleted")
             disk_object = [disk for disk in self.children
                            if disk.name == image_id][0]
             self.remove_child(disk_object)
@@ -501,48 +502,30 @@ class Disk(UINode):
                                                      size_rqst))
 
         local_gw = this_host()
-        other_gateways = get_other_gateways(self.parent.parent.target.children)
+        # other_gateways = get_other_gateways(self.parent.parent.target.children)
 
         # make call to local api server first!
-        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
-                                                          settings.config.api_port,
-                                                          self.image_id)
+        disk_api = '{}://127.0.0.1:{}/api/all_disk/{}'.format(self.http_mode,
+                                                              settings.config.api_port,
+                                                              self.image_id)
 
         api_vars = {'pool': self.pool, 'size': size_rqst,
                     'owner': local_gw, 'mode': 'resize'}
 
-        self.logger.debug("Processing local LIO instance")
+        self.logger.debug("Issuing resize request")
         api = APIRequest(disk_api, data=api_vars)
         api.put()
 
         if api.response.status_code == 200:
-            # rbd resize request successful, so update the local information
-            self.logger.debug("- LUN resize complete")
-            self.get_meta_data_tcmu()
+            # at this point the resize request was successful, so we need to
+            # update the ceph pool meta data (%commit etc)
+            self._update_pool()
 
-            self.logger.debug("Processing other gateways")
-            for gw in other_gateways:
-                disk_api = '{}://{}:{}/api/disk/{}'.format(self.http_mode,
-                                                           gw,
-                                                           settings.config.api_port,
-                                                           self.image_id)
-                api = APIRequest(disk_api, data=api_vars)
-                api.put()
-
-                if api.response.status_code == 200:
-                    self.logger.debug("- LUN resize registered on "
-                                      "{}".format(gw))
-                else:
-                    raise GatewayAPIError(api.response.json()['message'])
+            self.logger.info('ok')
 
         else:
             raise GatewayAPIError(api.response.json()['message'])
 
-        # at this point the resize request was successful, so we need to
-        # update the pool commit values
-        self._update_pool()
-
-        self.logger.info('ok')
 
     def _update_pool(self):
         """

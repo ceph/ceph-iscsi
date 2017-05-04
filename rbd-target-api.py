@@ -444,12 +444,120 @@ def get_disks():
 @requires_restricted_auth
 def all_disk(image_id):
     """
-    define rbd images across the gateway nodes
+    define/delete rbd images across the gateway nodes, by calling the disk api
+    across each of the gateways. Processing is done serially: creation is done
+    locally first, then other gateways - whereas, rbd deletion is performed
+    first against remote gateways and then the local to perform the actual
+    rbd delete.
 
     :param image_id: (str) rbd image name of the format pool.image
     :return:
     """
-    pass
+
+    http_mode = 'https' if settings.config.api_secure else 'http'
+
+    local_gw = this_host()
+    logger.debug("this host is {}".format(local_gw))
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("all gateways - {}".format(gateways))
+    gateways.remove(local_gw)
+    logger.debug("other gw's {}".format(gateways))
+
+    if request.method == 'PUT':
+
+        pool = request.form.get('pool')
+        size = request.form.get('size')
+        mode = request.form.get('mode')
+
+        # make call to local api server first!
+        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(http_mode,
+                                                          settings.config.api_port,
+                                                          image_id)
+
+        api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
+                    'mode': mode}
+
+        logger.debug("Issuing disk request to the local API "
+                     "for {}".format(image_id))
+
+        api = APIRequest(disk_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code == 200:
+            logger.info("LUN is ready on this host")
+
+            for gw in gateways:
+                logger.debug("Adding {} to gw {}".format(image_id,
+                                                         gw))
+                disk_api = '{}://{}:{}/api/disk/{}'.format(http_mode,
+                                                           gw,
+                                                           settings.config.api_port,
+                                                           image_id)
+                api = APIRequest(disk_api, data=api_vars)
+                api.put()
+
+                if api.response.status_code == 200:
+                    logger.info("LUN is ready on {}".format(gw))
+                else:
+                    return make_response(api.response.json()['message'], 500)
+
+        else:
+            logger.error(api.response.json()['message'])
+            return make_response(api.response.json()['message'], 500)
+
+        logger.info("LUN defined on all gateways for {}".format(image_id))
+        return make_response(jsonify({"message": "ok"}), 200)
+
+    else:
+        # this is a DELETE request
+        api_vars = {'purge_host': local_gw}
+
+        # process other gateways first
+        for gw_name in gateways:
+            disk_api = '{}://{}:{}/api/disk/{}'.format(http_mode,
+                                                       gw_name,
+                                                       settings.config.api_port,
+                                                       image_id)
+
+            logger.debug("removing '{}' from {}".format(image_id,
+                                                        gw_name))
+
+            api = APIRequest(disk_api, data=api_vars)
+            api.delete()
+
+            if api.response.status_code == 200:
+                logger.debug("{} removed from {}".format(image_id, gw_name))
+
+            elif api.response.status_code == 400:
+                # 400 means the rbd is still allocated to a client
+                msg = api.response.json()['message']
+                logger.error(msg)
+                return make_response(jsonify({"message": msg}), 400)
+            else:
+                # delete failed - don't know why, pass the error to the
+                # admin and abort
+                msg = api.response.json()['message']
+                return make_response(jsonify({"message": msg}), 500)
+
+        # at this point the remote gateways are cleaned up, now perform the
+        # purge on the local host which will also purge the rbd
+        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(http_mode,
+                                                          settings.config.api_port,
+                                                          image_id)
+
+        logger.debug("- removing '{}' from the local "
+                     "machine, deleting the rbd".format(image_id))
+
+        api = APIRequest(disk_api, data=api_vars)
+        api.delete()
+
+        if api.response.status_code == 200:
+            logger.debug("- rbd {} deleted".format(image_id))
+            return make_response(jsonify({"message": "ok"}), 200)
+        else:
+            return make_response(jsonify(
+                {"message": "failed to delete rbd {}".format(image_id)}), 500)
 
 
 @app.route('/api/disk/<image_id>', methods=['GET', 'PUT', 'DELETE'])
