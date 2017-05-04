@@ -554,7 +554,13 @@ class GatewayGroup(UIGroup):
                               " over API - sync aborted, restart rbd-target-gw"
                               " on {} to sync".format(gateway_name))
 
-        sync_text = "sync requested" if not nosync else "sync skipped"
+        if not nosync:
+            sync_text = "sync skipped"
+        else:
+            sync_text = ("sync'ing LIO config ({} disks,"
+                         "{} clients)".format(len(config['disks']),
+                                              len(config['clients'])))
+
         self.logger.info("Adding gateway, ({})".format(sync_text))
 
         gw_api = '{}://{}:{}/api'.format(self.http_mode,
