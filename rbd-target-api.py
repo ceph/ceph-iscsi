@@ -444,10 +444,12 @@ def get_disks():
 @requires_restricted_auth
 def all_disk(image_id):
     """
-    define/delete rbd images across the gateway nodes, by calling the disk api
-    across each of the gateways. Processing is done serially: creation is done
-    locally first, then other gateways - whereas, rbd deletion is performed
-    first against remote gateways and then the local to perform the actual
+    Coordinate the create/delete of rbd images across the gateway nodes
+
+    The "all_" method calls the corresponding disk api entrypoints across each
+    gateway. Processing is done serially: creation is done locally first,
+    then other gateways - whereas, rbd deletion is performed first against
+    remote gateways and then the local machine is used to perform the actual
     rbd delete.
 
     :param image_id: (str) rbd image name of the format pool.image
@@ -717,6 +719,70 @@ def _update_client(**kwargs):
         config.refresh()
         return 200, "Client configured successfully"
 
+@app.route('/api/all_clientauth/<client_iqn>', methods=['PUT'])
+@requires_restricted_auth
+def all_client_auth(client_iqn):
+    """
+    Coordinate client authentication changes across each gateway node
+
+    :param client_iqn: (str) client IQN name
+    :return:
+    """
+
+    http_mode = 'https' if settings.config.api_secure else 'http'
+    local_gw = this_host()
+    logger.debug("this host is {}".format(local_gw))
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("other gateways - {}".format(gateways))
+    gateways.remove(local_gw)
+
+    image_list = request.form.get('image_list')
+    chap = request.form.get('chap')
+
+    api_vars = {"committing_host": local_gw,
+                "image_list": image_list,
+                "chap": chap}
+
+    clientauth_api = '{}://127.0.0.1:{}/api/clientauth/{}'.format(
+                     http_mode,
+                     settings.config.api_port,
+                     client_iqn)
+    logger.debug("Issuing client update to local gw for {}".format(
+                 client_iqn))
+    api = APIRequest(clientauth_api, data=api_vars)
+    api.put()
+
+    if api.response.status_code == 200:
+        logger.debug("Client update succeeded on local LIO")
+
+        for gw in gateways:
+            clientauth_api = '{}://{}:{}/api/clientauth/{}'.format(
+                http_mode,
+                gw,
+                settings.config.api_port,
+                client_iqn)
+            logger.debug("updating client {} on {}".format(client_iqn,
+                                                           gw))
+            api = APIRequest(clientauth_api, data=api_vars)
+            api.put()
+            if api.response.status_code == 200:
+                logger.info("client update successful on {}".format(gw))
+                continue
+            else:
+                return make_response(jsonify(
+                       {"message": "client update failed on {}".format(gw)}),
+                       api.response.status_code)
+
+        logger.info("All gateways updated")
+        return make_response(jsonify({"message": "ok"}), 200)
+
+    else:
+        # the local update failed, so abort further updates
+        return make_response(jsonify(
+               {"message": "Client updated failed on local LIO instance"}),
+               api.response.status_code)
+
 
 @app.route('/api/clientauth/<client_iqn>', methods=['GET', 'PUT'])
 @requires_restricted_auth
@@ -729,7 +795,9 @@ def manage_client_auth(client_iqn):
     """
 
     if request.method == 'GET':
+        # deny a GET request, in case this exposes a client's credentials
         abort(403)
+
     else:
         # PUT request to define/change authentication
         image_list = request.form['image_list']

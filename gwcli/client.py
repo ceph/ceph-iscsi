@@ -349,39 +349,26 @@ class Client(UINode):
         image_list = ','.join(Client.get_srtd_names(lun_list))
 
         other_gateways = get_other_gateways(self.parent.parent.parent.parent.target.children)
-        api_vars = {"committing_host": this_host(),
-                    "image_list": image_list,
+        api_vars = {"image_list": image_list,
                     "chap": chap}
 
-        clientauth_api = '{}://127.0.0.1:{}/api/clientauth/{}'.format(self.http_mode,
-                                                                      settings.config.api_port,
-                                                                      self.client_iqn)
+        clientauth_api = '{}://127.0.0.1:{}/api/all_clientauth/{}'.format(
+                         self.http_mode,
+                         settings.config.api_port,
+                         self.client_iqn)
+
         api = APIRequest(clientauth_api, data=api_vars)
         api.put()
 
         if api.response.status_code == 200:
-            self.logger.debug("- Local environment updated")
+            self.logger.debug("- client credentials updated")
 
             self.auth['chap'] = chap
 
-            for gw in other_gateways:
-                clientauth_api = '{}://{}:{}/api/clientauth/{}'.format(self.http_mode,
-                                                                       gw,
-                                                                       settings.config.api_port,
-                                                                       self.client_iqn)
-                api = APIRequest(clientauth_api, data=api_vars)
-                api.put()
+            self.logger.info('ok')
 
-                if api.response.status_code == 200:
-                    self.logger.debug("- {} updated".format(gw))
-                    continue
-                else:
-                    raise GatewayAPIError(api.response.json()['message'])
         else:
             raise GatewayAPIError(api.response.json()['message'])
-
-        self.logger.info('ok')
-
 
     @staticmethod
     def get_srtd_names(lun_list):
