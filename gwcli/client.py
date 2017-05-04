@@ -469,21 +469,21 @@ class Client(UINode):
             current_luns.remove(disk)
 
         image_list = ','.join(current_luns)
-        ui_root = self.get_ui_root()
-        other_gateways = get_other_gateways(ui_root.target.children)
 
-        api_vars = {"committing_host": this_host(),
-                    "image_list": image_list,
+        api_vars = {"image_list": image_list,
                     "chap": self.auth.get('chap', '')}
 
-        clientlun_api = '{}://127.0.0.1:{}/api/clientlun/{}'.format(self.http_mode,
-                                                                    settings.config.api_port,
-                                                                    self.client_iqn)
+        clientlun_api = '{}://127.0.0.1:{}/api/all_clientlun/{}'.format(
+                        self.http_mode,
+                        settings.config.api_port,
+                        self.client_iqn)
 
         api = APIRequest(clientlun_api, data=api_vars)
         api.put()
 
         if api.response.status_code == 200:
+
+            self.logger.debug("disk mapping updated successfully")
 
             if action == 'add':
 
@@ -491,6 +491,9 @@ class Client(UINode):
                 # we need to query the api server to get the new configuration
                 # to be able to set the local cli entry correctly
                 get_api_vars = {"disk": disk}
+                clientlun_api = clientlun_api.replace('/all_clientlun/',
+                                                      '/clientlun/')
+                self.logger.debug("Querying API to get mapped LUN information")
                 api = APIRequest(clientlun_api, data=get_api_vars)
                 api.get()
 
@@ -510,7 +513,8 @@ class Client(UINode):
                                                                active_maps))
 
                 else:
-                    raise GatewayAPIError(api.response.json()['message'])
+                    self.logger.error("Query for disk '{}' failed".format(disk))
+                    raise GatewayAPIError()
 
             else:
 
@@ -523,30 +527,15 @@ class Client(UINode):
                 del self.luns[disk]
                 self.parent.update_lun_map('remove', disk, self.client_iqn)
 
-            self.logger.debug("- local environment updated")
 
-            for gw in other_gateways:
-                clientlun_api = '{}://{}:{}/api/clientlun/{}'.format(self.http_mode,
-                                                                     gw,
-                                                                     settings.config.api_port,
-                                                                     self.client_iqn)
-                api = APIRequest(clientlun_api, data=api_vars)
-                api.put()
-
-                if api.response.status_code == 200:
-                    self.logger.debug("- gateway '{}' updated".format(gw))
-                    continue
-                else:
-                    raise GatewayAPIError(api.response.json()['message'])
-
-        elif api.response.status_code == 400:
-            self.logger.error(api.response.json()['message'])
-            return
+            self.logger.debug("configuration update successful")
+            self.logger.info('ok')
 
         else:
-            raise GatewayAPIError(api.response.json()['message'])
-
-        self.logger.info('ok')
+            # the request to add/remove the disk for the client failed
+            self.logger.error("Adding disk '{}' to {} failed".format(disk,
+                                                                     self.client_iqn))
+            raise GatewayAPIError()
 
     logged_in = property(_get_logged_in_state,
                          doc="login state of the client")

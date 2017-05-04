@@ -813,6 +813,79 @@ def manage_client_auth(client_iqn):
         return make_response(jsonify({"message": status_text}), status_code)
 
 
+@app.route('/api/all_clientlun/<client_iqn>', methods=['PUT'])
+@requires_restricted_auth
+def all_client_luns(client_iqn):
+    """
+    Handle coordination of disk add/remove from clients across all gateways
+
+    We only use a PUT method, since the image list for a client is maintained
+    as a whole and passed through to the underlying config module.
+
+    :param client_iqn: (str) client IQN name
+    :return:
+    """
+
+    http_mode = 'https' if settings.config.api_secure else 'http'
+
+    local_gw = this_host()
+    logger.debug("this host is {}".format(local_gw))
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("other gateways - {}".format(gateways))
+    gateways.remove(local_gw)
+
+    image_list = request.form.get('image_list')
+    chap = request.form.get('chap')
+
+    # committing host is the local LIO node
+    api_vars = {"committing_host": local_gw,
+                "image_list": image_list,
+                "chap": chap}
+
+    clientlun_api = '{}://127.0.0.1:{}/api/clientlun/{}'.format(http_mode,
+                                                                settings.config.api_port,
+                                                                client_iqn)
+
+    api = APIRequest(clientlun_api, data=api_vars)
+    api.put()
+
+    if api.response.status_code == 200:
+
+        logger.info("disk mapping update on {} successful".format(client_iqn))
+
+        for gw in gateways:
+            clientlun_api = '{}://{}:{}/api/clientlun/{}'.format(
+                            http_mode,
+                            gw,
+                            settings.config.api_port,
+                            client_iqn)
+
+            logger.debug("Updating disk map for {} on GW {}".format(
+                         client_iqn,
+                         gw))
+            api = APIRequest(clientlun_api, data=api_vars)
+            api.put()
+
+            if api.response.status_code == 200:
+                logger.debug("gateway '{}' updated".format(gw))
+                continue
+            else:
+                logger.error("disk mapping update on {} failed".format(gw))
+                return make_response(jsonify(
+                       {"message": "disk map updated failed on {}".format(gw)}),
+                       api.response.status_code)
+
+        return make_response(jsonify({"message": "ok"}), 200)
+
+    else:
+        # disk map update failed at the first hurdle!
+        logger.error("disk map update failed on the local LIO instance")
+        return make_response(jsonify(
+               {"message": "failed to update local LIO instance"}),
+               api.response.status_code)
+
+
 @app.route('/api/clientlun/<client_iqn>', methods=['GET', 'PUT'])
 @requires_restricted_auth
 def manage_client_luns(client_iqn):
@@ -842,6 +915,7 @@ def manage_client_luns(client_iqn):
                                                   committing_host=committing_host)
 
         return make_response(jsonify({"message": status_text}), status_code)
+
 
 @app.route('/api/all_client/<client_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
