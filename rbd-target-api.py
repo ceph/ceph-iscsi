@@ -460,7 +460,7 @@ def all_disk(image_id):
     logger.debug("this host is {}".format(local_gw))
     gateways = [key for key in config.config['gateways']
                 if isinstance(config.config['gateways'][key], dict)]
-    logger.debug("all gateways - {}".format(gateways))
+    logger.debug("other gateways - {}".format(gateways))
     gateways.remove(local_gw)
     logger.debug("other gw's {}".format(gateways))
 
@@ -774,6 +774,125 @@ def manage_client_luns(client_iqn):
                                                   committing_host=committing_host)
 
         return make_response(jsonify({"message": status_text}), status_code)
+
+@app.route('/api/all_client/<client_iqn>', methods=['PUT', 'DELETE'])
+@requires_restricted_auth
+def all_client(client_iqn):
+    """
+    Handle the coordination of client creation and deletion across the iscsi
+    gateways
+
+    :param client_iqn: (str) IQN of the client to create or delete
+    :return:
+    """
+
+    http_mode = 'https' if settings.config.api_secure else 'http'
+    local_gw = this_host()
+    logger.debug("this host is {}".format(local_gw))
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("other gateways - {}".format(gateways))
+    gateways.remove(local_gw)
+
+    # committing host is the node responsible for updating the config object
+    api_vars = {"committing_host": local_gw}
+
+    if request.method == 'PUT':
+
+        client_api = '{}://127.0.0.1:{}/api/client/{}'.format(
+                     http_mode,
+                     settings.config.api_port,
+                     client_iqn)
+
+        logger.debug("Processing client CREATE for {}".format(client_iqn))
+        api = APIRequest(client_api, data=api_vars)
+        api.put()
+        if api.response.status_code == 200:
+            logger.info("Client {} added to local LIO".format(client_iqn))
+
+            for gw in gateways:
+                client_api = '{}://{}:{}/api/client/{}'.format(
+                             http_mode,
+                             gw,
+                             settings.config.api_port,
+                             client_iqn)
+
+                logger.debug("sending request to {} to create {}".format(
+                             gw,
+                             client_iqn))
+                api = APIRequest(client_api, data=api_vars)
+                api.put()
+
+                if api.response.status_code == 200:
+                    logger.info(
+                        "Client '{}' added to {}".format(client_iqn, gw))
+                    continue
+                else:
+                    # client create failed against the remote LIO instance
+                    msg = api.response.json()['message']
+                    logger.error("Client create for {} failed on {} "
+                                 ": {}".format(
+                                               client_iqn,
+                                               gw,
+                                               msg))
+
+                    return make_response(jsonify({"message": msg}), 500)
+
+            # all gateways processed return a success state to the caller
+            return make_response(jsonify({"message": "ok"}), 200)
+
+        else:
+            # client create failed against the local LIO instance
+            msg = api.response.json()['message']
+            logger.error("Client create on local LIO instance failed "
+                         "for {} : {}".format(client_iqn,
+                                              msg))
+            return make_response(jsonify({"message": msg}), 500)
+
+    else:
+        # DELETE client request
+        # Process flow: remote gateways > local > delete config object entry
+        for gw in gateways:
+            client_api = '{}://{}:{}/api/client/{}'.format(http_mode,
+                                                           gw,
+                                                           settings.config.api_port,
+                                                           client_iqn)
+            logger.info("- removing '{}' from {}".format(client_iqn, gw))
+            api = APIRequest(client_api, data=api_vars)
+            api.delete()
+
+            if api.response.status_code == 200:
+                logger.info("- '{}' removed".format(client_iqn))
+                continue
+            elif api.response.status_code == 400:
+                logger.error("- '{}' is in use on {}".format(client_iqn, gw))
+                return make_response(jsonify({"message": "Client in use"}), 400)
+            else:
+                msg = api.response.json()['message']
+                logger.error("Failed to remove {} from {}".format(
+                             client_iqn,
+                             gw))
+                return make_response(jsonify(
+                       {"message": "failed to remove client '{}' on "
+                                   "{}".format(client_iqn, msg)}))
+
+        # At this point the other gateways have removed the client, so
+        # remove from the local LIO instance
+        client_api = '{}://127.0.0.1:{}/api/client/{}'.format(http_mode,
+                                                              settings.config.api_port,
+                                                              client_iqn)
+        api = APIRequest(client_api, data=api_vars)
+        api.delete()
+
+        if api.response.status_code == 200:
+            logger.info("successfully removed '{}'".format(client_iqn))
+            return make_response(jsonify({"message": "ok"}), 200)
+
+        else:
+            return make_response(jsonify(
+                   {"message": "Unable to delete {} from local LIO "
+                               "instance".format(client_iqn)}),
+                   api.response.status_code)
 
 
 @app.route('/api/client/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])

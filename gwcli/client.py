@@ -85,39 +85,42 @@ class Clients(UIGroup):
 
 
         # run the create locally - to seed the config object
-        other_gateways = get_other_gateways(self.parent.parent.parent.target.children)
-        api_vars = {"committing_host": this_host()}
-        client_api = '{}://127.0.0.1:{}/api/client/{}'.format(self.http_mode,
-                                                              settings.config.api_port,
-                                                              client_iqn)
+        # other_gateways = get_other_gateways(self.parent.parent.parent.target.children)
+        # api_vars = {"committing_host": this_host()}
+        client_api = '{}://127.0.0.1:{}/api/all_client/{}'.format(
+                     self.http_mode,
+                     settings.config.api_port,
+                     client_iqn)
 
         self.logger.debug("Client CREATE for {}".format(client_iqn))
-        api = APIRequest(client_api, data=api_vars)
+        api = APIRequest(client_api) #, data=api_vars)
         api.put()
 
         if api.response.status_code == 200:
             Client(self, client_iqn, cli_seed)
-            self.logger.debug("- Client '{}' added locally".format(client_iqn))
-            # defined locally OK, so let's apply to the other gateways
-            for gw in other_gateways:
-                client_api = '{}://{}:{}/api/client/{}'.format(self.http_mode,
-                                                               gw,
-                                                               settings.config.api_port,
-                                                               client_iqn)
-                api = APIRequest(client_api, data=api_vars)
-                api.put()
+            self.logger.debug("- Client '{}' added".format(client_iqn))
+            self.logger.info('ok')
 
-                if api.response.status_code == 200:
-                    self.logger.debug("- Client '{}' added to {}".format(client_iqn, gw))
-                    continue
-                else:
-                    raise GatewayAPIError(api.response.json()['message'])
+            # # defined locally OK, so let's apply to the other gateways
+            # for gw in other_gateways:
+            #     client_api = '{}://{}:{}/api/client/{}'.format(self.http_mode,
+            #                                                    gw,
+            #                                                    settings.config.api_port,
+            #                                                    client_iqn)
+            #     api = APIRequest(client_api, data=api_vars)
+            #     api.put()
+            #
+            #     if api.response.status_code == 200:
+            #         self.logger.debug("- Client '{}' added to {}".format(client_iqn, gw))
+            #         continue
+            #     else:
+            #         raise GatewayAPIError(api.response.json()['message'])
         else:
             raise GatewayAPIError(api.response.json()['message'])
 
-        self.logger.info('ok')
 
-        # switch the current directory to the nee client for auth or disk
+
+        # switch the current directory to the new client for auth or disk
         # definitions as part of the users workflow
         return self.ui_command_cd(client_iqn)
 
@@ -152,7 +155,7 @@ class Clients(UIGroup):
             return
 
         # At this point we know the client requested is defined to the
-        # configuration and is not currently logged in (at least to this host),
+        # configuration and is not currently logged in (at least to this host!),
         # OK to delete
         self.logger.debug("Client DELETE for {}".format(client_iqn))
         client = [client for client in self.children
@@ -160,38 +163,17 @@ class Clients(UIGroup):
 
         # Process flow: remote gateways > local > delete config object entry
 
-        other_gateways = get_other_gateways(self.parent.parent.parent.target.children)
-        api_vars = {"committing_host": this_host()}
-
-        for gw in other_gateways:
-            client_api = '{}://{}:{}/api/client/{}'.format(self.http_mode,
-                                                           gw,
-                                                           settings.config.api_port,
-                                                           client_iqn)
-            api = APIRequest(client_api, data=api_vars)
-            api.delete()
-
-            if api.response.status_code == 200:
-                self.logger.debug("- '{}' removed from {}".format(client_iqn, gw))
-                continue
-            elif api.response.status_code == 400:
-                self.logger.critical("- '{}' is in use on {}".format(client_iqn, gw))
-                return
-            else:
-                raise GatewayAPIError(api.response.json()['message'])
-
-        # At this point the other gateways have removed the client, so
-        # remove from the local instance and delete from the interface
-        client_api = '{}://127.0.0.1:{}/api/client/{}'.format(self.http_mode,
-                                                              settings.config.api_port,
-                                                              client_iqn)
-        api = APIRequest(client_api, data=api_vars)
+        client_api = '{}://{}:{}/api/all_client/{}'.format(self.http_mode,
+                                                       "127.0.0.1",
+                                                       settings.config.api_port,
+                                                       client_iqn)
+        api = APIRequest(client_api)
         api.delete()
 
         if api.response.status_code == 200:
-
-            self.logger.debug("- '{}' removed from local gateway, "
-                              "configuration updated".format(client_iqn))
+            # Delete successfull across all gateways
+            self.logger.debug("- '{}' removed and configuration "
+                              "updated".format(client_iqn))
 
             # remove any rbd maps from the lun_map for this client
             rbds_mapped = [lun.rbd_name for lun in client.children]
@@ -200,7 +182,7 @@ class Clients(UIGroup):
 
             self.delete(client)
 
-        self.logger.info('ok')
+            self.logger.info('ok')
 
     def update_lun_map(self, action, rbd_path, client_iqn):
         """
