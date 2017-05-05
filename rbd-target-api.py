@@ -16,7 +16,7 @@ from rpm import labelCompare
 import rados
 
 import werkzeug
-from flask import Flask, jsonify, make_response, request, abort
+from flask import Flask, jsonify, make_response, request
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
@@ -47,11 +47,13 @@ def requires_basic_auth(f):
         # check credentials supplied in the http request are valid
         auth = request.authorization
         if not auth:
-            abort(401)
+            return jsonify(message="Missing credentials"), 401
+
 
         if (auth.username != settings.config.api_user or
            auth.password != settings.config.api_password):
-            abort(401)
+            return jsonify(message="username/password mismatch with the "
+                                   "configuration file"), 401
 
         return f(*args, **kwargs)
 
@@ -75,23 +77,25 @@ def requires_restricted_auth(f):
                   local_gw + settings.config.trusted_ip_list
 
         if request.remote_addr not in gw_ips:
-            abort(403)
+            return jsonify(message="API access not available to "
+                                   "{}".format(request.remote_addr)), 403
 
         # check credentials supplied in the http request are valid
         auth = request.authorization
         if not auth:
-            abort(401)
+            return jsonify(message="Missing credentials"), 401
 
         if (auth.username != settings.config.api_user or
            auth.password != settings.config.api_password):
-            abort(401)
+            return jsonify(message="username/password mismatch with the "
+                                   "configuration file"), 401
 
         return f(*args, **kwargs)
 
     return decorated
 
 
-@app.route('/api')
+@app.route('/api', methods=['GET'])
 def get_api_info():
     """
     Display the available API endpoints
@@ -110,10 +114,10 @@ def get_api_info():
                 doc = ''
         links.append((url, doc))
 
-    return make_response(jsonify(api=links), 200)
+    return jsonify(api=links), 200
 
 
-@app.route('/api/sysinfo/<query_type>')
+@app.route('/api/sysinfo/<query_type>', methods=['GET'])
 @requires_basic_auth
 def sys_info(query_type=None):
     """
@@ -139,8 +143,7 @@ def sys_info(query_type=None):
 
     else:
         # Request Unknown
-        abort(404,
-              "Unknown query")
+        return jsonify(message="Unknown /sysinfo query"), 404
 
 
 @app.route('/api/target/<target_iqn>', methods=['PUT'])
@@ -164,25 +167,25 @@ def target(target_iqn=None):
 
         if target.error:
             logger.error("Unable to create an instance of the GWTarget class")
-            abort(418,
-                  "GWTarget problem - {}".format(target.error_msg))
+            return jsonify(message="GWTarget problem - "
+                                   "{}".format(target.error_msg)), 500
 
         target.manage('init')
         if target.error:
             logger.error("Failure during gateway 'init' processing")
-            abort(418,
-                  "iscsi target 'init' process failed for {} - "
-                  "{}".format(target_iqn, target.error_msg))
+            return jsonify(message="iscsi target 'init' process failed "
+                                   "for {} - {}".format(target_iqn,
+                                                        target.error_msg)), 500
 
-        return make_response(jsonify(
-                             {"message": "Target defined successfully"}), 200)
-        pass
+        return jsonify(message="Target defined successfully"), 200
+
     else:
         # return unrecognised request
-        abort(405)
+        return jsonify(message="Invalid method ({}) to target "
+                               "API".format(request.method)), 405
 
 
-@app.route('/api/config')
+@app.route('/api/config', methods=['GET'])
 @requires_restricted_auth
 def get_config():
     """
@@ -193,11 +196,10 @@ def get_config():
     """
     if request.method == 'GET':
         return make_response(jsonify(config.config), 200)
-    else:
-        abort(403)
 
 
-@app.route('/api/gateways')
+
+@app.route('/api/gateways', methods=['GET'])
 @requires_restricted_auth
 def get_gateways():
     """
@@ -205,8 +207,6 @@ def get_gateways():
     """
     if request.method == 'GET':
         return make_response(jsonify(config.config['gateways']), 200)
-    else:
-        abort(403)
 
 
 @app.route('/api/all_gateway/<gateway_name>', methods=['PUT'])
@@ -273,7 +273,8 @@ def all_gateway(gateway_name=None):
             logger.error("Failed to create gateway {}: {}".format(gateway_name,
                                                                   msg))
 
-            abort(500, msg)
+            return jsonify(message="Failed to create gateway"), 500
+
 
         # for the new gateway, when sync is selected we need to run the
         # disk api to register all the rbd's to that gateway
@@ -296,7 +297,7 @@ def all_gateway(gateway_name=None):
                                  "tpg : {}".format(disk_key,
                                                    endpoint,
                                                    msg))
-                    abort(500, msg)
+                    return jsonify(message="Failed to add disk"), 500
 
             resp_text += ", {} disks added".format(len(current_disks))
 
@@ -316,7 +317,7 @@ def all_gateway(gateway_name=None):
                     msg = api.response.json()['message']
                     logger.error("Failed to map existing disks to new"
                                  " tpg on {} - ".format(endpoint))
-                    abort(500, msg)
+                    return jsonify(message="Failed to map disk"), 500
 
             if endpoint == ip_address and not nosync:
 
@@ -342,7 +343,7 @@ def all_gateway(gateway_name=None):
                         logger.error("Problem adding client {} - "
                                      "{}".format(client_iqn,
                                                  api.response.json()['message']))
-                        abort(500, msg)
+                        return jsonify(message="Failed to add client"), 500
 
                 resp_text += ", {} clients defined".format(len(current_clients))
 
@@ -368,8 +369,8 @@ def manage_gateway(gateway_name=None):
             return make_response(jsonify(
                                  config.config['gateways'][gateway_name]), 200)
         else:
-            abort(404,
-                  "this isn't the droid you're looking for")
+            return jsonify(message="Gateway doesn't exist in the "
+                                   "configuration"), 404
 
     elif request.method == 'PUT':
         # the parameters need to be cast to str for compatibility
@@ -388,19 +389,14 @@ def manage_gateway(gateway_name=None):
 
         if gateway.error:
             logger.error("Unable to create an instance of the GWTarget class")
-            abort(418,
-                  "Error initialising an instance of GWTarget "
-                  "for {}: {}".format(gateway_name,
-                                      gateway.error_msg))
+            return jsonify(message="Failed to create the gateway"), 500
+
 
         gateway.manage(target_mode)
         if gateway.error:
             logger.error("manage({}) logic failed for {}".format(target_mode,
                                                                  gateway_name))
-            abort(418,
-                  "Error defining the {} gateway: "
-                  "{}".format(gateway_name,
-                              gateway.error_msg))
+            return jsonify(message="Failed to create the gateway"), 500
 
         logger.info("created the gateway")
 
@@ -411,27 +407,29 @@ def manage_gateway(gateway_name=None):
                         "creation")
             config.refresh()
 
-        return make_response(jsonify(
-                             {"message": "Gateway defined/mapped"}), 200)
+        return jsonify(message="Gateway defined/mapped"), 200
+
     else:
         # DELETE gateway request
         gateway = GWTarget(logger,
                            config.config['gateways']['iqn'],
                            '')
         if gateway.error:
-            abort(418,
-                  "Unable to create an instance of GWTarget")
+            return jsonify(message="Failed to connect to the gateway"), 500
 
         gateway.manage('clearconfig')
         if gateway.error:
-            abort(400,
-                  gateway.error_msg)
+            logger.error("clearconfig failed for {} : "
+                         "{}".format(gateway_name,
+                                     gateway.error_msg))
+            return jsonify(message="Unable to remove {} from the "
+                                   "configuration".format(gateway_name)), 400
+
         else:
 
             config.refresh()
 
-            return make_response(jsonify(
-                {"message": "Gateway removed successfully"}), 200)
+            return jsonify(message="Gateway removed successfully"), 200
 
 
 @app.route('/api/disks')
@@ -602,8 +600,8 @@ def manage_disk(image_id):
             return make_response(jsonify(config.config["disks"][image_id]),
                                  200)
         else:
-            abort(404,
-                  "rbd image {} not found".format(image_id))
+            return jsonify(message="rbd image {} not "
+                                   "found".format(image_id)), 404
 
     elif request.method == 'PUT':
         # A put is for either a create or a resize
@@ -619,15 +617,14 @@ def manage_disk(image_id):
                       str(request.form['size']),
                       str(request.form['owner']))
             if lun.error:
-                logger.error("Unable to create a LUN instance")
-                abort(418, lun.error_msg)
+                logger.error("Unable to create a LUN instance"
+                             " : {}".format(lun.error_msg))
+                return jsonify(message="Unable to establish LUN instance"), 500
 
             lun.allocate()
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
-                abort(418,
-                      lun.error_msg)
-
+                return jsonify(message="LUN allocation failure"), 500
 
             if request.form['mode'] == 'create':
                 # new disk is allocated, so refresh the local config object
@@ -644,21 +641,21 @@ def manage_disk(image_id):
 
                 gateway.manage('map')
                 if gateway.error:
-                    abort(418,
-                          "LUN mapping failed - {}".format(gateway.error_msg))
+                    logger.error("LUN mapping failed : "
+                                 "".format(gateway.error_msg))
+                    return jsonify(message="LUN map failed"), 500
 
-                return make_response(jsonify({"message": "LUN created"}), 200)
+                return jsonify(message="LUN created"), 200
 
             elif request.form['mode'] == 'resize':
 
-                return make_response(jsonify(
-                                     {"message": "LUN resized"}), 200)
+                return jsonify(message="LUN resized"), 200
 
         else:
 
             # this is an invalid request
-            abort(400,
-                  "Invalid Request - need to provide pool, size and owner")
+            return jsonify(message="Invalid Request - need to provide"
+                                   "pool, size and owner"), 400
 
     else:
         # DELETE request
@@ -677,8 +674,9 @@ def manage_disk(image_id):
 
         if lun.error:
             # problem defining the LUN instance
-            abort(500,
-                  "Error initialising the LUN ({})".format(lun.error_msg))
+            logger.error("Error initialising the LUN : "
+                         "{}".format(lun.error_msg))
+            return jsonify(message="Error establishing LUN instance"), 500
 
         lun.remove_lun()
         if lun.error:
@@ -688,16 +686,15 @@ def manage_disk(image_id):
             else:
                 status_code = 500
 
-            abort(status_code,
-                  "Error removing the LUN ({})".format(lun.error_msg))
+            logger.error("LUN remove failed : {}".format(lun.error_msg))
+            return jsonify(message="Failed to remove the LUN"), status_code
 
         config.refresh()
 
-        return make_response(jsonify(
-                             {"message": "LUN removed".format(lun.error_msg)}), 200)
+        return jsonify(message="LUN removed"), 200
 
 
-@app.route('/api/clients')
+@app.route('/api/clients', methods=['GET'])
 @requires_restricted_auth
 def get_clients():
     """
@@ -711,7 +708,7 @@ def get_clients():
     client_list = config.config['clients'].keys()
     response = {"clients": client_list}
 
-    return make_response(jsonify(response), 200)
+    return jsonify(response), 200
 
 
 def _update_client(**kwargs):
@@ -732,14 +729,19 @@ def _update_client(**kwargs):
                       kwargs['chap'])
 
     if client.error:
-        return 400, "Invalid request - {}".format(client.error_msg)
+        logger.error("Invalid client request - {}".format(client.error_msg))
+        return 400, "Invalid client request"
 
     client.manage('present', committer=kwargs['committing_host'])
     if client.error:
-        return 500, "Client update failed: {}".format(client.error_msg)
+        logger.error("client update failed on {} : "
+                     "{}".format(kwargs['client_iqn'],
+                                 client.error_msg))
+        return 500, "Client update failed"
     else:
         config.refresh()
         return 200, "Client configured successfully"
+
 
 @app.route('/api/all_clientauth/<client_iqn>', methods=['PUT'])
 @requires_restricted_auth
@@ -806,7 +808,7 @@ def all_client_auth(client_iqn):
                api.response.status_code)
 
 
-@app.route('/api/clientauth/<client_iqn>', methods=['GET', 'PUT'])
+@app.route('/api/clientauth/<client_iqn>', methods=['PUT'])
 @requires_restricted_auth
 def manage_client_auth(client_iqn):
     """
@@ -816,23 +818,17 @@ def manage_client_auth(client_iqn):
     :return:
     """
 
-    if request.method == 'GET':
-        # deny a GET request, in case this exposes a client's credentials
-        abort(403)
+    # PUT request to define/change authentication
+    image_list = request.form['image_list']
+    chap = request.form['chap']
+    committing_host = request.form['committing_host']
 
-    else:
-        # PUT request to define/change authentication
-        image_list = request.form['image_list']
-        chap = request.form['chap']
-        committing_host = request.form['committing_host']
+    status_code, status_text = _update_client(client_iqn=client_iqn,
+                                              images=image_list,
+                                              chap=chap,
+                                              committing_host=committing_host)
 
-        status_code, status_text = _update_client(client_iqn=client_iqn,
-                                                  images=image_list,
-                                                  chap=chap,
-                                                  committing_host=committing_host)
-
-
-        return make_response(jsonify({"message": status_text}), status_code)
+    return jsonify(message=status_text), status_code
 
 
 @app.route('/api/all_clientlun/<client_iqn>', methods=['PUT'])
@@ -920,9 +916,10 @@ def manage_client_luns(client_iqn):
         if client_iqn in config.config['clients']:
             lun_config = config.config['clients'][client_iqn]['luns']
 
-            return make_response(jsonify({"message": lun_config}), 200)
+            return jsonify(message=lun_config), 200
         else:
-            abort(404, "Client does not exist")
+            return jsonify(message="Client does not exist"), 404
+
     else:
         # PUT request = new/updated disks for this client
 
@@ -936,7 +933,7 @@ def manage_client_luns(client_iqn):
                                                   chap=chap,
                                                   committing_host=committing_host)
 
-        return make_response(jsonify({"message": status_text}), status_code)
+        return jsonify(message=status_text), status_code
 
 
 @app.route('/api/all_client/<client_iqn>', methods=['PUT', 'DELETE'])
@@ -1000,10 +997,10 @@ def all_client(client_iqn):
                                                gw,
                                                msg))
 
-                    return make_response(jsonify({"message": msg}), 500)
+                    return jsonify(message=msg), 500
 
             # all gateways processed return a success state to the caller
-            return make_response(jsonify({"message": "ok"}), 200)
+            return jsonify(message='ok'), 200
 
         else:
             # client create failed against the local LIO instance
@@ -1075,15 +1072,15 @@ def manage_client(client_iqn):
             return make_response(jsonify(
                                  config.config["clients"][client_iqn]), 200)
         else:
-            abort(404,
-                  "Client '{}' does not exist".format(client_iqn))
+            return jsonify(message="Client does not exist"), 404
+
     elif request.method == 'PUT':
 
         try:
             valid_iqn = normalize_wwn(['iqn'], client_iqn)
         except RTSLibError:
-            abort(400,
-                  "'{}' is not a valid name for iSCSI".format(client_iqn))
+            return jsonify(message="'{}' is not a valid name for "
+                                   "iSCSI".format(client_iqn)), 400
 
         committing_host = request.form['committing_host']
 
@@ -1096,7 +1093,9 @@ def manage_client(client_iqn):
                                                   chap=chap,
                                                   committing_host=committing_host)
 
-        return make_response(jsonify({"message": status_text}), status_code)
+        logger.debug("client create: {}".format(status_code))
+        logger.debug("client create: {}".format(status_text))
+        return jsonify(message=status_text), status_code
 
     else:
         # DELETE request
@@ -1108,19 +1107,18 @@ def manage_client(client_iqn):
             client.manage('absent', committer=committing_host)
 
             if client.error:
-
-                abort(500,
-                      client.error_msg)
+                logger.error("Failed to remove client : "
+                             "{}".format(client.error_msg))
+                return jsonify(message="Failed to remove client"), 500
 
             else:
                 if committing_host == this_host():
                     config.refresh()
 
-                return make_response(jsonify(
-                                     {"message": "client deleted"}), 200)
+                return jsonify(message="Client deleted ok"), 200
         else:
-            abort(404,
-                  "Client does not exist")
+            logger.error("Delete request for non existent client!")
+            return jsonify(message="Client does not exist!"), 404
 
 
 def pre_reqs_errors():
