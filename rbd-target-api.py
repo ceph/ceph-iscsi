@@ -26,8 +26,8 @@ from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
                                      gen_file_hash, valid_rpm)
-from gwcli.utils import (this_host,
-                         APIRequest)
+from gwcli.utils import (this_host, APIRequest, valid_gateway,
+                         valid_disk)
 
 from gwcli.client import Client
 
@@ -213,17 +213,24 @@ def get_gateways():
 @requires_restricted_auth
 def all_gateway(gateway_name=None):
     """
-    Define iscsi gateway(s) across node(s)
+    Define iscsi gateway(s) across node(s), adding TPGs, disks and clients
 
     :param gateway_name: (str) gateway name
     :return:
     """
 
-    resp_text = "Gateway added"     # Assume the best!
-    http_mode = 'https' if settings.config.api_secure else 'http'
-
     ip_address = request.form.get('ip_address')
     nosync = request.form.get('nosync', False)
+
+    # first confirm that the request is actually valid, if not return a 400
+    # error with the error description
+    current_config = config.config
+    gateway_usable = valid_gateway(gateway_name, ip_address, current_config)
+    if gateway_usable != 'ok':
+        return jsonify(message=gateway_usable),400
+
+    resp_text = "Gateway added"     # Assume the best!
+    http_mode = 'https' if settings.config.api_secure else 'http'
 
     current_disks = config.config['disks']
     current_clients = config.config['clients']
@@ -339,7 +346,7 @@ def all_gateway(gateway_name=None):
 
                 resp_text += ", {} clients defined".format(len(current_clients))
 
-    return make_response(jsonify({"message": resp_text}), 200)
+    return jsonify(message=resp_text), 200
 
 
 @app.route('/api/gateway/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
@@ -472,6 +479,13 @@ def all_disk(image_id):
         size = request.form.get('size')
         mode = request.form.get('mode')
 
+        pool, image_name = image_id.split('.')
+
+        disk_usable = valid_disk(pool=pool, image=image_name, size=size,
+                                 mode=mode)
+        if disk_usable != 'ok':
+            return jsonify(message=disk_usable), 400
+
         # make call to local api server first!
         disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(http_mode,
                                                           settings.config.api_port,
@@ -508,11 +522,19 @@ def all_disk(image_id):
             logger.error(api.response.json()['message'])
             return make_response(api.response.json()['message'], 500)
 
-        logger.info("LUN defined on all gateways for {}".format(image_id))
-        return make_response(jsonify({"message": "ok"}), 200)
+        logger.info("LUN defined to all gateways for {}".format(image_id))
+
+        return jsonify(message="ok"), 200
 
     else:
         # this is a DELETE request
+        pool_name, image_name = image_id.split('.')
+        disk_usable = valid_disk(mode='delete', pool=pool_name,
+                                 image=image_name)
+
+        if disk_usable != 'ok':
+            return jsonify(message=disk_usable), 400
+
         api_vars = {'purge_host': local_gw}
 
         # process other gateways first
@@ -852,7 +874,7 @@ def all_client_luns(client_iqn):
 
     if api.response.status_code == 200:
 
-        logger.info("disk mapping update on {} successful".format(client_iqn))
+        logger.info("disk mapping update for {} successful".format(client_iqn))
 
         for gw in gateways:
             clientlun_api = '{}://{}:{}/api/clientlun/{}'.format(
