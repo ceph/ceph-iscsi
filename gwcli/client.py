@@ -85,8 +85,6 @@ class Clients(UIGroup):
 
 
         # run the create locally - to seed the config object
-        # other_gateways = get_other_gateways(self.parent.parent.parent.target.children)
-        # api_vars = {"committing_host": this_host()}
         client_api = '{}://127.0.0.1:{}/api/all_client/{}'.format(
                      self.http_mode,
                      settings.config.api_port,
@@ -101,20 +99,6 @@ class Clients(UIGroup):
             self.logger.debug("- Client '{}' added".format(client_iqn))
             self.logger.info('ok')
 
-            # # defined locally OK, so let's apply to the other gateways
-            # for gw in other_gateways:
-            #     client_api = '{}://{}:{}/api/client/{}'.format(self.http_mode,
-            #                                                    gw,
-            #                                                    settings.config.api_port,
-            #                                                    client_iqn)
-            #     api = APIRequest(client_api, data=api_vars)
-            #     api.put()
-            #
-            #     if api.response.status_code == 200:
-            #         self.logger.debug("- Client '{}' added to {}".format(client_iqn, gw))
-            #         continue
-            #     else:
-            #         raise GatewayAPIError(api.response.json()['message'])
         else:
             raise GatewayAPIError(api.response.json()['message'])
 
