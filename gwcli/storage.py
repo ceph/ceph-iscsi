@@ -76,29 +76,23 @@ class Disks(UIGroup):
                                                     image,
                                                     size))
 
-        rc = self.create_disk(pool=pool, image=image, size=size)
-
-        if rc == 0:
-            self.logger.info('ok')
-        else:
-            self.logger.error('Failed')
-
+        self.create_disk(pool=pool, image=image, size=size)
 
     def create_disk(self, pool=None, image=None, size=None, parent=None):
 
         if not parent:
             parent = self
 
-        if not self._valid_request(pool, image, size):
-            self.logger.error("Adding {}.{} is invalid".format(pool, image))
-            return 4
-
-        ui_root = self.get_ui_root()
-        other_gateways = get_other_gateways(ui_root.target.children)
-        if len(other_gateways) < (settings.config.minimum_gateways - 1):
-            self.logger.error("At least {} gateways must be defined before "
-                              "disks can be added".format(settings.config.minimum_gateways))
-            return 8
+        # if not self._valid_request(pool, image, size):
+        #     self.logger.error("Adding {}.{} is invalid".format(pool, image))
+        #     return 4
+        #
+        # ui_root = self.get_ui_root()
+        # other_gateways = get_other_gateways(ui_root.target.children)
+        # if len(other_gateways) < (settings.config.minimum_gateways - 1):
+        #     self.logger.error("At least {} gateways must be defined before "
+        #                       "disks can be added".format(settings.config.minimum_gateways))
+        #     return 8
 
         self.logger.debug("Creating/mapping disk {}/{}".format(pool,
                                                                image))
@@ -113,7 +107,7 @@ class Disks(UIGroup):
         api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
                     'mode': 'create'}
 
-        self.logger.debug("Issuing request to local API")
+        self.logger.debug("Issuing disk create request")
 
         api = APIRequest(disk_api, data=api_vars)
         api.put()
@@ -126,6 +120,7 @@ class Disks(UIGroup):
             ceph_pools = self.parent.ceph.local_ceph.pools
             ceph_pools.refresh()
 
+            self.logger.debug("Updating UI for the new disk")
             disk_api = disk_api.replace('/all_disk/', '/disk/')
             api = APIRequest(disk_api)
             api.get()
@@ -133,11 +128,13 @@ class Disks(UIGroup):
             if api.response.status_code == 200:
                 image_config = api.response.json()
                 Disk(parent, disk_key, image_config)
-
-            return 0
+                self.logger.info('ok')
+            else:
+                raise GatewayAPIError("Unable to retrieve disk details from the API")
 
         else:
-            return 16
+            self.logger.error("Failed : {}".format(api.response.json()['message']))
+
 
 
     def find_hosts(self):
@@ -222,28 +219,28 @@ class Disks(UIGroup):
         """
         self.logger.debug("CMD: /disks delete {}".format(image_id))
 
-        # 1st does the image id given exist?
-        rbd_list = [disk.name for disk in self.children]
-        if image_id not in rbd_list:
-            self.logger.error("- the disk '{}' does not exist in this "
-                              "configuration".format(image_id))
-            return
+        # # 1st does the image id given exist?
+        # rbd_list = [disk.name for disk in self.children]
+        # if image_id not in rbd_list:
+        #     self.logger.error("- the disk '{}' does not exist in this "
+        #                       "configuration".format(image_id))
+        #     return
+        #
+        # # Although the LUN class will check that the lun is unallocated before
+        # # attempting a delete, it seems cleaner and more responsive to check
+        # # through the local object model here before sending a delete request
+        # # to the API
+        #
+        # disk_users = self.disk_in_use(image_id)
+        # if disk_users:
+        #     self.logger.error("- Unable to delete '{}', it is currently "
+        #                       "allocated to:".format(image_id))
+        #
+        #     for client in disk_users:
+        #         self.logger.error("  - {}".format(client))
+        #     return
 
-        # Although the LUN class will check that the lun is unallocated before
-        # attempting a delete, it seems cleaner and more responsive to check
-        # through the local object model here before sending a delete request
-        # to the API
-
-        disk_users = self.disk_in_use(image_id)
-        if disk_users:
-            self.logger.error("- Unable to delete '{}', it is currently "
-                              "allocated to:".format(image_id))
-
-            for client in disk_users:
-                self.logger.error("  - {}".format(client))
-            return
-
-        self.logger.debug("Deleting rbd {}".format(image_id))
+        self.logger.debug("Starting delete for rbd {}".format(image_id))
 
         local_gw = this_host()
         # other_gateways = get_other_gateways(self.parent.target.children)
@@ -303,7 +300,7 @@ class Disks(UIGroup):
             del self.disk_info[image_id]
             del self.disk_lookup[image_id]
         else:
-            raise GatewayLIOError("--> Failed to remove the device from the "
+            raise GatewayLIOError("Failed to remove the device from the "
                                   "local machine")
 
         ceph_pools = self.parent.ceph.local_ceph.pools
@@ -479,32 +476,31 @@ class Disk(UINode):
         # resize is actually managed by the same lun and api endpoint as
         # create so this logic is very similar to a 'create' request
 
-        if not size:
-            self.logger.error("Specify a size value (current size "
-                              "is {})".format(self.size_h))
-            return
-
+        # if not size:
+        #     self.logger.error("Specify a size value (current size "
+        #                       "is {})".format(self.size_h))
+        #     return
+        #
         size_rqst = size.upper()
-        if not valid_size(size_rqst):
-            self.logger.error("Size parameter value is not valid syntax "
-                              "(must be of the form 100G, or 1T)")
-            return
-
-        new_size = convert_2_bytes(size_rqst)
-        if self.size >= new_size:
-            # current size is larger, so nothing to do
-            self.logger.error("New size isn't larger than the current "
-                              "image size, ignoring request")
-            return
+        # if not valid_size(size_rqst):
+        #     self.logger.error("Size parameter value is not valid syntax "
+        #                       "(must be of the form 100G, or 1T)")
+        #     return
+        #
+        # new_size = convert_2_bytes(size_rqst)
+        # if self.size >= new_size:
+        #     # current size is larger, so nothing to do
+        #     self.logger.error("New size isn't larger than the current "
+        #                       "image size, ignoring request")
+        #     return
 
         # At this point the size request needs to be honoured
         self.logger.debug("Resizing {} to {}".format(self.image_id,
                                                      size_rqst))
 
         local_gw = this_host()
-        # other_gateways = get_other_gateways(self.parent.parent.target.children)
 
-        # make call to local api server first!
+        # Issue the api request for the resize
         disk_api = '{}://127.0.0.1:{}/api/all_disk/{}'.format(self.http_mode,
                                                               settings.config.api_port,
                                                               self.image_id)
@@ -520,11 +516,14 @@ class Disk(UINode):
             # at this point the resize request was successful, so we need to
             # update the ceph pool meta data (%commit etc)
             self._update_pool()
+            self.size_h = size_rqst
+            self.size = convert_2_bytes(size_rqst)
 
             self.logger.info('ok')
 
         else:
-            raise GatewayAPIError(api.response.json()['message'])
+            self.logger.error("Failed to resize : "
+                              "{}".format(api.response.json()['message']))
 
 
     def _update_pool(self):
