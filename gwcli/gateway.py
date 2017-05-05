@@ -12,7 +12,8 @@ from gwcli.client import Clients, Client, CHAP
 from gwcli.utils import (this_host, get_other_gateways,
                          GatewayAPIError, GatewayError,
                          APIRequest, progress_message,
-                         console_message, get_port_state)
+                         console_message, get_port_state,
+                         valid_gateway)
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import get_ip, ipv4_addresses, gen_file_hash
@@ -441,99 +442,9 @@ class GatewayGroup(UIGroup):
                                              ip_address,
                                              nosync))
 
-        # where possible, validation is done against the local ui tree elements
-        # as opposed to multiple calls to the API - in order to to keep the UI
-        # as responsive as possible
-
-        # validate the gateway name is resolvable
-        if get_ip(gateway_name) == '0.0.0.0':
-            self.logger.error("Gateway '{}' is not resolvable to an ipv4"
-                              " address".format(gateway_name))
-            return
-
-        # validate the ip_address is valid ipv4
-        if get_ip(ip_address) == '0.0.0.0':
-            self.logger.error("IP address provided is not usable (name doesn't"
-                              " resolve, or not a valid ipv4 address)")
-            return
-
-        # validate that the gateway name isn't already known within the
-        # configuration by looking at the UI tree
-        current_gws = [gw for gw in self.children]
-        current_gw_names = [gw.name for gw in current_gws]
-        current_gw_portals = [gw.portal_ip_address for gw in current_gws]
-        if gateway_name in current_gw_names:
-            self.logger.error("'{}' is already defined to the "
-                              "configuration".format(gateway_name))
-            return
-
-        # validate that the ip address given is NOT already known
-        if ip_address in current_gw_portals:
-            self.logger.error("'{}' is already defined within the "
-                              "configuration".format(ip_address))
-            return
-
-        gw_api = '{}://{}:{}/api'.format(self.http_mode,
-                                         gateway_name,
-                                         settings.config.api_port)
-
-        # check the intended host actually has the requested IP available
-        api = APIRequest(gw_api + '/sysinfo/ipv4_addresses')
-        api.get()
-
-        if api.response.status_code != 200:
-            self.logger.error("ipv4_addresses query to {} failed - check"
-                              "rbd-target-gw log, is the API server "
-                              "running?".format(gateway_name))
-
-            raise GatewayAPIError("API call to {}, returned status "
-                                  "{}".format(gateway_name,
-                                              api.response.status_code))
-
-        target_ips = api.response.json()['data']
-        if ip_address not in target_ips:
-            self.logger.error("{} is not available on {}".format(ip_address,
-                                                                 gateway_name))
-            self.logger.error("{} IP's are : {}".format(gateway_name,
-                                                        ','.join(target_ips)))
-            return
-
-
-        api = APIRequest(gw_api + '/sysinfo/checkconf')
-        api.get()
-        if api.response.status_code !=200:
-            msg = ("checkconf API call to {} failed with "
-                   "code".format(gateway_name, api.response.status_code))
-
-            self.logger.error(msg)
-            return
-
-        # compare the hash of the new gateways conf file with the local one
-        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
-        remote_hash = str(api.response.json()['data'])
-        if local_hash != remote_hash:
-            self.logger.error("/etc/ceph/iscsi-gateway.conf on {} does "
-                              "not match the local version. Correct and "
-                              "retry".format(gateway_name))
-            return
-
-        api = APIRequest(gw_api + '/sysinfo/checkversions')
-        api.get()
-        if api.response.status_code !=200:
-            errors = api.response.json()['data']
-            self.logger.error("{} failed rpm/file validation "
-                              "checks".format(gateway_name))
-            for err_desc in errors:
-                self.logger.error("- {}".format(err_desc))
-            return
-
         local_gw = this_host()
         current_gateways = [tgt.name for tgt in self.children]
 
-        if gateway_name == local_gw and len(current_gateways) == 0:
-            first_gateway = True
-        else:
-            first_gateway = False
 
         if gateway_name != local_gw and len(current_gateways) == 0:
             # the first gateway defined must be the local machine. By doing
@@ -554,14 +465,14 @@ class GatewayGroup(UIGroup):
                               " over API - sync aborted, restart rbd-target-gw"
                               " on {} to sync".format(gateway_name))
 
-        if not nosync:
+        if nosync:
             sync_text = "sync skipped"
         else:
-            sync_text = ("sync'ing LIO config ({} disks,"
-                         "{} clients)".format(len(config['disks']),
+            sync_text = ("sync'ing {} disk(s) and "
+                         "{} client(s)".format(len(config['disks']),
                                               len(config['clients'])))
 
-        self.logger.info("Adding gateway, ({})".format(sync_text))
+        self.logger.info("Adding gateway, {}".format(sync_text))
 
         gw_api = '{}://{}:{}/api'.format(self.http_mode,
                                          "127.0.0.1",
@@ -573,12 +484,11 @@ class GatewayGroup(UIGroup):
         api.put()
 
         if api.response.status_code != 200:
+
             msg = api.response.json()['message']
 
-            self.logger.error("Failed to create gateway {} - "
-                              "{}".format(gateway_name,
-                                          msg))
-            raise GatewayAPIError(msg)
+            self.logger.error("Failed : {}".format(msg))
+            return
 
         self.logger.debug("{}".format(api.response.json()['message']))
         self.logger.debug("Adding gw to UI")
