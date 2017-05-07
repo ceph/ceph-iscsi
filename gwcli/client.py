@@ -97,23 +97,23 @@ class Clients(UIGroup):
 
         self.logger.debug("CMD: ../hosts/ delete {}".format(client_iqn))
 
-        # check the iqn given matches one of the child objects
-        # - i.e. it's valid
-        client_names = [child.name for child in self.children]
-        if client_iqn not in client_names:
-            self.logger.error("Host with an iqn of '{}' is not defined."
-                              "..mis-typed?".format(client_iqn))
-            return
-
-        lio_root = root.RTSRoot()
-        clients_logged_in = [session['parent_nodeacl'].node_wwn
-                             for session in lio_root.sessions
-                             if session['state'] == 'LOGGED_IN']
-
-        if client_iqn in clients_logged_in:
-            self.logger.error("Host '{}' is logged in - unable to delete until"
-                              " it's logged out".format(client_iqn))
-            return
+        # # check the iqn given matches one of the child objects
+        # # - i.e. it's valid
+        # client_names = [child.name for child in self.children]
+        # if client_iqn not in client_names:
+        #     self.logger.error("Host with an iqn of '{}' is not defined."
+        #                       "..mis-typed?".format(client_iqn))
+        #     return
+        #
+        # lio_root = root.RTSRoot()
+        # clients_logged_in = [session['parent_nodeacl'].node_wwn
+        #                      for session in lio_root.sessions
+        #                      if session['state'] == 'LOGGED_IN']
+        #
+        # if client_iqn in clients_logged_in:
+        #     self.logger.error("Host '{}' is logged in - unable to delete until"
+        #                       " it's logged out".format(client_iqn))
+        #     return
 
         # At this point we know the client requested is defined to the
         # configuration and is not currently logged in (at least to this host!),
