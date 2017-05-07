@@ -51,45 +51,24 @@ class Clients(UIGroup):
         """
         Clients may be created using the 'create' sub-command. The initial
         definition will be added to each gateway without any authentication
-        set, so once the client is created you must 'cd' to the client and
-        add authentication (auth) and any desired disks (disk).
+        set. Once a client is created the admin is automatically placed in the
+        context of the new client definition for auth and disk configuration
+        operations.
 
         > create <client_iqn>
 
         """
         self.logger.debug("CMD: ../hosts/ create {}".format(client_iqn))
-
-        # to be able to create a host/client, we need to ensure that there are
-        # gateways defined
-        gws = [gw for gw in self.parent.gateway_group.children]
-        if len(gws) < settings.config.minimum_gateways:
-            self.logger.error("You need at least {} gateways defined, before "
-                              "hosts can be added".format(settings.config.minimum_gateways))
-            return
-
         cli_seed = {"luns": {}, "auth": {}}
 
-        # make sure the iqn isn't already defined
-        existing_clients = [client.name for client in self.children]
-        if client_iqn in existing_clients:
-            self.logger.error("Client '{}' is already "
-                              "defined".format(client_iqn))
-            return
-
-        if not valid_iqn(client_iqn):
-            self.logger.critical("An iqn of '{}' is not a valid name for "
-                                 "iSCSI".format(client_iqn))
-            return
-
-
-        # run the create locally - to seed the config object
+        # Issue the API call to create the client
         client_api = '{}://127.0.0.1:{}/api/all_client/{}'.format(
                      self.http_mode,
                      settings.config.api_port,
                      client_iqn)
 
         self.logger.debug("Client CREATE for {}".format(client_iqn))
-        api = APIRequest(client_api) #, data=api_vars)
+        api = APIRequest(client_api)
         api.put()
 
         if api.response.status_code == 200:
@@ -98,8 +77,8 @@ class Clients(UIGroup):
             self.logger.info('ok')
 
         else:
-            raise GatewayAPIError(api.response.json()['message'])
-
+            self.logger.error("Failed: {}".format(api.response.json()['message']))
+            return
 
 
         # switch the current directory to the new client for auth or disk
@@ -140,8 +119,7 @@ class Clients(UIGroup):
         # configuration and is not currently logged in (at least to this host!),
         # OK to delete
         self.logger.debug("Client DELETE for {}".format(client_iqn))
-        client = [client for client in self.children
-                  if client.name == client_iqn][0]
+
 
         # Process flow: remote gateways > local > delete config object entry
 
@@ -156,6 +134,9 @@ class Clients(UIGroup):
             # Delete successfull across all gateways
             self.logger.debug("- '{}' removed and configuration "
                               "updated".format(client_iqn))
+
+            client = [client for client in self.children
+                      if client.name == client_iqn][0]
 
             # remove any rbd maps from the lun_map for this client
             rbds_mapped = [lun.rbd_name for lun in client.children]

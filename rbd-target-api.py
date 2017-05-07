@@ -27,7 +27,7 @@ from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
                                      gen_file_hash, valid_rpm)
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
-                         valid_disk)
+                         valid_disk, valid_client)
 
 from gwcli.client import Client
 
@@ -947,6 +947,9 @@ def all_client(client_iqn):
     :return:
     """
 
+    method = {"PUT": 'create',
+              "DELETE": 'delete'}
+
     http_mode = 'https' if settings.config.api_secure else 'http'
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
@@ -957,6 +960,12 @@ def all_client(client_iqn):
 
     # committing host is the node responsible for updating the config object
     api_vars = {"committing_host": local_gw}
+
+    # validate the PUT/DELETE request first
+    client_usable = valid_client(mode=method[request.method],
+                                 client_iqn=client_iqn)
+    if client_usable != 'ok':
+        return jsonify(message=client_usable), 400
 
     if request.method == 'PUT':
 

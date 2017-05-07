@@ -9,6 +9,7 @@ import rados
 import rbd
 
 from rtslib_fb.utils import normalize_wwn, RTSLibError
+import rtslib_fb.root as root
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (get_ip, ipv4_addresses, gen_file_hash,
@@ -204,7 +205,6 @@ def valid_disk(**kwargs):
                  "delete": ['pool', 'image']}
 
     config = get_config()
-
     if not config:
         return "Unable to query the local API for the current config"
 
@@ -304,7 +304,77 @@ def get_other_gateways(gw_objects):
 
 
 def valid_client(**kwargs):
-    pass
+    """
+    validate a client create or update request, based on mode.
+    :param kwargs: 'mode' is the key field used to determine process flow
+    :return: 'ok' or an error description (str)
+    """
+
+    valid_modes = ['create', 'delete', 'auth', 'disk']
+    if 'mode' in kwargs:
+        if kwargs['mode'] not in valid_modes:
+            return ("Invalid client validation mode request - "
+                    "asked for {}, available {}".format(kwargs['mode'],
+                                                        valid_modes))
+    else:
+        return "Invalid call to valid_client - mode is needed"
+
+    # at this point we have a mode to work with
+
+    mode = kwargs['mode']
+    config = get_config()
+    if not config:
+        return "Unable to query the local API for the current config"
+
+    if mode == 'create':
+        # iqn must be valid
+        if not valid_iqn(kwargs['client_iqn']):
+            return ("Invalid IQN name for iSCSI")
+
+        # iqn must not already exist
+        if kwargs['client_iqn'] in config['clients']:
+            return ("A client with the name '{}' is "
+                    "already defined".format(kwargs['client_iqn']))
+
+        # Creates can only be done with a minimum number of gw's in place
+        num_gws = len([gw_name for gw_name in config['gateways']
+                       if isinstance(config['gateways'][gw_name], dict)])
+        if num_gws < settings.config.minimum_gateways:
+            return ("Clients can not be defined until a HA configuration "
+                    "has been defined "
+                    "(>{} gateways)".format(settings.config.minimum_gateways))
+
+        # at this point pre-req's look good
+        return 'ok'
+
+    elif mode == 'delete':
+
+        # client must exist in the configuration
+        if kwargs['client_iqn'] not in config['clients']:
+            return ("{} is not defined yet - nothing to "
+                    "delete".format(kwargs['client_iqn']))
+
+        # client to delete must not be logged in - we're just checking locally,
+        # since *all* nodes are set up the same, and a client login would
+        # normally login to each gateway
+        lio_root = root.RTSRoot()
+        clients_logged_in = [session['parent_nodeacl'].node_wwn
+                             for session in lio_root.sessions
+                             if session['state'] == 'LOGGED_IN']
+
+        if kwargs['client_iqn'] in clients_logged_in:
+            return ("Client '{}' is logged in - unable to delete until"
+                    " it's logged out".format(kwargs['client_iqn']))
+
+        # at this point client looks good for a delete
+        return 'ok'
+
+    elif mode == 'auth':
+        pass
+    elif mode == 'disk':
+        pass
+
+    return 'Unknown error in valid_client function'
 
 
 class GatewayError(Exception):
