@@ -8,6 +8,8 @@ import sys
 import rados
 import rbd
 
+from rtslib_fb.utils import normalize_wwn, RTSLibError
+
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (get_ip, ipv4_addresses, gen_file_hash,
                                      valid_size, convert_2_bytes)
@@ -59,6 +61,21 @@ def get_config():
         return api.response.json()
     else:
         return {}
+
+
+def valid_iqn(iqn):
+    """
+    confirm whether the given iqn is in an acceptable format
+    :param iqn: (str) iqn name to check
+    :return: (bool) True if iqn is valid for iSCSI
+    """
+
+    try:
+        valid_iqn = normalize_wwn(['iqn'], iqn)
+    except RTSLibError:
+        return False
+
+    return True
 
 
 def valid_gateway(gw_name, gw_ip, config):
@@ -284,6 +301,10 @@ def get_other_gateways(gw_objects):
             other_gateways.append(gw.name)
 
     return other_gateways
+
+
+def valid_client(**kwargs):
+    pass
 
 
 class GatewayError(Exception):

@@ -13,7 +13,7 @@ from gwcli.utils import (this_host, get_other_gateways,
                          GatewayAPIError, GatewayError,
                          APIRequest, progress_message,
                          console_message, get_port_state,
-                         valid_gateway)
+                         valid_gateway, valid_iqn)
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import get_ip, ipv4_addresses, gen_file_hash
@@ -228,12 +228,10 @@ class ISCSITarget(UIGroup):
         if current_target_names:
             self.logger.error("Local LIO instance already has LIO configured "
                               "with a target - unable to continue")
-            raise GatewayError
+            return
 
-        # OK - this request is valid, lets make sure the iqn is also valid :P
-        try:
-            valid_iqn = normalize_wwn(['iqn'], target_iqn)
-        except RTSLibError:
+        # OK - this request is valid, but is the IQN usable?
+        if not valid_iqn(target_iqn):
             self.logger.error("IQN name '{}' is not valid for "
                               "iSCSI".format(target_iqn))
             return

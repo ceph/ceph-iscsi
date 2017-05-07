@@ -7,7 +7,7 @@ from gwcli.node import UIGroup, UINode
 
 from gwcli.utils import (human_size, get_other_gateways,
                          GatewayAPIError, GatewayLIOError,
-                         this_host, APIRequest)
+                         this_host, APIRequest, valid_iqn)
 
 from ceph_iscsi_config.client import CHAP
 import ceph_iscsi_config.settings as settings
@@ -76,9 +76,7 @@ class Clients(UIGroup):
                               "defined".format(client_iqn))
             return
 
-        try:
-            valid_iqn = normalize_wwn(['iqn'], client_iqn)
-        except RTSLibError:
+        if not valid_iqn(client_iqn):
             self.logger.critical("An iqn of '{}' is not a valid name for "
                                  "iSCSI".format(client_iqn))
             return
