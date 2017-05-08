@@ -49,9 +49,8 @@ def requires_basic_auth(f):
         if not auth:
             return jsonify(message="Missing credentials"), 401
 
-
         if (auth.username != settings.config.api_user or
-           auth.password != settings.config.api_password):
+                    auth.password != settings.config.api_password):
             return jsonify(message="username/password mismatch with the "
                                    "configuration file"), 401
 
@@ -74,7 +73,7 @@ def requires_restricted_auth(f):
         gw_names = [gw for gw in config.config['gateways']
                     if isinstance(config.config['gateways'][gw], dict)]
         gw_ips = [get_ip(gw_name) for gw_name in gw_names] + \
-                  local_gw + settings.config.trusted_ip_list
+                 local_gw + settings.config.trusted_ip_list
 
         if request.remote_addr not in gw_ips:
             return jsonify(message="API access not available to "
@@ -86,7 +85,7 @@ def requires_restricted_auth(f):
             return jsonify(message="Missing credentials"), 401
 
         if (auth.username != settings.config.api_user or
-           auth.password != settings.config.api_password):
+                    auth.password != settings.config.api_password):
             return jsonify(message="username/password mismatch with the "
                                    "configuration file"), 401
 
@@ -98,9 +97,12 @@ def requires_restricted_auth(f):
 @app.route('/api', methods=['GET'])
 def get_api_info():
     """
-    Display the available API endpoints
-    :return:
+    Display all the available API endpoints
+    **UNRESTRICTED**
     """
+
+    internal_text = "Internal Use ONLY"
+
     links = []
     for rule in app.url_map.iter_rules():
         url = rule.rule
@@ -109,9 +111,19 @@ def get_api_info():
         else:
             func_doc = inspect.getdoc(globals()[rule.endpoint])
             if func_doc:
-                doc = func_doc.split('\n')[0]
+                # doc = func_doc.split('\n')[0]
+                doc = func_doc.split('\n')
+
+                url = "{} : {}".format(url, doc[0])
+                if internal_text in doc:
+                    pos = doc.index(internal_text)
+                    doc = doc[1:(pos+1)]
+                else:
+                    doc = doc[1:]
+
             else:
-                doc = ''
+                doc = ["Missing description - FIXME!"]
+            # url = "{} : {}".format(url, doc[0])
         links.append((url, doc))
 
     return jsonify(api=links), 200
@@ -122,6 +134,8 @@ def get_api_info():
 def sys_info(query_type=None):
     """
     Provide system information based on the query_type
+    Valid query types are: ipv4_addresses, checkconf and checkversions
+    **RESTRICTED**
     """
 
     if query_type == 'ipv4_addresses':
@@ -151,11 +165,10 @@ def sys_info(query_type=None):
 def target(target_iqn=None):
     """
     Handle the definition of the iscsi target name
-
     The target is added to the configuration object, seeding the configuration
     for ALL gateways
     :param target_iqn: IQN of the target each gateway will use
-    :return: None
+    **RESTRICTED**
     """
     if request.method == 'PUT':
 
@@ -189,14 +202,12 @@ def target(target_iqn=None):
 @requires_restricted_auth
 def get_config():
     """
-    Return the complete config object to the caller - must be authenticated
-
-    Contents will include any defined CHAP credentials
-    :return:
+    Return the complete config object to the caller (must be authenticated)
+    WARNING: Contents will include any defined CHAP credentials
+    **RESTRICTED**
     """
     if request.method == 'GET':
         return make_response(jsonify(config.config), 200)
-
 
 
 @app.route('/api/gateways', methods=['GET'])
@@ -204,6 +215,7 @@ def get_config():
 def get_gateways():
     """
     Return the gateway subsection of the config object to the caller
+    **RESTRICTED**
     """
     if request.method == 'GET':
         return make_response(jsonify(config.config['gateways']), 200)
@@ -214,9 +226,11 @@ def get_gateways():
 def all_gateway(gateway_name=None):
     """
     Define iscsi gateway(s) across node(s), adding TPGs, disks and clients
-
+    The call requires the following variables to be set;
     :param gateway_name: (str) gateway name
-    :return:
+    :param ip_address: (str) ipv4 dotted quad for the address iSCSI should use
+    :param nosync: (bool) whether to sync the LIO objects to the new gateway
+    **RESTRICTED**
     """
 
     ip_address = request.form.get('ip_address')
@@ -227,9 +241,9 @@ def all_gateway(gateway_name=None):
     current_config = config.config
     gateway_usable = valid_gateway(gateway_name, ip_address, current_config)
     if gateway_usable != 'ok':
-        return jsonify(message=gateway_usable),400
+        return jsonify(message=gateway_usable), 400
 
-    resp_text = "Gateway added"     # Assume the best!
+    resp_text = "Gateway added"  # Assume the best!
     http_mode = 'https' if settings.config.api_secure else 'http'
 
     current_disks = config.config['disks']
@@ -274,7 +288,6 @@ def all_gateway(gateway_name=None):
                                                                   msg))
 
             return jsonify(message="Failed to create gateway"), 500
-
 
         # for the new gateway, when sync is selected we need to run the
         # disk api to register all the rbd's to that gateway
@@ -342,10 +355,12 @@ def all_gateway(gateway_name=None):
                         msg = api.response.json()['message']
                         logger.error("Problem adding client {} - "
                                      "{}".format(client_iqn,
-                                                 api.response.json()['message']))
+                                                 api.response.json()[
+                                                     'message']))
                         return jsonify(message="Failed to add client"), 500
 
-                resp_text += ", {} clients defined".format(len(current_clients))
+                resp_text += ", {} clients defined".format(
+                    len(current_clients))
 
     return jsonify(message=resp_text), 200
 
@@ -355,11 +370,11 @@ def all_gateway(gateway_name=None):
 def manage_gateway(gateway_name=None):
     """
     Manage the local iSCSI gateway definition
-
-    Gateways maye be added(PUT), queried (GET) or deleted (DELETE) from
+    Internal Use ONLY
+    Gateways may be be added(PUT), queried (GET) or deleted (DELETE) from
     the configuration
     :param gateway_name: (str) gateway name, normally the DNS name
-    :return:
+    **RESTRICTED**
     """
 
     if request.method == 'GET':
@@ -367,7 +382,7 @@ def manage_gateway(gateway_name=None):
         if gateway_name in config.config['gateways']:
 
             return make_response(jsonify(
-                                 config.config['gateways'][gateway_name]), 200)
+                config.config['gateways'][gateway_name]), 200)
         else:
             return jsonify(message="Gateway doesn't exist in the "
                                    "configuration"), 404
@@ -390,7 +405,6 @@ def manage_gateway(gateway_name=None):
         if gateway.error:
             logger.error("Unable to create an instance of the GWTarget class")
             return jsonify(message="Failed to create the gateway"), 500
-
 
         gateway.manage(target_mode)
         if gateway.error:
@@ -437,6 +451,7 @@ def manage_gateway(gateway_name=None):
 def get_disks():
     """
     Show the rbd disks defined to the gateways
+    **RESTRICTED**
     """
 
     disk_names = config.config['disks'].keys()
@@ -450,7 +465,6 @@ def get_disks():
 def all_disk(image_id):
     """
     Coordinate the create/delete of rbd images across the gateway nodes
-
     The "all_" method calls the corresponding disk api entrypoints across each
     gateway. Processing is done serially: creation is done locally first,
     then other gateways - whereas, rbd deletion is performed first against
@@ -458,7 +472,7 @@ def all_disk(image_id):
     rbd delete.
 
     :param image_id: (str) rbd image name of the format pool.image
-    :return:
+    **RESTRICTED**
     """
 
     http_mode = 'https' if settings.config.api_secure else 'http'
@@ -586,12 +600,12 @@ def all_disk(image_id):
 @requires_restricted_auth
 def manage_disk(image_id):
     """
-    Manage a disk definition across the gateways
-
+    Manage a disk definition on the local gateway
+    Internal Use ONLY
     Disks can be created and added to each gateway, or deleted through this
     call
     :param image_id: (str) of the form pool.image_name
-    :return:
+    **RESTRICTED**
     """
 
     if request.method == 'GET':
@@ -699,10 +713,9 @@ def manage_disk(image_id):
 def get_clients():
     """
     List clients defined to the configuration.
-
     This information will include auth information, hence the
     restricted_auth wrapper
-    :return:
+    **RESTRICTED**
     """
 
     client_list = config.config['clients'].keys()
@@ -715,7 +728,6 @@ def _update_client(**kwargs):
     """
     Handler function to apply the changes to a specific client definition
     :param args:
-    :return:
     """
     # convert the comma separated image_list string into a list for GWClient
     if kwargs['images']:
@@ -748,9 +760,11 @@ def _update_client(**kwargs):
 def all_client_auth(client_iqn):
     """
     Coordinate client authentication changes across each gateway node
-
+    The following parameters are needed to manage client auth
     :param client_iqn: (str) client IQN name
-    :return:
+    :param image_list: (str) comma separated list of rbd images
+    :param chap: (str) chap string of the form user/password or ''
+    **RESTRICTED**
     """
 
     http_mode = 'https' if settings.config.api_secure else 'http'
@@ -764,16 +778,21 @@ def all_client_auth(client_iqn):
     image_list = request.form.get('image_list')
     chap = request.form.get('chap')
 
+    client_usable = valid_client(mode='auth', client_iqn=client_iqn, chap=chap)
+    if client_usable != 'ok':
+        logger.error("BAD auth request from {}".format(request.remote_addr))
+        return jsonify(message=client_usable), 400
+
     api_vars = {"committing_host": local_gw,
                 "image_list": image_list,
                 "chap": chap}
 
     clientauth_api = '{}://127.0.0.1:{}/api/clientauth/{}'.format(
-                     http_mode,
-                     settings.config.api_port,
-                     client_iqn)
+        http_mode,
+        settings.config.api_port,
+        client_iqn)
     logger.debug("Issuing client update to local gw for {}".format(
-                 client_iqn))
+        client_iqn))
     api = APIRequest(clientauth_api, data=api_vars)
     api.put()
 
@@ -794,28 +813,28 @@ def all_client_auth(client_iqn):
                 logger.info("client update successful on {}".format(gw))
                 continue
             else:
-                return make_response(jsonify(
-                       {"message": "client update failed on {}".format(gw)}),
-                       api.response.status_code)
+                return jsonify(message="client update failed on "
+                                       "{}".format(gw)), \
+                       api.response.status_code
 
         logger.info("All gateways updated")
-        return make_response(jsonify({"message": "ok"}), 200)
+        return jsonify(message="ok"), 200
 
     else:
         # the local update failed, so abort further updates
         return make_response(jsonify(
-               {"message": "Client updated failed on local LIO instance"}),
-               api.response.status_code)
+            {"message": "Client updated failed on local LIO instance"}),
+            api.response.status_code)
 
 
 @app.route('/api/clientauth/<client_iqn>', methods=['PUT'])
 @requires_restricted_auth
 def manage_client_auth(client_iqn):
     """
-    Manage client authentication credentials
-
+    Manage client authentication credentials on the local gateway
+    Internal Use ONLY
     :param client_iqn: IQN of the client
-    :return:
+    **RESTRICTED**
     """
 
     # PUT request to define/change authentication
@@ -836,12 +855,10 @@ def manage_client_auth(client_iqn):
 def all_client_luns(client_iqn):
     """
     Handle coordination of disk add/remove from clients across all gateways
-
     We only use a PUT method, since the image list for a client is maintained
     as a whole and passed through to the underlying config module.
-
     :param client_iqn: (str) client IQN name
-    :return:
+    **RESTRICTED**
     """
 
     http_mode = 'https' if settings.config.api_secure else 'http'
@@ -855,6 +872,11 @@ def all_client_luns(client_iqn):
 
     image_list = request.form.get('image_list')
     chap = request.form.get('chap')
+
+    client_usable = valid_client(mode='disk', client_iqn=client_iqn,
+                                 image_list=image_list)
+    if client_usable != 'ok':
+        return jsonify(message=client_usable), 400
 
     # committing host is the local LIO node
     api_vars = {"committing_host": local_gw,
@@ -874,14 +896,14 @@ def all_client_luns(client_iqn):
 
         for gw in gateways:
             clientlun_api = '{}://{}:{}/api/clientlun/{}'.format(
-                            http_mode,
-                            gw,
-                            settings.config.api_port,
-                            client_iqn)
+                http_mode,
+                gw,
+                settings.config.api_port,
+                client_iqn)
 
             logger.debug("Updating disk map for {} on GW {}".format(
-                         client_iqn,
-                         gw))
+                client_iqn,
+                gw))
             api = APIRequest(clientlun_api, data=api_vars)
             api.put()
 
@@ -890,25 +912,26 @@ def all_client_luns(client_iqn):
                 continue
             else:
                 logger.error("disk mapping update on {} failed".format(gw))
-                return make_response(jsonify(
-                       {"message": "disk map updated failed on {}".format(gw)}),
-                       api.response.status_code)
+                return jsonify(message="disk map updated failed on "
+                                       "{}".format(gw)), \
+                       api.response.status_code
 
-        return make_response(jsonify({"message": "ok"}), 200)
+        return jsonify(message="ok"), 200
 
     else:
         # disk map update failed at the first hurdle!
         logger.error("disk map update failed on the local LIO instance")
-        return make_response(jsonify(
-               {"message": "failed to update local LIO instance"}),
-               api.response.status_code)
+        return jsonify(message="failed to update local LIO instance"), \
+               api.response.status_code
 
 
 @app.route('/api/clientlun/<client_iqn>', methods=['GET', 'PUT'])
 @requires_restricted_auth
 def manage_client_luns(client_iqn):
     """
-    Manage the addition/removal of disks from a client
+    Manage the addition/removal of disks from a client on the local gateway
+    Internal Use ONLY
+    **RESTRICTED**
     """
 
     if request.method == 'GET':
@@ -940,11 +963,9 @@ def manage_client_luns(client_iqn):
 @requires_restricted_auth
 def all_client(client_iqn):
     """
-    Handle the coordination of client creation and deletion across the iscsi
-    gateways
-
+    Handle the client create/delete actions across gateways
     :param client_iqn: (str) IQN of the client to create or delete
-    :return:
+    **RESTRICTED**
     """
 
     method = {"PUT": 'create',
@@ -970,9 +991,9 @@ def all_client(client_iqn):
     if request.method == 'PUT':
 
         client_api = '{}://127.0.0.1:{}/api/client/{}'.format(
-                     http_mode,
-                     settings.config.api_port,
-                     client_iqn)
+            http_mode,
+            settings.config.api_port,
+            client_iqn)
 
         logger.debug("Processing client CREATE for {}".format(client_iqn))
         api = APIRequest(client_api, data=api_vars)
@@ -982,14 +1003,14 @@ def all_client(client_iqn):
 
             for gw in gateways:
                 client_api = '{}://{}:{}/api/client/{}'.format(
-                             http_mode,
-                             gw,
-                             settings.config.api_port,
-                             client_iqn)
+                    http_mode,
+                    gw,
+                    settings.config.api_port,
+                    client_iqn)
 
                 logger.debug("sending request to {} to create {}".format(
-                             gw,
-                             client_iqn))
+                    gw,
+                    client_iqn))
                 api = APIRequest(client_api, data=api_vars)
                 api.put()
 
@@ -1002,9 +1023,9 @@ def all_client(client_iqn):
                     msg = api.response.json()['message']
                     logger.error("Client create for {} failed on {} "
                                  ": {}".format(
-                                               client_iqn,
-                                               gw,
-                                               msg))
+                        client_iqn,
+                        gw,
+                        msg))
 
                     return jsonify(message=msg), 500
 
@@ -1036,15 +1057,16 @@ def all_client(client_iqn):
                 continue
             elif api.response.status_code == 400:
                 logger.error("- '{}' is in use on {}".format(client_iqn, gw))
-                return make_response(jsonify({"message": "Client in use"}), 400)
+                return make_response(jsonify({"message": "Client in use"}),
+                                     400)
             else:
                 msg = api.response.json()['message']
                 logger.error("Failed to remove {} from {}".format(
-                             client_iqn,
-                             gw))
+                    client_iqn,
+                    gw))
                 return make_response(jsonify(
-                       {"message": "failed to remove client '{}' on "
-                                   "{}".format(client_iqn, msg)}))
+                    {"message": "failed to remove client '{}' on "
+                                "{}".format(client_iqn, msg)}))
 
         # At this point the other gateways have removed the client, so
         # remove from the local LIO instance
@@ -1060,26 +1082,26 @@ def all_client(client_iqn):
 
         else:
             return make_response(jsonify(
-                   {"message": "Unable to delete {} from local LIO "
-                               "instance".format(client_iqn)}),
-                   api.response.status_code)
+                {"message": "Unable to delete {} from local LIO "
+                            "instance".format(client_iqn)}),
+                api.response.status_code)
 
 
 @app.route('/api/client/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
 def manage_client(client_iqn):
     """
-    Manage a client definition to this node's LIO
-
+    Manage a client definition to the local gateway
+    Internal Use ONLY
     :param client_iqn: iscsi name for the client
-    :return:
+    **RESTRICTED**
     """
 
     if request.method == 'GET':
 
         if client_iqn in config.config['clients']:
             return make_response(jsonify(
-                                 config.config["clients"][client_iqn]), 200)
+                config.config["clients"][client_iqn]), 200)
         else:
             return jsonify(message="Client does not exist"), 404
 
@@ -1156,9 +1178,8 @@ def pre_reqs_errors():
             logger.error("RPM check for {} failed")
             errors_found.append("{} rpm must be installed at >= "
                                 "{}-{}".format(rpm['name'],
-                                              rpm['version'],
-                                              rpm['release']))
-
+                                               rpm['version'],
+                                               rpm['release']))
 
     # check the running kernel is OK (required kernel has patches to rbd.ko)
     os_info = os.uname()
@@ -1196,7 +1217,8 @@ class ConfigWatcher(threading.Thread):
     def run(self):
 
         logger.info("Started the configuration object watcher")
-        logger.info("Checking for config object changes every {}s".format(self.interval))
+        logger.info("Checking for config object changes every {}s".format(
+            self.interval))
 
         cluster = rados.Rados(conffile=settings.config.cephconf)
         cluster.connect()
@@ -1226,8 +1248,8 @@ class ConfigWatcher(threading.Thread):
                                                     obj_epoch))
                     config.refresh()
 
-def get_ssl_context():
 
+def get_ssl_context():
     # Use these self-signed crt and key files
     cert_files = ['/etc/ceph/iscsi-gateway.crt',
                   '/etc/ceph/iscsi-gateway.key']
@@ -1258,7 +1280,6 @@ def get_ssl_context():
 
 
 def main():
-
     config_watcher = ConfigWatcher()
     config_watcher.start()
 
@@ -1321,7 +1342,8 @@ if __name__ == '__main__':
     # file target - more verbose logging for diagnostics
     file_handler = logging.FileHandler('/var/log/rbd-target-api.log', mode='w')
     file_handler.setLevel(logging.DEBUG)
-    file_format = logging.Formatter("%(asctime)s [%(levelname)8s] - %(message)s")
+    file_format = logging.Formatter(
+        "%(asctime)s [%(levelname)8s] - %(message)s")
     file_handler.setFormatter(file_format)
 
     logger.addHandler(syslog_handler)
