@@ -460,8 +460,11 @@ class Client(UINode):
 
         else:
             # the request to add/remove the disk for the client failed
-            self.logger.error("Adding disk '{}' to {} failed".format(disk,
-                                                                     self.client_iqn))
+            self.logger.error("disk {} for '{}' against {} "
+                              "failed\n{}".format(action,
+                                              disk,
+                                              self.client_iqn,
+                                              api.response.json()['message']))
             return
 
     logged_in = property(_get_logged_in_state,
