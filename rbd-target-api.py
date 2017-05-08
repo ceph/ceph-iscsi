@@ -140,20 +140,20 @@ def sys_info(query_type=None):
 
     if query_type == 'ipv4_addresses':
 
-        return make_response(jsonify(data=ipv4_addresses()), 200)
+        return jsonify(data=ipv4_addresses()), 200
 
     elif query_type == 'checkconf':
 
         local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
-        return make_response(jsonify(data=local_hash), 200)
+        return jsonify(data=local_hash), 200
 
     elif query_type == 'checkversions':
 
         config_errors = pre_reqs_errors()
         if config_errors:
-            return make_response(jsonify(data=config_errors), 500)
+            return jsonify(data=config_errors), 500
         else:
-            return make_response(jsonify(data='checks passed'), 200)
+            return jsonify(data='checks passed'), 200
 
     else:
         # Request Unknown
@@ -207,7 +207,7 @@ def get_config():
     **RESTRICTED**
     """
     if request.method == 'GET':
-        return make_response(jsonify(config.config), 200)
+        return jsonify(config.config), 200
 
 
 @app.route('/api/gateways', methods=['GET'])
@@ -218,7 +218,7 @@ def get_gateways():
     **RESTRICTED**
     """
     if request.method == 'GET':
-        return make_response(jsonify(config.config['gateways']), 200)
+        return jsonify(config.config['gateways']), 200
 
 
 @app.route('/api/all_gateway/<gateway_name>', methods=['PUT'])
@@ -381,8 +381,7 @@ def manage_gateway(gateway_name=None):
 
         if gateway_name in config.config['gateways']:
 
-            return make_response(jsonify(
-                config.config['gateways'][gateway_name]), 200)
+            return jsonify(config.config['gateways'][gateway_name]), 200
         else:
             return jsonify(message="Gateway doesn't exist in the "
                                    "configuration"), 404
@@ -457,7 +456,7 @@ def get_disks():
     disk_names = config.config['disks'].keys()
     response = {"disks": disk_names}
 
-    return make_response(jsonify(response), 200)
+    return jsonify(response), 200
 
 
 @app.route('/api/all_disk/<image_id>', methods=['PUT', 'DELETE'])
@@ -528,11 +527,11 @@ def all_disk(image_id):
                 if api.response.status_code == 200:
                     logger.info("LUN is ready on {}".format(gw))
                 else:
-                    return make_response(api.response.json()['message'], 500)
+                    return jsonify(message=api.response.json()['message']), 500
 
         else:
             logger.error(api.response.json()['message'])
-            return make_response(api.response.json()['message'], 500)
+            return jsonify(message=api.response.json()['message']), 500
 
         logger.info("LUN defined to all gateways for {}".format(image_id))
 
@@ -569,12 +568,12 @@ def all_disk(image_id):
                 # 400 means the rbd is still allocated to a client
                 msg = api.response.json()['message']
                 logger.error(msg)
-                return make_response(jsonify({"message": msg}), 400)
+                return jsonify(message=msg), 400
             else:
                 # delete failed - don't know why, pass the error to the
                 # admin and abort
                 msg = api.response.json()['message']
-                return make_response(jsonify({"message": msg}), 500)
+                return jsonify(message=msg), 500
 
         # at this point the remote gateways are cleaned up, now perform the
         # purge on the local host which will also purge the rbd
@@ -590,10 +589,10 @@ def all_disk(image_id):
 
         if api.response.status_code == 200:
             logger.debug("- rbd {} deleted".format(image_id))
-            return make_response(jsonify({"message": "ok"}), 200)
+            return jsonify(message="ok"), 200
         else:
-            return make_response(jsonify(
-                {"message": "failed to delete rbd {}".format(image_id)}), 500)
+            return jsonify(message="failed to delete rbd "
+                                   "{}".format(image_id)), 500
 
 
 @app.route('/api/disk/<image_id>', methods=['GET', 'PUT', 'DELETE'])
@@ -611,8 +610,8 @@ def manage_disk(image_id):
     if request.method == 'GET':
 
         if image_id in config.config['disks']:
-            return make_response(jsonify(config.config["disks"][image_id]),
-                                 200)
+            return jsonify(config.config["disks"][image_id]), 200
+
         else:
             return jsonify(message="rbd image {} not "
                                    "found".format(image_id)), 404
@@ -822,9 +821,8 @@ def all_client_auth(client_iqn):
 
     else:
         # the local update failed, so abort further updates
-        return make_response(jsonify(
-            {"message": "Client updated failed on local LIO instance"}),
-            api.response.status_code)
+        return jsonify(message="Client updated failed on local "
+                               "LIO instance"), api.response.status_code
 
 
 @app.route('/api/clientauth/<client_iqn>', methods=['PUT'])
@@ -966,6 +964,9 @@ def all_client(client_iqn):
     Handle the client create/delete actions across gateways
     :param client_iqn: (str) IQN of the client to create or delete
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X PUT https://192.168.122.69:5001/api/all_client/iqn.1994-05.com.redhat:myhost4
+    curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5001/api/all_client/iqn.1994-05.com.redhat:myhost4
     """
 
     method = {"PUT": 'create',
@@ -1038,7 +1039,7 @@ def all_client(client_iqn):
             logger.error("Client create on local LIO instance failed "
                          "for {} : {}".format(client_iqn,
                                               msg))
-            return make_response(jsonify({"message": msg}), 500)
+            return jsonify(message=msg), 500
 
     else:
         # DELETE client request
@@ -1057,16 +1058,14 @@ def all_client(client_iqn):
                 continue
             elif api.response.status_code == 400:
                 logger.error("- '{}' is in use on {}".format(client_iqn, gw))
-                return make_response(jsonify({"message": "Client in use"}),
-                                     400)
+                return jsonify(message="Client in use"), 400
             else:
                 msg = api.response.json()['message']
                 logger.error("Failed to remove {} from {}".format(
                     client_iqn,
                     gw))
-                return make_response(jsonify(
-                    {"message": "failed to remove client '{}' on "
-                                "{}".format(client_iqn, msg)}))
+                return jsonify(message="failed to remove client '{}' on "
+                                       "{}".format(client_iqn, msg)), 500
 
         # At this point the other gateways have removed the client, so
         # remove from the local LIO instance
@@ -1078,13 +1077,12 @@ def all_client(client_iqn):
 
         if api.response.status_code == 200:
             logger.info("successfully removed '{}'".format(client_iqn))
-            return make_response(jsonify({"message": "ok"}), 200)
+            return jsonify(message="ok"), 200
 
         else:
-            return make_response(jsonify(
-                {"message": "Unable to delete {} from local LIO "
-                            "instance".format(client_iqn)}),
-                api.response.status_code)
+            return jsonify(message="Unable to delete {} from local LIO "
+                                   "instance".format(client_iqn)), \
+                   api.response.status_code
 
 
 @app.route('/api/client/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
@@ -1100,8 +1098,7 @@ def manage_client(client_iqn):
     if request.method == 'GET':
 
         if client_iqn in config.config['clients']:
-            return make_response(jsonify(
-                config.config["clients"][client_iqn]), 200)
+            return jsonify(config.config["clients"][client_iqn]), 200
         else:
             return jsonify(message="Client does not exist"), 404
 
