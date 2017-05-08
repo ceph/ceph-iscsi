@@ -7,6 +7,7 @@ import requests
 import sys
 import rados
 import rbd
+import re
 
 from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
@@ -303,6 +304,34 @@ def get_other_gateways(gw_objects):
     return other_gateways
 
 
+def valid_credentials(credentials_str, auth_type='chap'):
+    """
+    Return a boolean indicating whether the credentials supplied are
+    acceptable
+    """
+
+    # regardless of the auth_type, the credentials_str must be of
+    # for form <username>/<password>
+    try:
+        user_name, password = credentials_str.split('/')
+    except ValueError:
+        return False
+
+    if auth_type == 'chap':
+        # username is any length and includes . and : chars
+        # password is 12-16 chars long containing any alphanumeric
+        # or !,_,& symbol
+        usr_regex = re.compile("^[\w\\.\:]+")
+        pw_regex = re.compile("^[\w\!\&\_]{12,16}$")
+        if not usr_regex.search(user_name) or not pw_regex.search(password):
+            return False
+
+        return True
+    else:
+        # insert mutual or any other credentials logic here!
+        return True
+
+
 def valid_client(**kwargs):
     """
     validate a client create or update request, based on mode.
@@ -311,6 +340,9 @@ def valid_client(**kwargs):
     """
 
     valid_modes = ['create', 'delete', 'auth', 'disk']
+    parms_passed = set(kwargs.keys())
+
+
     if 'mode' in kwargs:
         if kwargs['mode'] not in valid_modes:
             return ("Invalid client validation mode request - "
@@ -322,19 +354,20 @@ def valid_client(**kwargs):
     # at this point we have a mode to work with
 
     mode = kwargs['mode']
+    client_iqn = kwargs['client_iqn']
     config = get_config()
     if not config:
         return "Unable to query the local API for the current config"
 
     if mode == 'create':
         # iqn must be valid
-        if not valid_iqn(kwargs['client_iqn']):
+        if not valid_iqn(client_iqn):
             return ("Invalid IQN name for iSCSI")
 
         # iqn must not already exist
-        if kwargs['client_iqn'] in config['clients']:
+        if client_iqn in config['clients']:
             return ("A client with the name '{}' is "
-                    "already defined".format(kwargs['client_iqn']))
+                    "already defined".format(client_iqn))
 
         # Creates can only be done with a minimum number of gw's in place
         num_gws = len([gw_name for gw_name in config['gateways']
@@ -350,29 +383,78 @@ def valid_client(**kwargs):
     elif mode == 'delete':
 
         # client must exist in the configuration
-        if kwargs['client_iqn'] not in config['clients']:
+        if client_iqn not in config['clients']:
             return ("{} is not defined yet - nothing to "
-                    "delete".format(kwargs['client_iqn']))
+                    "delete".format(client_iqn))
 
         # client to delete must not be logged in - we're just checking locally,
-        # since *all* nodes are set up the same, and a client login would
-        # normally login to each gateway
+        # since *all* nodes are set up the same, and a client login request
+        # would normally login to each gateway
         lio_root = root.RTSRoot()
         clients_logged_in = [session['parent_nodeacl'].node_wwn
                              for session in lio_root.sessions
                              if session['state'] == 'LOGGED_IN']
 
-        if kwargs['client_iqn'] in clients_logged_in:
+        if client_iqn in clients_logged_in:
             return ("Client '{}' is logged in - unable to delete until"
-                    " it's logged out".format(kwargs['client_iqn']))
+                    " it's logged out".format(client_iqn))
 
-        # at this point client looks good for a delete
+        # at this point, the client looks ok for a DELETE operation
         return 'ok'
 
     elif mode == 'auth':
-        pass
+        chap = kwargs['chap']
+        # client iqn must exist
+        if client_iqn not in config['clients']:
+            return ("Client '{}' does not exist".format(client_iqn))
+
+        # must provide chap as either '' or a user/password string
+        if 'chap' not in kwargs:
+            return ("Client auth needs 'chap' defined")
+
+        # credentials string must be valid
+        if chap:
+            if not valid_credentials(chap):
+                return ("Invalid chap credentials provided (must be "
+                        "user/password format)")
+
+        return 'ok'
+
     elif mode == 'disk':
-        pass
+
+        if 'image_list' not in parms_passed:
+            return ("Disk changes require 'image_list' to be set, containing"
+                    " a comma separated str of rbd images (pool.image)")
+
+        rqst_disks = set(kwargs['image_list'].split(','))
+        mapped_disks = set(config['clients'][client_iqn]['luns'].keys())
+        current_disks = set(config['disks'].keys())
+
+        if len(rqst_disks) > len(mapped_disks):
+            # this is an add operation
+
+            # ensure the image list is 'complete' not just a single disk
+            if not mapped_disks.issubset(rqst_disks):
+                return ("Invalid image list - it must contain existing "
+                        "disks AND any additions")
+
+            # ensure new disk(s) exist - must yield a result since rqst>mapped
+            new_disks = rqst_disks.difference(mapped_disks)
+            if not new_disks.issubset(current_disks):
+                # disks provided are not currently defined
+                return ("Invalid image list - it defines new disks that do "
+                        "not current exist")
+
+            return 'ok'
+
+        else:
+
+            # this is a disk removal operation
+            if not rqst_disks.issubset(mapped_disks):
+                return ("Invalid image list - deleting a disk requires the "
+                        "complete list of images the client must have ")
+
+            return 'ok'
 
     return 'Unknown error in valid_client function'
 

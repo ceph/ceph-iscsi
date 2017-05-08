@@ -97,31 +97,7 @@ class Clients(UIGroup):
 
         self.logger.debug("CMD: ../hosts/ delete {}".format(client_iqn))
 
-        # # check the iqn given matches one of the child objects
-        # # - i.e. it's valid
-        # client_names = [child.name for child in self.children]
-        # if client_iqn not in client_names:
-        #     self.logger.error("Host with an iqn of '{}' is not defined."
-        #                       "..mis-typed?".format(client_iqn))
-        #     return
-        #
-        # lio_root = root.RTSRoot()
-        # clients_logged_in = [session['parent_nodeacl'].node_wwn
-        #                      for session in lio_root.sessions
-        #                      if session['state'] == 'LOGGED_IN']
-        #
-        # if client_iqn in clients_logged_in:
-        #     self.logger.error("Host '{}' is logged in - unable to delete until"
-        #                       " it's logged out".format(client_iqn))
-        #     return
-
-        # At this point we know the client requested is defined to the
-        # configuration and is not currently logged in (at least to this host!),
-        # OK to delete
         self.logger.debug("Client DELETE for {}".format(client_iqn))
-
-
-        # Process flow: remote gateways > local > delete config object entry
 
         client_api = '{}://{}:{}/api/all_client/{}'.format(self.http_mode,
                                                        "127.0.0.1",
@@ -131,7 +107,7 @@ class Clients(UIGroup):
         api.delete()
 
         if api.response.status_code == 200:
-            # Delete successfull across all gateways
+            # Delete successful across all gateways
             self.logger.debug("- '{}' removed and configuration "
                               "updated".format(client_iqn))
 
@@ -246,33 +222,33 @@ class Client(UINode):
 
         return ", ".join(msg), status
 
-    @staticmethod
-    def valid_credentials(credentials_str, auth_type='chap'):
-        """
-        Return a boolean indicating whether the credentials supplied are
-        acceptable
-        """
-
-        # regardless of the auth_type, the credentials_str must be of
-        # for form <username>/<password>
-        try:
-            user_name, password = credentials_str.split('/')
-        except ValueError:
-            return False
-
-        if auth_type == 'chap':
-            # username is any length and includes . and : chars
-            # password is 12-16 chars long containing any alphanumeric
-            # or !,_,& symbol
-            usr_regex = re.compile("^[\w\\.\:]+")
-            pw_regex = re.compile("^[\w\!\&\_]{12,16}$")
-            if not usr_regex.search(user_name) or not pw_regex.search(password):
-                return False
-
-            return True
-        else:
-            # insert mutual or any other credentials logic here!
-            return True
+    # @staticmethod
+    # def valid_credentials(credentials_str, auth_type='chap'):
+    #     """
+    #     Return a boolean indicating whether the credentials supplied are
+    #     acceptable
+    #     """
+    #
+    #     # regardless of the auth_type, the credentials_str must be of
+    #     # for form <username>/<password>
+    #     try:
+    #         user_name, password = credentials_str.split('/')
+    #     except ValueError:
+    #         return False
+    #
+    #     if auth_type == 'chap':
+    #         # username is any length and includes . and : chars
+    #         # password is 12-16 chars long containing any alphanumeric
+    #         # or !,_,& symbol
+    #         usr_regex = re.compile("^[\w\\.\:]+")
+    #         pw_regex = re.compile("^[\w\!\&\_]{12,16}$")
+    #         if not usr_regex.search(user_name) or not pw_regex.search(password):
+    #             return False
+    #
+    #         return True
+    #     else:
+    #         # insert mutual or any other credentials logic here!
+    #         return True
 
     def ui_command_auth(self, nochap=False, chap=None):
         """
@@ -294,24 +270,11 @@ class Client(UINode):
         if nochap:
             chap = ''
 
-        if not nochap and not chap:
-            self.logger.error("To set CHAP authentication provide a string of "
-                              "the format 'user/password'")
-            return
-
-        if chap:
-            # validate the chap credentials are acceptable
-            if not Client.valid_credentials(chap, auth_type='chap'):
-                self.logger.error("-> the format of the CHAP string is invalid"
-                                  ", use 'help auth' for examples")
-                return
-
         self.logger.debug("Client '{}' AUTH update".format(self.client_iqn))
         # get list of children (luns) to build current image list
         lun_list = [(lun.rbd_name, lun.lun_id) for lun in self.children]
         image_list = ','.join(Client.get_srtd_names(lun_list))
 
-        other_gateways = get_other_gateways(self.parent.parent.parent.parent.target.children)
         api_vars = {"image_list": image_list,
                     "chap": chap}
 
@@ -325,13 +288,13 @@ class Client(UINode):
 
         if api.response.status_code == 200:
             self.logger.debug("- client credentials updated")
-
             self.auth['chap'] = chap
-
             self.logger.info('ok')
 
         else:
-            raise GatewayAPIError(api.response.json()['message'])
+            self.logger.error("Failed to update the client's auth"
+                              " :{}".format(api.response.json()['message']))
+            return
 
     @staticmethod
     def get_srtd_names(lun_list):
@@ -476,8 +439,9 @@ class Client(UINode):
                                                                active_maps))
 
                 else:
-                    self.logger.error("Query for disk '{}' failed".format(disk))
-                    raise GatewayAPIError()
+                    self.logger.error("Query for disk '{}' meta data "
+                                      "failed".format(disk))
+                    return
 
             else:
 
@@ -498,7 +462,7 @@ class Client(UINode):
             # the request to add/remove the disk for the client failed
             self.logger.error("Adding disk '{}' to {} failed".format(disk,
                                                                      self.client_iqn))
-            raise GatewayAPIError()
+            return
 
     logged_in = property(_get_logged_in_state,
                          doc="login state of the client")
