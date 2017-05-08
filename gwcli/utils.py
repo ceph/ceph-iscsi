@@ -450,9 +450,9 @@ def valid_client(**kwargs):
         else:
 
             # this is a disk removal operation
-            if not rqst_disks.issubset(mapped_disks):
-                return ("Invalid image list - deleting a disk requires the "
-                        "complete list of images the client must have ")
+            if kwargs['image_list']:
+                if not rqst_disks.issubset(mapped_disks):
+                    return ("Invalid image list ({})".format(rqst_disks))
 
             return 'ok'
 
