@@ -22,7 +22,6 @@ class Settings(object):
                 "api_secure": "true",
                 "loop_delay": 2,
                 "trusted_ip_list": '',          # comma separate list of IPs
-                "api_enabled": 'true',
                 "api_user": "admin",
                 "api_password": "admin",
                 "ceph_user": "admin",
