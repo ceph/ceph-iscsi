@@ -12,6 +12,8 @@ The gwcli shell is similar to the targetcli interface, and is also based on 'con
 .SH USAGE
 \fBgwcli\fR [-d | --debug]
 
+The -d option provides additional verbosity within the shell
+
 \fBgwcli [cmd]\fR
 
 Invoke gwcli as root to enter the interactive shell, or supply a command to execute without entering the shell. Within the shell, us \fBls\fR to list nodes beneath the current path. Moving around the tree is done using the \fBcd\fR command, or by simply entering the 'path' of the new location/node directly. Use \fBhelp <cmd>\fR for specific help information. The shell provides tab completion for commands and command arguments.
@@ -19,13 +21,9 @@ Invoke gwcli as root to enter the interactive shell, or supply a command to exec
 Configuration state is persisted within a rados object stored in the 'rbd' pool. gwcli orchestrates changes across all iscsi gateways via the rbd-target-api service running on each gateway. Once the change to the local LIO subsystem is complete, the change is committed to the rados configuration object. Although 'targetcli' is available, it can only really provide a view of the local LIO configuration.
 
 .SH QUICKSTART
-gwcli interacts with an API service provided by each iSCSI gateway's rbd-target-api daemon. The API service is installed with the cli, but in order to use 'gwcli', you'll need to update '/etc/ceph/iscsi-gateway.cfg' with the following;
+gwcli interacts with an API service provided by each iSCSI gateway's rbd-target-api daemon. The API service is installed with the cli, and can be configured by updating the api_* related settings in '/etc/ceph/iscsi-gateway.cfg'.
 .PP
-.RS 3
-\fBapi_enabled = true\fR
-.RE
-.PP
-Additional overrides may be provided to change the way the API server and CLI tool interact, including;
+Typically, the following options are regarded as site specific;
 .PP
 .PD 0.4
 .RS 3
@@ -39,6 +37,12 @@ Additional overrides may be provided to change the way the API server and CLI to
 .RE
 .PD 1
 .PP
+Access to the API is normally restricted to the IP's of the gateway nodes, but you may also define other IP addresses that should be granted access to the API by adding the follwing entry to the configuration file;
+.PP
+.RS 3
+\fBtrusted_ip_list = <ip_address,ip_address...>\fR
+.RE
+.PP
 By default the API service is not running with TLS, so for a more secure environment ensure iscsi-gateway.cfg has "api_secure = true" defined. When using secure mode you will need to create the appropriate certificate and private key files, and place them in /etc/ceph as 'iscsi-gateway.crt' and 'iscsi-gateway.key' on \fBeach\fR gateway node.
 .PP
 Once these files are inplace across the nodes, the rbd-target-api service can be started. Check that the API service is enabled and in the correct mode by looking at the output of 'systemctl status rbd-target-api'. You should see a message similar to
@@ -47,7 +51,7 @@ Once these files are inplace across the nodes, the rbd-target-api service can be
 \fB* Running on https://0.0.0.0:5001/\fR.
 .RE
 .PP
-The example gwcli output below shows a small two-gateway configuration, supporting 3 iSCSI clients
+The example gwcli output below shows a small two-gateway configuration, supporting 2 iSCSI clients
 
 .PP
 .PD 0.4
@@ -57,34 +61,36 @@ $ sudo gwcli
 .PP
 .nf
 /> ls
-o- / ............................................................. [...]
-  o- ceph .................................................. [HEALTH_OK]
-  | o- pools ................................................ [Pools: 2]
-  | | o- iscsi ........ [Commit: 0b, Avail: 20G, Used: 18b, Commit%: 0%]
-  | | o- rbd ......... [Commit: 14G, Avail: 20G, Used: 4K, Commit%: 70%]
-  | o- topology ...................................... [OSDs: 3,MONs: 3]
-  o- disks ............................................. [14G, Disks: 3]
-  | o- rbd.ansible1 .................................... [ansible1 (6G)]
-  | o- rbd.ansible2 .................................... [ansible2 (5G)]
-  | o- rbd.ansible3 .................................... [ansible3 (3G)]
-  o- iscsi-target ......................................... [Targets: 1]
-    o- iqn.2003-01.com.redhat.iscsi-gw:ceph-gw ........... [Gateways: 2]
-      o- gateways ......................................... [Portals: 2]
-      | o- rh7-gw1 .................................... [192.168.122.69]
-      | o- rh7-gw2 ................................... [192.168.122.104]
-      o- hosts .............................................. [Hosts: 3]
-        o- iqn.1994-05.com.redhat:myhost .... [Auth: CHAP, Disks: 1(6G)]
-        | o- lun 0 .................. [rbd.ansible1(6G), \fBOwner: rh7-gw2]\fR
-        o- iqn.1994-05.com.redhat:myhost2 ... [Auth: None, Disks: 1(5G)]
-        | o- lun 0 .................. [rbd.ansible2(5G), \fBOwner: rh7-gw1]\fR
-        o- iqn.1994-05.com.redhat:myhost3 ... [Auth: None, Disks: 1(3G)]
-          o- lun 0 .................. [rbd.ansible3(3G), Owner: rh7-gw2]
+o- / ................................................................... [...]
+  o- clusters .................................................. [Clusters: 1]
+  | o- ceph ...................................................... [HEALTH_OK]
+  |   o- pools .................................................... [Pools: 3]
+  |   | o- ec ......................... [(2+1), Commit: 0b/40G (0%), Used: 0b]
+  |   | o- iscsi ...................... [(x3), Commit: 0b/20G (0%), Used: 18b]
+  |   | o- rbd ........................ [(x3), Commit: 8G/20G (40%), Used: 5K]
+  |   o- topology .......................................... [OSDs: 3,MONs: 3]
+  o- disks .................................................... [8G, Disks: 5]
+  | o- rbd.disk_1 .............................................. [disk_1 (1G)]
+  | o- rbd.disk_2 .............................................. [disk_2 (2G)]
+  | o- rbd.disk_3 .............................................. [disk_3 (2G)]
+  | o- rbd.disk_4 .............................................. [disk_4 (1G)]
+  | o- rbd.disk_5 .............................................. [disk_5 (2G)]
+  o- iscsi-target ............................................... [Targets: 1]
+    o- iqn.2003-01.com.redhat.iscsi-gw:ceph-gw ................. [Gateways: 2]
+      o- gateways ...................................... [Up: 2/2, Portals: 2]
+      | o- rh7-gw1 ..................................... [192.168.122.69 (UP)]
+      | o- rh7-gw2 .................................... [192.168.122.104 (UP)]
+      o- hosts .................................................... [Hosts: 2]
+        o- iqn.1994-05.com.redhat:myhost1 ......... [Auth: None, Disks: 1(1G)]
+        | o- lun 0 .......................... [rbd.disk_1(1G), \fBOwner: rh7-gw2]\fR]
+        o- iqn.1994-05.com.redhat:rh7-client  [LOGGED-IN, Auth: CHAP, Disks: 1(2G)]
+          o- lun 0 .......................... [rbd.disk_5(2G), \fBOwner: rh7-gw2]\fR]
 .fi
 .PD 1
 .PP
 Disks exported through the gateways use ALUA attributes to provide ActiveOptimised and ActiveNonOptimised access to the rbd images. Each disk is assigned a primary owner at creation/import time - shown above with the \fBowner\fR attribute.
 .SH DISKS
-In order to manage rbd images (disks) within the environment there are several commands that enable you to create, resize and delete rbd's from the ceph cluster. When an rbd image is created, it is registered with all gateways. Part of this registration process defines the gateway that will provide the active I/O path to the LUN (disk) for any/all clients. This process means therefore dictates that the iscsi-target definition \fIand\fR the gateway hosts must be defined prior to any disks being created. It's also important to note that for an rbd image to be compatible with the iSCSI environment, it must have specific image features enabled (exclusive_lock, layering). The easiest way to create new disks is using the \fB/disks create\fR command.
+In order to manage rbd images (disks) within the environment there are several commands that enable you to create, resize and delete rbd's from the ceph cluster. When an rbd image is created, it is registered with all gateways. Part of this registration process defines the gateway that will provide the active I/O path to the LUN (disk) for any/all clients. This means that the iscsi-target definition \fIand\fR the gateway hosts must be defined prior to any disks being created (added to the gateways). It's also important to note that for an rbd image to be compatible with the iSCSI environment, it must have specific image features enabled (exclusive_lock, layering). The easiest way to create new disks is using the \fB/disks create\fR command.
 .PP
 .TP
 \fB/disks/ create pool=<pool> image=<image_name> size=<N>G\fR
@@ -116,10 +122,9 @@ Gateways provide the access points for rbd images over iSCSI, so there should be
 .PP
 .TP
 \fB/iscsi-target/<iqn>/ create <node_name> <portal_ip_address>
-Gateways are defined by a node name (preferably a shortname, but it must resolve), and an IP address that the iSCSI 'service' will be bound to (i.e. the iSCSI portal IP address. When adding a gateway, the candidate machine will be checked to ensure the relevant files and daemons are in place.
-ahh
+Gateways are defined by a node name (preferably a shortname, but it must resolve), and an IPv4 address that the iSCSI 'service' will be bound to (i.e. the iSCSI portal IP address). When adding a gateway, the candidate machine will be checked to ensure the relevant files and daemons are in place.
 .SH HOSTS
-The 'hosts' group defines the iSCSI client definitions that provide access to the rbd images. The CLI provides the ability to create and delete clients, define/update chap authentication and add and remove rbd images to the client.
+The 'hosts' section defines the iSCSI client definitions (NodeACLs) that provide access to the rbd images. The CLI provides the ability to create and delete clients, define/update chap authentication and add and remove rbd images for the client.
 .PP
 .TP
 \fB/iscsi-target/<iqn>/hosts/ create <client_iqn>
