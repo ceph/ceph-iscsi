@@ -246,19 +246,33 @@ class CephPools(UIGroup):
 
     def populate(self):
 
-        existing_pools = [pool.name for pool in self.children]
+        # existing_pools = [pool.name for pool in self.children]
 
-        # Ensure we have all the pool child objects defined
+
+        # get a breakdown of the osd's to retrieve the pool types
+        # SLEDGEHAMMER meets NUT
+        self.logger.debug("Fetching ceph osd information")
         with rados.Rados(conffile=self.parent.conf) as cluster:
-            pools = cluster.list_pools()
-            for pool_name in pools:
-                if pool_name not in existing_pools:
-                    new_pool = RadosPool(self, pool_name)
-                    self.pool_lookup[pool_name] = new_pool
+            cmd = {'prefix': 'osd dump', 'format': 'json'}
+            rc, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
+
+        pools = {}
+        for pool in json.loads(buf_s)['pools']:
+            name = pool['pool_name']
+            pools[name] = pool
+
+        # # Get the pools defined
+        # with rados.Rados(conffile=self.parent.conf) as cluster:
+        #     pools = cluster.list_pools()
+
+        for pool_name in pools:
+            # if pool_name not in existing_pools:
+            new_pool = RadosPool(self, pool_name, pools[pool_name])
+            self.pool_lookup[pool_name] = new_pool
 
     def refresh(self):
 
-        self.logger.debug("Gathering pool stats for "
+        self.logger.debug("Gathering pool stats for cluster "
                           "'{}'".format(self.parent.name))
 
         # unfortunately the rados python api does not expose all the needed
@@ -282,10 +296,18 @@ class CephPools(UIGroup):
 
 class RadosPool(UINode):
     display_attributes = ["name", "commit", "overcommit_PCT", "max_bytes",
-                          "used_bytes"]
+                          "used_bytes", "type", "desc"]
 
-    def __init__(self, parent, pool_name):
+    def __init__(self, parent, pool_name, pool_md):
         UINode.__init__(self, pool_name, parent)
+        self.pool_md = pool_md
+        pool_type = {1: ("x{}".format(self.pool_md['size']),
+                         'replicated'),
+                     3: ("{}+{}".format(self.pool_md['min_size'],
+                                        (self.pool_md['size'] -
+                                         self.pool_md['min_size'])),
+                         "erasure")}
+        self.desc, self.type = pool_type[self.pool_md['type']]
 
     def _calc_overcommit(self):
         root = self.parent.parent.parent.parent
@@ -306,10 +328,13 @@ class RadosPool(UINode):
         self._calc_overcommit()
 
     def summary(self):
-        msg = ["Commit: {}".format(human_size(self.commit))]
-        msg.append("Avail: {}".format(human_size(self.max_bytes)))
+        msg = ["({})".format(self.desc)]
+        msg.append("Commit: {}/{} ({}%)".format(human_size(self.commit),
+                                                human_size(self.max_bytes),
+                                                self.overcommit_PCT))
+        #msg.append("Avail: {}".format(human_size(self.max_bytes)))
         msg.append("Used: {}".format(human_size(self.used_bytes)))
-        msg.append("Commit%: {}%".format(self.overcommit_PCT))
+        #msg.append("Commit%: {}%".format(self.overcommit_PCT))
         return ', '.join(msg), True
 
 
