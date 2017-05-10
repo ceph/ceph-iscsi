@@ -22,7 +22,7 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.lun import LUN
-from ceph_iscsi_config.client import GWClient
+from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
                                      gen_file_hash, valid_rpm)
@@ -761,7 +761,6 @@ def all_client_auth(client_iqn):
     Coordinate client authentication changes across each gateway node
     The following parameters are needed to manage client auth
     :param client_iqn: (str) client IQN name
-    :param image_list: (str) comma separated list of rbd images
     :param chap: (str) chap string of the form user/password or ''
     **RESTRICTED**
     """
@@ -774,7 +773,8 @@ def all_client_auth(client_iqn):
     logger.debug("other gateways - {}".format(gateways))
     gateways.remove(local_gw)
 
-    image_list = request.form.get('image_list')
+    lun_list = config.config['clients'][client_iqn]['luns'].keys()
+    image_list = ','.join(lun_list)
     chap = request.form.get('chap')
 
     client_usable = valid_client(mode='auth', client_iqn=client_iqn, chap=chap)
@@ -792,6 +792,7 @@ def all_client_auth(client_iqn):
         client_iqn)
     logger.debug("Issuing client update to local gw for {}".format(
         client_iqn))
+
     api = APIRequest(clientauth_api, data=api_vars)
     api.put()
 
@@ -847,15 +848,13 @@ def manage_client_auth(client_iqn):
 
     return jsonify(message=status_text), status_code
 
-
-@app.route('/api/all_clientlun/<client_iqn>', methods=['PUT'])
+@app.route('/api/all_clientlun/<client_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
 def all_client_luns(client_iqn):
     """
-    Handle coordination of disk add/remove from clients across all gateways
-    We only use a PUT method, since the image list for a client is maintained
-    as a whole and passed through to the underlying config module.
-    :param client_iqn: (str) client IQN name
+    Coordinate the addition(PUT) and removal(DELETE) of a disk from a client
+    :param client_iqn: (str) IQN of the client
+    :param disk: (str) rbd image name of the format pool.image
     **RESTRICTED**
     """
 
@@ -868,12 +867,29 @@ def all_client_luns(client_iqn):
     logger.debug("other gateways - {}".format(gateways))
     gateways.remove(local_gw)
 
-    image_list = request.form.get('image_list')
-    chap = request.form.get('chap')
+    disk = request.form.get('disk')
+
+    lun_list = config.config['clients'][client_iqn]['luns'].keys()
+
+    if request.method == 'PUT':
+        lun_list.append(disk)
+    else:
+        # this is a delete request
+        if disk in lun_list:
+            lun_list.remove(disk)
+        else:
+            return jsonify(message="disk not mapped to client"), 400
+
+    chap_obj = CHAP(config.config['clients'][client_iqn]['auth']['chap'])
+    chap = "{}/{}".format(chap_obj.user, chap_obj.password)
+    image_list = ','.join(lun_list)
 
     client_usable = valid_client(mode='disk', client_iqn=client_iqn,
                                  image_list=image_list)
     if client_usable != 'ok':
+        logger.error("Bad disk request for client {} : "
+                     "{}".format(client_iqn,
+                                 client_usable))
         return jsonify(message=client_usable), 400
 
     # committing host is the local LIO node

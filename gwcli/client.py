@@ -153,7 +153,6 @@ class Clients(UIGroup):
                 raise ValueError("Clients.update_lun_map : Attempt to delete "
                                  "rbd from lun_map that is not defined")
 
-
     def delete(self, child):
 
         self.remove_child(child)
@@ -222,34 +221,6 @@ class Client(UINode):
 
         return ", ".join(msg), status
 
-    # @staticmethod
-    # def valid_credentials(credentials_str, auth_type='chap'):
-    #     """
-    #     Return a boolean indicating whether the credentials supplied are
-    #     acceptable
-    #     """
-    #
-    #     # regardless of the auth_type, the credentials_str must be of
-    #     # for form <username>/<password>
-    #     try:
-    #         user_name, password = credentials_str.split('/')
-    #     except ValueError:
-    #         return False
-    #
-    #     if auth_type == 'chap':
-    #         # username is any length and includes . and : chars
-    #         # password is 12-16 chars long containing any alphanumeric
-    #         # or !,_,& symbol
-    #         usr_regex = re.compile("^[\w\\.\:]+")
-    #         pw_regex = re.compile("^[\w\!\&\_]{12,16}$")
-    #         if not usr_regex.search(user_name) or not pw_regex.search(password):
-    #             return False
-    #
-    #         return True
-    #     else:
-    #         # insert mutual or any other credentials logic here!
-    #         return True
-
     def ui_command_auth(self, nochap=False, chap=None):
         """
         Client authentication can be set to use CHAP by supplying the
@@ -271,12 +242,8 @@ class Client(UINode):
             chap = ''
 
         self.logger.debug("Client '{}' AUTH update".format(self.client_iqn))
-        # get list of children (luns) to build current image list
-        lun_list = [(lun.rbd_name, lun.lun_id) for lun in self.children]
-        image_list = ','.join(Client.get_srtd_names(lun_list))
 
-        api_vars = {"image_list": image_list,
-                    "chap": chap}
+        api_vars = {"chap": chap}
 
         clientauth_api = '{}://127.0.0.1:{}/api/all_clientauth/{}'.format(
                          self.http_mode,
@@ -362,7 +329,7 @@ class Client(UINode):
                 ui_root = self.get_ui_root()
                 ui_disks = ui_root.disks
                 if not size:
-                    self.logger.error("To autodefine the disk to the client"
+                    self.logger.error("To auto-define the disk to the client"
                                       " you must provide a disk size")
                     return
 
@@ -370,9 +337,9 @@ class Client(UINode):
                 pool, image = disk.split('.')
                 rc = ui_disks.create_disk(pool=pool, image=image, size=size)
                 if rc == 0:
-                    self.logger.debug("disk autodefine successful")
+                    self.logger.debug("disk auto-define successful")
                 else:
-                    self.logger.error("disk autodefine failed({}), try "
+                    self.logger.error("disk auto-define failed({}), try "
                                       "using the /disks create "
                                       "command".format(rc))
                     return
@@ -389,15 +356,17 @@ class Client(UINode):
                                       action,
                                       disk))
 
-        if action == 'add':
-            current_luns.append(disk)
-        else:
-            current_luns.remove(disk)
+        api_vars = {"disk": disk}
 
-        image_list = ','.join(current_luns)
-
-        api_vars = {"image_list": image_list,
-                    "chap": self.auth.get('chap', '')}
+        # if action == 'add':
+        #     current_luns.append(disk)
+        # else:
+        #     current_luns.remove(disk)
+        #
+        # image_list = ','.join(current_luns)
+        #
+        # api_vars = {"image_list": image_list,
+        #             "chap": self.auth.get('chap', '')}
 
         clientlun_api = '{}://127.0.0.1:{}/api/all_clientlun/{}'.format(
                         self.http_mode,
@@ -405,7 +374,10 @@ class Client(UINode):
                         self.client_iqn)
 
         api = APIRequest(clientlun_api, data=api_vars)
-        api.put()
+        if action == 'add':
+            api.put()
+        else:
+            api.delete()
 
         if api.response.status_code == 200:
 
