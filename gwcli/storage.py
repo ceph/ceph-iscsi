@@ -219,27 +219,6 @@ class Disks(UIGroup):
         """
         self.logger.debug("CMD: /disks delete {}".format(image_id))
 
-        # # 1st does the image id given exist?
-        # rbd_list = [disk.name for disk in self.children]
-        # if image_id not in rbd_list:
-        #     self.logger.error("- the disk '{}' does not exist in this "
-        #                       "configuration".format(image_id))
-        #     return
-        #
-        # # Although the LUN class will check that the lun is unallocated before
-        # # attempting a delete, it seems cleaner and more responsive to check
-        # # through the local object model here before sending a delete request
-        # # to the API
-        #
-        # disk_users = self.disk_in_use(image_id)
-        # if disk_users:
-        #     self.logger.error("- Unable to delete '{}', it is currently "
-        #                       "allocated to:".format(image_id))
-        #
-        #     for client in disk_users:
-        #         self.logger.error("  - {}".format(client))
-        #     return
-
         self.logger.debug("Starting delete for rbd {}".format(image_id))
 
         local_gw = this_host()
@@ -254,44 +233,6 @@ class Disks(UIGroup):
         api = APIRequest(disk_api, data=api_vars)
         api.delete()
 
-        # # process other gateways first
-        # for gw_name in other_gateways:
-        #     disk_api = '{}://{}:{}/api/all_disk/{}'.format(self.http_mode,
-        #                                                    gw_name,
-        #                                                    settings.config.api_port,
-        #                                                    image_id)
-        #
-        #     self.logger.debug("- removing '{}' from {}".format(image_id,
-        #                                                        gw_name))
-        #
-        #     api = APIRequest(disk_api, data=api_vars)
-        #     api.delete()
-        #
-        #     if api.response.status_code == 200:
-        #         pass
-        #     elif api.response.status_code == 400:
-        #         # 400 means the rbd is still allocated to a client
-        #         msg = api.response.json()['message']
-        #         self.logger.error(msg)
-        #         return
-        #     else:
-        #         # delete failed - don't know why, pass the error to the
-        #         # admin and abort
-        #         raise GatewayAPIError(api.response.json()['message'])
-        #
-        #
-        # # at this point the remote gateways are cleaned up, now perform the
-        # # purge on the local host which will also purge the rbd
-        # disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
-        #                                                   settings.config.api_port,
-        #                                                   image_id)
-        #
-        # self.logger.debug("- removing '{}' from the local "
-        #                   "machine".format(image_id))
-        #
-        # api = APIRequest(disk_api, data=api_vars)
-        # api.delete()
-        #
         if api.response.status_code == 200:
             self.logger.debug("- rbd removed from all gateways, and deleted")
             disk_object = [disk for disk in self.children
