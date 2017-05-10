@@ -78,26 +78,45 @@ class Disks(UIGroup):
 
         self.create_disk(pool=pool, image=image, size=size)
 
+    def _valid_pool(self, pool=None):
+        """
+        ensure the requested pool is ok to use. currently this is just a
+        pool type check, but could also include checks against freespace in the
+        pool, it's overcommit ratio etc etc
+        :param pool: (str) pool name
+        :return: (bool) showing whether the pool is acceptable for a new disk
+        """
+
+        # first check that the intended pool is compatible with rbd images
+        root = self.get_ui_root()
+        clusters = root.ceph.cluster_map
+        local_cluster = [clusters[cluster_name] for cluster_name in clusters
+                         if clusters[cluster_name]['local']][0]['object']
+        pools = local_cluster.pools
+        pool_lookup = pools.pool_lookup
+
+        pool_type = pool_lookup[pool].type
+        if pool_type == 'replicated':
+            self.logger.debug("pool '{}' is ok to use".format(pool))
+            return True
+        else:
+            self.logger.error("Invalid pool type ({}) for rbd "
+                              "images. Must be replicated".format(pool_type))
+            return False
+
     def create_disk(self, pool=None, image=None, size=None, parent=None):
 
         if not parent:
             parent = self
 
-        # if not self._valid_request(pool, image, size):
-        #     self.logger.error("Adding {}.{} is invalid".format(pool, image))
-        #     return 4
-        #
-        # ui_root = self.get_ui_root()
-        # other_gateways = get_other_gateways(ui_root.target.children)
-        # if len(other_gateways) < (settings.config.minimum_gateways - 1):
-        #     self.logger.error("At least {} gateways must be defined before "
-        #                       "disks can be added".format(settings.config.minimum_gateways))
-        #     return 8
+        local_gw = this_host()
+        disk_key = "{}.{}".format(pool, image)
+
+        if not self._valid_pool(pool):
+            return
 
         self.logger.debug("Creating/mapping disk {}/{}".format(pool,
                                                                image))
-        local_gw = this_host()
-        disk_key = "{}.{}".format(pool, image)
 
         # make call to local api server's all_ method
         disk_api = '{}://127.0.0.1:{}/api/all_disk/{}'.format(self.http_mode,
@@ -134,8 +153,6 @@ class Disks(UIGroup):
 
         else:
             self.logger.error("Failed : {}".format(api.response.json()['message']))
-
-
 
     def find_hosts(self):
         hosts = []
