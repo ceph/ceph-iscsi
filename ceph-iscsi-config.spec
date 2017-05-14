@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        2.0
+Version:        2.2
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -14,6 +14,8 @@ Requires:  python-rbd >= 10.2.2
 Requires:  python-netaddr >= 0.7.5
 Requires:  python-netifaces >= 0.10.4
 Requires:  python-rtslib >= 2.1
+Requires:  rpm-python >= 4.11
+Requires:  python-crypto >= 2.6
 
 BuildRequires:  python-devel
 BuildRequires:  python-setuptools
@@ -49,11 +51,25 @@ install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 %files
 %doc LICENSE
 %doc README
+%doc iscsi-gateway.cfg_sample
 %{python2_sitelib}/*
 %{_bindir}/rbd-target-gw
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Fri Jan 12 2017 Paul Cuzner <pcuzner@redhat.com> - 2.2-1
+- remove redundant environment variable in settings
+- provide a sample cfg file in /usr/share/doc
+- fixes: alua cmd timeouts and service dependency (removing old multipathd)
+
+* Fri Jan 12 2017 Paul Cuzner <pcuzner@redhat.com> - 2.1-1
+- added dependency for rpm-python
+- dropped support for krbd/device-mapper configuration
+- adopted TCMU based LIO configuration using librbd
+- config file name changed to iscsi-gateway.cfg (from *.conf)
+- fix: prevent image_lists with duplicate rbd images from being acted upon
+- if pub/priv keys are in /etc/ceph, passwords will be encrypted in the config object
+
 * Thu Jan 05 2017 Paul Cuzner <pcuzner@redhat.com> - 2.0-1
 - daemon now watches the config object for changes, and reloads (for API)
 
