@@ -50,7 +50,8 @@ class Config(object):
                     "disks": {},
                     "gateways": {},
                     "clients": {},
-                    "version": 2,
+                    "groups": {},
+                    "version": 3,
                     "epoch": 0,
                     "created": '',
                     "updated": ''
@@ -223,25 +224,33 @@ class Config(object):
         self.logger.debug("config refresh - current config is {}".format(self.config))
         self.config = self.get_config()
 
-    def add_item(self, cfg_type, element_name, initial_value=None):
+    def add_item(self, cfg_type, element_name=None, initial_value=None):
         now = get_time()
 
-        # ensure the initial state for this item has a 'created' date/time value
-        if isinstance(initial_value, dict):
-            if 'created' not in initial_value:
-                initial_value['created'] = now
+        if element_name:
+            # ensure the initial state for this item has a 'created' date/time value
+            if isinstance(initial_value, dict):
+                if 'created' not in initial_value:
+                    initial_value['created'] = now
 
-        if initial_value is None:
-            init_state = {"created": now}
+            if initial_value is None:
+                init_state = {"created": now}
+            else:
+                init_state = initial_value
+
+            self.config[cfg_type][element_name] = init_state
+
+            if isinstance(init_state, str) and 'created' not in self.config[cfg_type]:
+                self.config[cfg_type]['created'] = now
+                # add a separate transaction to capture the creation date to the section
+                txn = ConfigTransaction(cfg_type, 'created', initial_value=now)
+                self.txn_list.append(txn)
+
         else:
+            # new section being added to the config object
+            self.config[cfg_type] = initial_value
             init_state = initial_value
-
-        self.config[cfg_type][element_name] = init_state
-
-        if isinstance(init_state, str) and 'created' not in self.config[cfg_type]:
-            self.config[cfg_type]['created'] = now
-            # add a separate transaction to capture the creation date to the section
-            txn = ConfigTransaction(cfg_type, 'created', initial_value=now)
+            txn = ConfigTransaction(cfg_type, None, initial_value=initial_value)
             self.txn_list.append(txn)
 
         self.logger.debug("(Config.add_item) config updated to {}".format(self.config))
@@ -260,16 +269,22 @@ class Config(object):
 
     def update_item(self, cfg_type, element_name, element_value):
         now = get_time()
-        current_values = self.config[cfg_type][element_name]
-        self.logger.debug("prior to update, item contains {}".format(current_values))
-        if isinstance(element_value, dict):
-            merged = current_values.copy()
-            new_dict = element_value
-            new_dict['updated'] = now
-            merged.update(new_dict)
-            element_value = merged.copy()
 
-        self.config[cfg_type][element_name] = element_value
+        if element_name:
+            current_values = self.config[cfg_type][element_name]
+            self.logger.debug("prior to update, item contains {}".format(current_values))
+            if isinstance(element_value, dict):
+                merged = current_values.copy()
+                new_dict = element_value
+                new_dict['updated'] = now
+                merged.update(new_dict)
+                element_value = merged.copy()
+
+            self.config[cfg_type][element_name] = element_value
+        else:
+            # update to a root level config element, like version
+            self.config[cfg_type] = element_value
+
         self.logger.debug("(Config.update_item) config is {}".format(self.config))
         self.changed = True
         self.logger.debug("update_item: type={}, item={}, update={}".format(cfg_type, element_name, element_value))
@@ -294,7 +309,11 @@ class Config(object):
 
             self.logger.debug("_commit_rbd transaction shows {}".format(txn))
             if txn.action == 'add':         # add's and updates
-                current_config[txn.type][txn.item_name] = txn.item_content
+                if txn.item_name:
+                    current_config[txn.type][txn.item_name] = txn.item_content
+                else:
+                    current_config[txn.type] = txn.item_content
+
             elif txn.action == 'delete':
                 del current_config[txn.type][txn.item_name]
             else:
