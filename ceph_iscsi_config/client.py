@@ -420,28 +420,32 @@ class GWClient(object):
                 # unable to define the client!
                 return
 
-            bad_images = self.validate_images()
-            if not bad_images:
+            # if a group name has been set on the client, we need to bypass
+            # lun setup
+            if not self.metadata["group_name"]:
 
-                self.setup_luns()
-                if self.error:
+                # no group_name, so the client is managed individually
+                bad_images = self.validate_images()
+                if not bad_images:
+
+                    self.setup_luns()
+                    if self.error:
+                        return
+                else:
+                    # request for images to map to this client that haven't
+                    # been added to LIO yet!
+                    self.error = True
+                    self.error_msg = ("Non-existent images {} requested "
+                                      "for {}".format(bad_images, self.iqn))
                     return
 
-                # if '/' in self.chap:
-                if self.chap == '':
-                    self.logger.warning("(main) client '{}' configured without"
-                                        " security".format(self.iqn))
+            # if '/' in self.chap:
+            if self.chap == '':
+                self.logger.warning("(main) client '{}' configured without"
+                                    " security".format(self.iqn))
 
-                self.configure_auth('chap', self.chap)
-                if self.error:
-                    return
-
-            else:
-                # request for images to map to this client that haven't been
-                # added to LIO yet!
-                self.error = True
-                self.error_msg = ("Non-existent images {} requested for "
-                                  "{}".format(bad_images, self.iqn))
+            self.configure_auth('chap', self.chap)
+            if self.error:
                 return
 
             # check the client object's change count, and update the config
