@@ -317,3 +317,26 @@ def encryption_available():
             for key_name in encryption_keys]
 
     return all([os.path.exists(key) for key in keys])
+
+
+class ListComparison(object):
+
+    def __init__(self, current_list, new_list):
+        """
+        compare two lists to identify changes
+        :param current_list:
+        :param new_list:
+        """
+        self.current = current_list
+        self.new = new_list
+
+    def _added(self):
+        return set(self.new) - set(self.current)
+
+    def _removed(self):
+        return set(self.current) - set(self.new)
+
+    added = property(_added,
+                     doc="return a list of added items to the list")
+    removed = property(_removed,
+                       doc="return a list of items removed from the list")
