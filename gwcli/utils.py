@@ -201,7 +201,7 @@ def valid_disk(**kwargs):
     :return: (str) either 'ok' or an error description
     """
 
-    mode_vars = {"create": ['pool', 'image', 'size'],
+    mode_vars = {"create": ['pool', 'image', 'size', 'count'],
                  "resize": ['pool', 'image', 'size'],
                  "delete": ['pool', 'image']}
 
@@ -234,8 +234,15 @@ def valid_disk(**kwargs):
 
     if mode == 'create':
 
-        if disk_key in config['disks']:
-            return "image of that name already defined"
+        if kwargs['count'] == '1':
+            new_disks = {disk_key}
+        else:
+            limit = int(kwargs['count']) + 1
+            new_disks = set(['{}{}'.format(disk_key, ctr)
+                             for ctr in range(1, limit)])
+
+        if new_disks.issubset(set(config['disks'])):
+            return "rbd image(s) of that name/prefix are already defined"
 
         gateways_defined = len([key for key in config['gateways']
                                if isinstance(config['gateways'][key],
@@ -272,9 +279,9 @@ def valid_disk(**kwargs):
                 allocation_list.append(client_iqn)
 
         if allocation_list:
-            return ("Unable to delete disk {}. It is allocated to the "
-                    "following clients:".format(disk_key,
-                                                ','.join(allocation_list)))
+            return ("Unable to delete {}. Allocated "
+                    "to: {}".format(disk_key,
+                                    ','.join(allocation_list)))
 
     return 'ok'
 
