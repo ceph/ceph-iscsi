@@ -20,6 +20,7 @@ class Settings(object):
                 "time_out": 30,
                 "api_port": 5000,
                 "api_secure": "true",
+                "api_ssl_verify": "false",
                 "loop_delay": 2,
                 "trusted_ip_list": '',          # comma separate list of IPs
                 "api_user": "admin",
