@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 # import ceph_iscsi_config.settings as settings
+import json
 
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.client import GWClient
@@ -43,6 +44,10 @@ class Group(object):
         self.group_members = members
         self.disks = disks
 
+        self.logger.info(self.group_members)
+        self.logger.info(self.group_name)
+        self.logger.info(self.disks)
+
     @staticmethod
     def _check_config(logger, config_object):
 
@@ -83,6 +88,11 @@ class Group(object):
                             "Only clients without prior lun maps "
                             "can be added to a group".format(client_iqn))
             return False
+        elif client.get('group_name'):
+            self._set_error("Client already assigned to {} - a client "
+                            "can only belong to one host "
+                            "group".format(client.get('group_name')))
+            return False
 
         return True
 
@@ -101,27 +111,26 @@ class Group(object):
             # this is a new group definition, and must have members
             config_dict = self.config.config
             if self.group_members:
-                self.logger.debug("Validating group members")
+                self.logger.debug("Validating group members :{}".format(self.group_members))
                 for mbr in self.group_members:
                     if not self._valid_client(mbr, config_dict):
                         return
             else:
-                self._set_error("group defined without members")
-                return
+                self.logger.debug("Group defined without members")
 
-            self.logger.debug("Validating requested disks")
+            self.logger.debug("Validating requested disks - {}".format(self.disks))
             bad_disks = [disk_name for disk_name in self.disks
                          if disk_name not in self.config.config['disks']]
+
             if not self.disks:
-                self._set_error("a list of disks must be supplied")
-                return
+                self.logger.debug("Group defined without any disks")
             elif bad_disks:
                 self._set_error("disk(s) {} do not"
                                 " exist".format(','.join(bad_disks)))
                 return
 
             # Group definition is ok to use
-            self.logger.info("Group request is valid")
+            self.logger.info("Group request is proceeding")
 
             # update the respective client definitions
             self.logger.debug("Applying the group definition for "
@@ -164,11 +173,17 @@ class Group(object):
             # At this point we know there are changes to make
             all_disks = self.config.config['disks'].keys()
             all_clients = self.config.config['clients'].keys()
-            if not members.added.issubset(set(all_clients)) or \
-               not disks.added.issubset(set(all_disks)):
-                self._set_error("Invalid disk(s)/member(s) requested - disk/"
-                                "client iqn must exist in the configuration")
-                return
+
+            if self.disks:
+                if not disks.added.issubset(all_disks):
+                    self._set_error("Disks must exist in the configuration")
+                    return
+            self.logger.debug("members added {}".format(members.added))
+            self.logger.debug("clients are {}".format(all_clients))
+            if self.group_members:
+                if not members.added.issubset(all_clients):
+                    self._set_error("Clients (members) must exist in the configuration")
+                    return
 
             # at this point the disk list and member list are valid
             image_list = self.disks
@@ -189,6 +204,7 @@ class Group(object):
             this_group['members'] = self.group_members
             this_group['disks'] = self.disks
 
+            self.logger.debug("Group set to {}".format(json.dumps(this_group)))
             self.config.update_item("groups", self.group_name, this_group)
             self.config.commit()
 
