@@ -9,7 +9,7 @@ import os
 from gwcli.utils import human_size
 import ceph_iscsi_config.settings as settings
 
-__author__ = 'pcuzner@redhat.com'
+__author__ = 'Paul Cuzner'
 
 
 class CephGroup(UIGroup):
@@ -39,7 +39,6 @@ class CephGroup(UIGroup):
         UIGroup.__init__(self, 'clusters', parent)
         self.cluster_map = self.get_clusters()
         self.local_ceph = None
-        self.logger = self.parent.logger
 
         for cluster_name in self.cluster_map.keys():
 
@@ -156,8 +155,6 @@ class CephCluster(UIGroup):
         self.keyring = keyring
         UIGroup.__init__(self, cluster_name, parent)
 
-        self.logger = self.parent.logger
-
         self.ceph_status = {}
         self.health_status = ''
 
@@ -238,8 +235,6 @@ class CephPools(UIGroup):
 
     def __init__(self, parent):
         UIGroup.__init__(self, 'pools', parent)
-
-        self.logger = self.parent.logger
 
         self.pool_lookup = {}  # pool_name -> pool object hash
         self.populate()
