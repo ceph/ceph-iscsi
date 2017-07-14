@@ -1,24 +1,20 @@
 #!/usr/bin/env python
 
-import sys
 import json
-import socket
 
 from gwcli.node import UIGroup, UINode, UIRoot
-# from requests import delete, put, get, ConnectionError
 
+from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks
-from gwcli.client import Clients, Client, CHAP
-from gwcli.utils import (this_host, get_other_gateways,
+from gwcli.client import Clients, CHAP
+from gwcli.utils import (this_host,
                          GatewayAPIError, GatewayError,
-                         APIRequest, progress_message,
+                         APIRequest,
                          console_message, get_port_state,
-                         valid_gateway, valid_iqn)
+                         valid_iqn)
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import get_ip, ipv4_addresses, gen_file_hash
 
-from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
 
 from gwcli.ceph import CephGroup
@@ -29,31 +25,31 @@ from gwcli.ceph import CephGroup
 # bombed
 from requests.packages import urllib3
 
-__author__ = 'pcuzner@redhat.com'
+__author__ = 'Paul Cuzner'
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class ISCSIRoot(UIRoot):
 
-    # display_attributes = ['http_mode', 'local_api']
-
-    def __init__(self, shell, logger, endpoint=None):
+    def __init__(self, shell, endpoint=None):
         UIRoot.__init__(self, shell)
 
         self.error = False
         self.error_msg = ''
         self.interactive = True           # default interactive mode
-        self.logger = logger
 
         if settings.config.api_secure:
             self.http_mode = 'https'
         else:
             self.http_mode = 'http'
 
-        if endpoint == None:
-            self.local_api = '{}://127.0.0.1:{}/api'.format(self.http_mode,
-                                                            settings.config.api_port)
+        if endpoint is None:
+
+            self.local_api = ('{}://127.0.0.1:{}/'
+                              'api'.format(self.http_mode,
+                                           settings.config.api_port))
+
         else:
             self.local_api = endpoint
 
@@ -102,14 +98,6 @@ class ISCSIRoot(UIRoot):
 
         api = APIRequest(endpoint + "/config")
         api.get()
-        # response = get(self.local_api + "/config",
-        #                auth=(settings.config.api_user, settings.config.api_password),
-        #                verify=settings.config.api_ssl_verify)
-
-        # except ConnectionError as e:
-        #     self.error = True
-        #     self.error_msg = "API unavailable @ {}".format(self.local_api)
-        #     return {}
 
         if api.response.status_code == 200:
             return api.response.json()
@@ -118,8 +106,6 @@ class ISCSIRoot(UIRoot):
             self.error_msg = "REST API failure, code : " \
                              "{}".format(api.response.status_code)
             return {}
-
-
 
     def export_ansible(self, config):
 
@@ -167,9 +153,7 @@ class ISCSIRoot(UIRoot):
                                  indent=4, separators=(',', ': '))
         print(fmtd_config)
 
-
     def ui_command_export(self, mode='ansible'):
-
 
         self.logger.debug("CMD: export mode={}".format(mode))
 
@@ -202,7 +186,6 @@ class ISCSITarget(UIGroup):
 
     def __init__(self, parent):
         UIGroup.__init__(self, 'iscsi-target', parent)
-        self.logger = self.parent.logger
         self.gateway_group = {}
         self.client_group = {}
 
@@ -240,9 +223,11 @@ class ISCSITarget(UIGroup):
         # 'safe' to continue with the definition
         self.logger.debug("Create an iscsi target definition in the UI")
 
-        local_api = '{}://127.0.0.1:{}/api/target/{}'.format(self.http_mode,
-                                                             settings.config.api_port,
-                                                             target_iqn)
+        local_api = ('{}://127.0.0.1:{}/api/'
+                     'target/{}'.format(self.http_mode,
+                                        settings.config.api_port,
+                                        target_iqn))
+
         api = APIRequest(local_api)
         api.put()
 
@@ -278,8 +263,10 @@ class ISCSITarget(UIGroup):
 
         # get a new copy of the config dict over the local API
         # check that there aren't any disks or client listed
-        local_api = "{}://127.0.0.1:{}/api/config".format(self.http_mode,
-                                                          settings.config.api_port)
+        local_api = ("{}://127.0.0.1:{}/api/"
+                     "config".format(self.http_mode,
+                                     settings.config.api_port))
+
         api = APIRequest(local_api)
         api.get()
 
@@ -311,10 +298,12 @@ class ISCSITarget(UIGroup):
 
         for gw_name in gw_list:
 
-            gw_api = '{}://{}:{}/api/gateway/{}'.format(self.http_mode,
-                                                        gw_name,
-                                                        settings.config.api_port,
-                                                        gw_name)
+            gw_api = ('{}://{}:{}/api/'
+                      'gateway/{}'.format(self.http_mode,
+                                          gw_name,
+                                          settings.config.api_port,
+                                          gw_name))
+
             api = APIRequest(gw_api)
             api.delete()
             if api.response.status_code != 200:
@@ -352,11 +341,12 @@ class Target(UIGroup):
                 '''
 
     def __init__(self, target_iqn, parent):
+
         UIGroup.__init__(self, target_iqn, parent)
-        self.logger = self.parent.logger
         self.target_iqn = target_iqn
         self.gateway_group = GatewayGroup(self)
         self.client_group = Clients(self)
+        self.host_groups = HostGroups(self)
 
     def summary(self):
         return "Gateways: {}".format(len(self.gateway_group.children)), None
@@ -382,7 +372,6 @@ class GatewayGroup(UIGroup):
     def __init__(self,  parent):
 
         UIGroup.__init__(self, 'gateways', parent)
-        self.logger = self.parent.logger
 
         # record the shortcut
         shortcut = self.shell.prefs['bookmarks'].get('gateways', None)
@@ -468,16 +457,17 @@ class GatewayGroup(UIGroup):
         else:
             sync_text = ("sync'ing {} disk(s) and "
                          "{} client(s)".format(len(config['disks']),
-                                              len(config['clients'])))
+                                               len(config['clients'])))
 
         self.logger.info("Adding gateway, {}".format(sync_text))
 
         gw_api = '{}://{}:{}/api'.format(self.http_mode,
                                          "127.0.0.1",
                                          settings.config.api_port)
-        gw_rqst = gw_api + '/all_gateway/{}'.format(gateway_name)
+        gw_rqst = gw_api + '/gateway/{}'.format(gateway_name)
         gw_vars = {"nosync": nosync,
                    "ip_address": ip_address}
+
         api = APIRequest(gw_rqst, data=gw_vars)
         api.put()
 
@@ -495,9 +485,11 @@ class GatewayGroup(UIGroup):
         # add to the UI. We have to use the new gateway to ensure what
         # we get back is current (the other gateways will lag until they see
         # epoch xattr change on the config object)
-        new_gw_endpoint = '{}://{}:{}/api'.format(self.http_mode,
-                                                  gateway_name,
-                                                  settings.config.api_port)
+        new_gw_endpoint = ('{}://{}:{}/'
+                           'api'.format(self.http_mode,
+                                        gateway_name,
+                                        settings.config.api_port))
+
         config = self.parent.parent.parent._get_config(endpoint=new_gw_endpoint)
         gw_config = config['gateways'][gateway_name]
         Gateway(self, gateway_name, gw_config)
@@ -548,7 +540,6 @@ class Gateway(UINode):
         for k, v in gateway_config.iteritems():
             self.__setattr__(k, v)
 
-        self.logger = parent.logger
         self.state = "DOWN"
         self.service_state = {"iscsi": {"state": "DOWN",
                                         "port": Gateway.TCP_PORT},
@@ -563,7 +554,8 @@ class Gateway(UINode):
                           "{}".format(self.name))
         self._get_state()
 
-        up_count = len([self.service_state[s]["state"] for s in self.service_state
+        up_count = len([self.service_state[s]["state"]
+                        for s in self.service_state
                         if self.service_state[s]["state"] == "UP"])
 
         if up_count == len(self.service_state):
@@ -586,12 +578,8 @@ class Gateway(UINode):
 
             self.service_state[svc]["state"] = "UP" if result == 0 else "DOWN"
 
-
-
-
     def summary(self):
 
         state = self.state
         return "{} ({})".format(self.portal_ip_address,
                                 state), (state == "UP")
-

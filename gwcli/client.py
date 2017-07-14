@@ -1,24 +1,18 @@
 #!/usr/bin/env python
 
-import json
-import re
-
 from gwcli.node import UIGroup, UINode
 
-from gwcli.utils import (human_size, get_other_gateways,
-                         GatewayAPIError, GatewayLIOError,
-                         this_host, APIRequest, valid_iqn)
+from gwcli.utils import human_size, APIRequest
 
 from ceph_iscsi_config.client import CHAP
 import ceph_iscsi_config.settings as settings
 
 import rtslib_fb.root as root
-from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 # FIXME - this ignores the warning issued when verify=False is used
 from requests.packages import urllib3
 
-__author__ = 'pcuzner@redhat.com'
+__author__ = 'Paul Cuzner'
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -29,7 +23,6 @@ class Clients(UIGroup):
 
     def __init__(self, parent):
         UIGroup.__init__(self, 'hosts', parent)
-        self.logger = self.parent.logger
 
         # lun_map dict is indexed by the rbd name, pointing to a list
         # of clients that have that rbd allocated.
@@ -62,10 +55,10 @@ class Clients(UIGroup):
         cli_seed = {"luns": {}, "auth": {}}
 
         # Issue the API call to create the client
-        client_api = '{}://127.0.0.1:{}/api/all_client/{}'.format(
-                     self.http_mode,
-                     settings.config.api_port,
-                     client_iqn)
+        client_api = ('{}://127.0.0.1:{}/api/'
+                      'client/{}'.format(self.http_mode,
+                                         settings.config.api_port,
+                                         client_iqn))
 
         self.logger.debug("Client CREATE for {}".format(client_iqn))
         api = APIRequest(client_api)
@@ -99,10 +92,11 @@ class Clients(UIGroup):
 
         self.logger.debug("Client DELETE for {}".format(client_iqn))
 
-        client_api = '{}://{}:{}/api/all_client/{}'.format(self.http_mode,
-                                                       "127.0.0.1",
-                                                       settings.config.api_port,
-                                                       client_iqn)
+        client_api = ('{}://{}:{}/api/'
+                      'client/{}'.format(self.http_mode,
+                                         "127.0.0.1",
+                                         settings.config.api_port,
+                                         client_iqn))
         api = APIRequest(client_api)
         api.delete()
 
@@ -122,6 +116,10 @@ class Clients(UIGroup):
             self.delete(client)
 
             self.logger.info('ok')
+        else:
+            # client delete request failed
+            error_message = api.response.json()['message']
+            self.logger.error(error_message)
 
     def update_lun_map(self, action, rbd_path, client_iqn):
         """
@@ -163,12 +161,12 @@ class Clients(UIGroup):
 
 class Client(UINode):
 
-    display_attributes = ["client_iqn", "logged_in", "auth", "luns"]
+    display_attributes = ["client_iqn", "logged_in", "auth",
+                          "group_name", "luns"]
 
     def __init__(self, parent, client_iqn, client_settings):
         UINode.__init__(self, client_iqn, parent)
         self.client_iqn = client_iqn
-        self.logger = self.parent.logger
 
         for k, v in client_settings.iteritems():
             self.__setattr__(k, v)
@@ -245,10 +243,10 @@ class Client(UINode):
 
         api_vars = {"chap": chap}
 
-        clientauth_api = '{}://127.0.0.1:{}/api/all_clientauth/{}'.format(
-                         self.http_mode,
-                         settings.config.api_port,
-                         self.client_iqn)
+        clientauth_api = ('{}://127.0.0.1:{}/api/'
+                          'clientauth/{}'.format(self.http_mode,
+                                                 settings.config.api_port,
+                                                 self.client_iqn))
 
         api = APIRequest(clientauth_api, data=api_vars)
         api.put()
@@ -346,7 +344,7 @@ class Client(UINode):
 
             else:
                 self.logger.error("disk '{}' is not mapped to this "
-                                     "client ".format(disk))
+                                  "client ".format(disk))
                 return
 
         # At this point we are either in add/remove mode, with a valid disk
@@ -358,20 +356,10 @@ class Client(UINode):
 
         api_vars = {"disk": disk}
 
-        # if action == 'add':
-        #     current_luns.append(disk)
-        # else:
-        #     current_luns.remove(disk)
-        #
-        # image_list = ','.join(current_luns)
-        #
-        # api_vars = {"image_list": image_list,
-        #             "chap": self.auth.get('chap', '')}
-
-        clientlun_api = '{}://127.0.0.1:{}/api/all_clientlun/{}'.format(
-                        self.http_mode,
-                        settings.config.api_port,
-                        self.client_iqn)
+        clientlun_api = ('{}://127.0.0.1:{}/api/'
+                         'clientlun/{}'.format(self.http_mode,
+                                               settings.config.api_port,
+                                               self.client_iqn))
 
         api = APIRequest(clientlun_api, data=api_vars)
         if action == 'add':
@@ -389,8 +377,10 @@ class Client(UINode):
                 # we need to query the api server to get the new configuration
                 # to be able to set the local cli entry correctly
                 get_api_vars = {"disk": disk}
-                clientlun_api = clientlun_api.replace('/all_clientlun/',
-                                                      '/clientlun/')
+
+                clientlun_api = clientlun_api.replace('/clientlun/',
+                                                      '/_clientlun/')
+
                 self.logger.debug("Querying API to get mapped LUN information")
                 api = APIRequest(clientlun_api, data=get_api_vars)
                 api.get()
@@ -432,11 +422,11 @@ class Client(UINode):
 
         else:
             # the request to add/remove the disk for the client failed
-            self.logger.error("disk {} for '{}' against {} "
-                              "failed\n{}".format(action,
-                                              disk,
-                                              self.client_iqn,
-                                              api.response.json()['message']))
+            self.logger.error("disk {} for '{}' against {} failed"
+                              "\n{}".format(action,
+                                            disk,
+                                            self.client_iqn,
+                                            api.response.json()['message']))
             return
 
     logged_in = property(_get_logged_in_state,
