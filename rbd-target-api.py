@@ -21,11 +21,13 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.group import Group
 from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
                                      gen_file_hash, valid_rpm)
+
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
                          valid_disk, valid_client)
 
@@ -50,7 +52,7 @@ def requires_basic_auth(f):
             return jsonify(message="Missing credentials"), 401
 
         if (auth.username != settings.config.api_user or
-                    auth.password != settings.config.api_password):
+           auth.password != settings.config.api_password):
             return jsonify(message="username/password mismatch with the "
                                    "configuration file"), 401
 
@@ -104,34 +106,45 @@ def get_api_info():
     internal_text = "Internal Use ONLY"
 
     links = []
-    for rule in app.url_map.iter_rules():
+    sorted_rules = sorted(app.url_map.iter_rules(),
+                          key=lambda x: x.rule, reverse=False)
+
+    for rule in sorted_rules:
         url = rule.rule
         if rule.endpoint == 'static':
             continue
         else:
             func_doc = inspect.getdoc(globals()[rule.endpoint])
             if func_doc:
-                # doc = func_doc.split('\n')[0]
+
                 doc = func_doc.split('\n')
 
-                url = "{} : {}".format(url, doc[0])
-                if internal_text in doc:
-                    pos = doc.index(internal_text)
-                    doc = doc[1:(pos+1)]
+                if any(path_entry.startswith('_')
+                       for path_entry in url.split('/')):
+                    continue
+
                 else:
+                    url_desc = "{} : {}".format(url,
+                                                doc[0])
                     doc = doc[1:]
 
             else:
-                doc = ["Missing description - FIXME!"]
-            # url = "{} : {}".format(url, doc[0])
-        links.append((url, doc))
+                url_desc = "{} : {}".format(url,
+                                            "Missing description - FIXME!")
+                doc = []
+
+        callable_methods = [method for method in rule.methods
+                            if method not in ['OPTIONS', 'HEAD']]
+        api_methods = "Methods: {}".format(','.join(callable_methods))
+
+        links.append((url_desc, api_methods, doc))
 
     return jsonify(api=links), 200
 
 
 @app.route('/api/sysinfo/<query_type>', methods=['GET'])
 @requires_basic_auth
-def sys_info(query_type=None):
+def get_sys_info(query_type=None):
     """
     Provide system information based on the query_type
     Valid query types are: ipv4_addresses, checkconf and checkversions
@@ -212,7 +225,7 @@ def get_config():
 
 @app.route('/api/gateways', methods=['GET'])
 @requires_restricted_auth
-def get_gateways():
+def gateways():
     """
     Return the gateway subsection of the config object to the caller
     **RESTRICTED**
@@ -221,9 +234,9 @@ def get_gateways():
         return jsonify(config.config['gateways']), 200
 
 
-@app.route('/api/all_gateway/<gateway_name>', methods=['PUT'])
+@app.route('/api/gateway/<gateway_name>', methods=['PUT'])
 @requires_restricted_auth
-def all_gateway(gateway_name=None):
+def gateway(gateway_name=None):
     """
     Define iscsi gateway(s) across node(s), adding TPGs, disks and clients
     The call requires the following variables to be set;
@@ -232,6 +245,12 @@ def all_gateway(gateway_name=None):
     :param nosync: (bool) whether to sync the LIO objects to the new gateway
     **RESTRICTED**
     """
+
+    # the definition of a gateway into an existing configuration can apply the
+    # running config to the new host. The downside is that this sync task
+    # could take a while if there are 100's of disks/clients. Future work should
+    # aim to make this synchronisation of the new gateway an async task
+
 
     ip_address = request.form.get('ip_address')
     nosync = request.form.get('nosync', False)
@@ -252,122 +271,170 @@ def all_gateway(gateway_name=None):
 
     total_objects = (len(current_disks.keys()) +
                      len(current_clients.keys()))
+
+    # if the config is empty, it doesn't matter what nosync is set to
     if total_objects == 0:
         nosync = True
 
     gateway_ip_list = config.config['gateways'].get('ip_list', [])
+
     gateway_ip_list.append(ip_address)
 
     first_gateway = (len(gateway_ip_list) == 1)
 
-    for endpoint in gateway_ip_list:
-        if first_gateway:
-            endpoint = '127.0.0.1'
+    if first_gateway:
+        gateways =['127.0.0.1']
+    else:
+        gateways = gateway_ip_list
 
-        logger.debug("Processing GW endpoint {} for {}".format(endpoint,
-                                                               gateway_name))
+    api_vars = {"target_iqn": target_iqn,
+                "gateway_ip_list": ",".join(gateway_ip_list),
+                "mode": "target"}
 
-        api_endpoint = '{}://{}:{}/api'.format(http_mode,
-                                               endpoint,
-                                               settings.config.api_port)
+    resp_text, resp_code = call_api(gateways, '_gateway',
+                                    gateway_name,
+                                    http_method='put',
+                                    api_vars=api_vars)
 
-        gw_rqst = api_endpoint + '/gateway/{}'.format(gateway_name)
-        gw_vars = {"target_iqn": target_iqn,
-                   "gateway_ip_list": ",".join(gateway_ip_list),
-                   "mode": "target"}
+    if resp_code == 200:
+        # GW definition has been added, so before we declare victory we need
+        # to sync tpg's to the existing gateways and sync the disk and client
+        # configuration to the new gateway
 
-        logger.debug("Calling API at {} with {}".format(gw_rqst, gw_vars))
+        if len(current_disks.keys()) > 0:
+            # there are disks in the environment, so we need to add them to the
+            # new tpg created when the new gateway was added
+            seed_gateways = gateways.remove(ip_address)
 
-        api = APIRequest(gw_rqst, data=gw_vars)
+            resp_text, resp_code = seed_tpg(seed_gateways,
+                                            gateway_name,
+                                            api_vars)
+
+            if resp_code != 200:
+                return jsonify(message="TPG sync failed on existing gateways"), \
+                       resp_code
+
+        # No check to see if the new gateway needs to be synchronised as part
+        # of this request
+        if nosync:
+            # no further action needed
+            return jsonify(message="Gateway creation {}".format(resp_text)), \
+                   resp_code
+        else:
+
+            resp_text, resp_code = seed_disks(current_disks,
+                                              ip_address)
+
+            if resp_code != 200:
+                return jsonify(message="Disk mapping {}".format(resp_text)), \
+                       resp_code
+            else:
+                # disks added, so seed the clients on the new gateway
+                resp_text, resp_code = seed_clients(current_clients,
+                                                    ip_address)
+
+    else:
+
+        return jsonify(message="Gateway creation {}".format(resp_text)), \
+               resp_code
+
+
+def seed_tpg(gateways, gateway_name, api_vars):
+
+    http_mode = 'https' if settings.config.api_secure else 'http'
+    state = 'succeeded'
+    rc = 200
+    api_vars['mode'] = 'map'
+
+    for gw in gateways:
+        logger.debug("Updating tpg on {}".format(gw))
+        gw_api = '{}://{}:{}/api/_gateway/{}'.format(http_mode,
+                                                     gw,
+                                                     settings.config.api_port,
+                                                     gateway_name)
+        api = APIRequest(gw_api, data=api_vars)
         api.put()
         if api.response.status_code != 200:
-            # GW creation failed
-            msg = api.response.json()['message']
+            state = 'failed'
+            rc = 500
+            break
 
-            logger.error("Failed to create gateway {}: {}".format(gateway_name,
-                                                                  msg))
-
-            return jsonify(message="Failed to create gateway"), 500
-
-        # for the new gateway, when sync is selected we need to run the
-        # disk api to register all the rbd's to that gateway
-        if endpoint == ip_address and not nosync:
-
-            for disk_key in current_disks:
-
-                this_disk = current_disks[disk_key]
-                lun_rqst = api_endpoint + '/disk/{}'.format(disk_key)
-                lun_vars = {"pool": this_disk['pool'],
-                            "size": "0G",
-                            "owner": this_disk['owner'],
-                            "mode": "sync"}
-
-                api = APIRequest(lun_rqst, data=lun_vars)
-                api.put()
-                if api.response.status_code != 200:
-                    msg = api.response.json()['message']
-                    logger.error("Failed to add disk {} to {} new "
-                                 "tpg : {}".format(disk_key,
-                                                   endpoint,
-                                                   msg))
-                    return jsonify(message="Failed to add disk"), 500
-
-            resp_text += ", {} disks added".format(len(current_disks))
-
-        # Adding a gateway introduces a new tpg - each tpg MUST have the
-        # luns defined so a RTPG call can be responded to correctly, so
-        # we need to sync the disks to the new tpg's
-        if len(current_disks.keys()) > 0:
-
-            if endpoint != ip_address or not nosync:
-
-                gw_vars['mode'] = 'map'
-                api = APIRequest(gw_rqst, data=gw_vars)
-                api.put()
-                if api.response.status_code != 200:
-                    # GW creation failed - if the failure was severe you'll
-                    # see a json issue here.
-                    msg = api.response.json()['message']
-                    logger.error("Failed to map existing disks to new"
-                                 " tpg on {} - ".format(endpoint))
-                    return jsonify(message="Failed to map disk"), 500
-
-            if endpoint == ip_address and not nosync:
-
-                for client_iqn in current_clients:
-
-                    this_client = current_clients[client_iqn]
-                    client_luns = this_client['luns']
-                    lun_list = [(disk, client_luns[disk]['lun_id'])
-                                for disk in client_luns]
-                    srtd_list = Client.get_srtd_names(lun_list)
-
-                    # client_iqn, image_list, chap, committing_host
-                    client_vars = {'chap': this_client['auth']['chap'],
-                                   'image_list': ','.join(srtd_list),
-                                   'committing_host': local_gw}
-
-                    api = APIRequest(api_endpoint +
-                                     "/client/{}".format(client_iqn),
-                                     data=client_vars)
-                    api.put()
-                    if api.response.status_code != 200:
-                        msg = api.response.json()['message']
-                        logger.error("Problem adding client {} - "
-                                     "{}".format(client_iqn,
-                                                 api.response.json()[
-                                                     'message']))
-                        return jsonify(message="Failed to add client"), 500
-
-                resp_text += ", {} clients defined".format(
-                    len(current_clients))
-
-    return jsonify(message=resp_text), 200
+    return "TPG mapping {}".format(state), rc
 
 
-@app.route('/api/gateway/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
+def seed_disks(current_disks, gw_ip):
+
+    http_mode = 'https' if settings.config.api_secure else 'http'
+    state = 'succeeded'
+
+    for disk_key in current_disks:
+
+        this_disk = current_disks[disk_key]
+        disk_api = '{}://{}:{}/api/disk/{}'.format(http_mode,
+                                                   gw_ip,
+                                                   settings.config.api_port,
+                                                   disk_key)
+
+        api_vars = {"pool": this_disk['pool'],
+                    "size": "0G",
+                    "owner": this_disk['owner'],
+                    "mode": "sync"}
+
+        api = APIRequest(disk_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code != 200:
+            state = 'failed'
+            break
+
+        logger.debug("added {} to gateway {}".format(disk_key,
+                                                     gw_ip))
+
+    return "disk seeding on {} {}".format(gw_ip, state), \
+           api.response.status_code
+
+
+def seed_clients(current_clients, gw_ip):
+
+    http_mode = 'https' if settings.config.api_secure else 'http'
+    state = 'succeeded'
+    local_gw = this_host()
+
+    for client_iqn in current_clients:
+
+        this_client = current_clients[client_iqn]
+        client_luns = this_client['luns']
+        lun_list = [(disk, client_luns[disk]['lun_id'])
+                    for disk in client_luns]
+        srtd_list = Client.get_srtd_names(lun_list)
+
+        api_vars = {'chap': this_client['auth']['chap'],
+                    'image_list': ','.join(srtd_list),
+                    'committing_host': local_gw}
+
+        client_api = '{}://{}:{}/api/client/{}'.format(http_mode,
+                                                       gw_ip,
+                                                       settings.config.api_port,
+                                                       client_iqn)
+
+        api = APIRequest(client_api,
+                         data=api_vars)
+        api.put()
+
+        if api.response.status_code != 200:
+            state = 'failed'
+            break
+
+        logger.debug("client '{}' defined to GW {}".format(client_iqn,
+                                                           gw_ip))
+
+    return "Client seeding to '{}' {}".format(gw_ip, state), \
+           api.response.status_code
+
+
+@app.route('/api/_gateway/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
-def manage_gateway(gateway_name=None):
+def _gateway(gateway_name=None):
     """
     Manage the local iSCSI gateway definition
     Internal Use ONLY
@@ -459,9 +526,9 @@ def get_disks():
     return jsonify(response), 200
 
 
-@app.route('/api/all_disk/<image_id>', methods=['PUT', 'DELETE'])
+@app.route('/api/disk/<image_id>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
-def all_disk(image_id):
+def disk(image_id):
     """
     Coordinate the create/delete of rbd images across the gateway nodes
     The "all_" method calls the corresponding disk api entrypoints across each
@@ -472,9 +539,9 @@ def all_disk(image_id):
 
     :param image_id: (str) rbd image name of the format pool.image
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5001/api/all_disk/rbd.new2_
     """
-
-    http_mode = 'https' if settings.config.api_secure else 'http'
 
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
@@ -484,58 +551,52 @@ def all_disk(image_id):
     gateways.remove(local_gw)
     logger.debug("other gw's {}".format(gateways))
 
-    if request.method == 'PUT':
+    if request.method == 'GET':
 
-        pool = request.form.get('pool')
+        if image_id in config.config['disks']:
+            return jsonify(config.config["disks"][image_id]), 200
+
+        else:
+            return jsonify(message="rbd image {} not "
+                                   "found".format(image_id)), 404
+
+    elif request.method == 'PUT':
+
+        # pool = request.form.get('pool')
         size = request.form.get('size')
         mode = request.form.get('mode')
+        count = request.form.get('count', '1')
 
         pool, image_name = image_id.split('.')
 
         disk_usable = valid_disk(pool=pool, image=image_name, size=size,
-                                 mode=mode)
+                                 mode=mode, count=count)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
+        suffixes = [n for n in range(1, int(count)+1)]
         # make call to local api server first!
-        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(http_mode,
-                                                          settings.config.api_port,
-                                                          image_id)
+        gateways.insert(0, '127.0.0.1')
 
-        api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
-                    'mode': mode}
+        for sfx in suffixes:
 
-        logger.debug("Issuing disk request to the local API "
-                     "for {}".format(image_id))
+            image_name = image_id if count == '1' else "{}{}".format(image_id,
+                                                                     sfx)
 
-        api = APIRequest(disk_api, data=api_vars)
-        api.put()
+            api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
+                        'mode': mode}
 
-        if api.response.status_code == 200:
-            logger.info("LUN is ready on this host")
+            resp_text, resp_code = call_api(gateways, '_disk',
+                                            image_name,
+                                            http_method='put',
+                                            api_vars=api_vars)
 
-            for gw in gateways:
-                logger.debug("Adding {} to gw {}".format(image_id,
-                                                         gw))
-                disk_api = '{}://{}:{}/api/disk/{}'.format(http_mode,
-                                                           gw,
-                                                           settings.config.api_port,
-                                                           image_id)
-                api = APIRequest(disk_api, data=api_vars)
-                api.put()
+            if resp_code != 200:
+                return jsonify(message="disk create/update "
+                                       "{}".format(resp_text)), resp_code
 
-                if api.response.status_code == 200:
-                    logger.info("LUN is ready on {}".format(gw))
-                else:
-                    return jsonify(message=api.response.json()['message']), 500
-
-        else:
-            logger.error(api.response.json()['message'])
-            return jsonify(message=api.response.json()['message']), 500
-
-        logger.info("LUN defined to all gateways for {}".format(image_id))
-
-        return jsonify(message="ok"), 200
+        return jsonify(message="disk create/update {}".format(resp_text)), \
+               resp_code
 
     else:
         # this is a DELETE request
@@ -549,55 +610,20 @@ def all_disk(image_id):
         api_vars = {'purge_host': local_gw}
 
         # process other gateways first
-        for gw_name in gateways:
-            disk_api = '{}://{}:{}/api/disk/{}'.format(http_mode,
-                                                       gw_name,
-                                                       settings.config.api_port,
-                                                       image_id)
+        gateways.append(local_gw)
 
-            logger.debug("removing '{}' from {}".format(image_id,
-                                                        gw_name))
+        resp_text, resp_code = call_api(gateways, '_disk',
+                                        image_id,
+                                        http_method='delete',
+                                        api_vars=api_vars)
 
-            api = APIRequest(disk_api, data=api_vars)
-            api.delete()
-
-            if api.response.status_code == 200:
-                logger.debug("{} removed from {}".format(image_id, gw_name))
-
-            elif api.response.status_code == 400:
-                # 400 means the rbd is still allocated to a client
-                msg = api.response.json()['message']
-                logger.error(msg)
-                return jsonify(message=msg), 400
-            else:
-                # delete failed - don't know why, pass the error to the
-                # admin and abort
-                msg = api.response.json()['message']
-                return jsonify(message=msg), 500
-
-        # at this point the remote gateways are cleaned up, now perform the
-        # purge on the local host which will also purge the rbd
-        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(http_mode,
-                                                          settings.config.api_port,
-                                                          image_id)
-
-        logger.debug("- removing '{}' from the local "
-                     "machine, deleting the rbd".format(image_id))
-
-        api = APIRequest(disk_api, data=api_vars)
-        api.delete()
-
-        if api.response.status_code == 200:
-            logger.debug("- rbd {} deleted".format(image_id))
-            return jsonify(message="ok"), 200
-        else:
-            return jsonify(message="failed to delete rbd "
-                                   "{}".format(image_id)), 500
+        return jsonify(message="disk map deletion {}".format(resp_text)), \
+               resp_code
 
 
-@app.route('/api/disk/<image_id>', methods=['GET', 'PUT', 'DELETE'])
+@app.route('/api/_disk/<image_id>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
-def manage_disk(image_id):
+def _disk(image_id):
     """
     Manage a disk definition on the local gateway
     Internal Use ONLY
@@ -676,7 +702,7 @@ def manage_disk(image_id):
 
         # if valid_request(request.remote_addr):
         purge_host = request.form['purge_host']
-
+        logger.debug("delete request for disk image '{}'".format(image_id))
         pool, image = image_id.split('.', 1)
 
         lun = LUN(logger,
@@ -754,9 +780,9 @@ def _update_client(**kwargs):
         return 200, "Client configured successfully"
 
 
-@app.route('/api/all_clientauth/<client_iqn>', methods=['PUT'])
+@app.route('/api/clientauth/<client_iqn>', methods=['PUT'])
 @requires_restricted_auth
-def all_client_auth(client_iqn):
+def clientauth(client_iqn):
     """
     Coordinate client authentication changes across each gateway node
     The following parameters are needed to manage client auth
@@ -765,7 +791,7 @@ def all_client_auth(client_iqn):
     **RESTRICTED**
     """
 
-    http_mode = 'https' if settings.config.api_secure else 'http'
+    # http_mode = 'https' if settings.config.api_secure else 'http'
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
     gateways = [key for key in config.config['gateways']
@@ -786,49 +812,19 @@ def all_client_auth(client_iqn):
                 "image_list": image_list,
                 "chap": chap}
 
-    clientauth_api = '{}://127.0.0.1:{}/api/clientauth/{}'.format(
-        http_mode,
-        settings.config.api_port,
-        client_iqn)
-    logger.debug("Issuing client update to local gw for {}".format(
-        client_iqn))
+    gateways.insert(0, '127.0.0.1')
 
-    api = APIRequest(clientauth_api, data=api_vars)
-    api.put()
+    resp_text, resp_code = call_api(gateways, '_clientauth', client_iqn,
+                                    http_method='put',
+                                    api_vars=api_vars)
 
-    if api.response.status_code == 200:
-        logger.debug("Client update succeeded on local LIO")
-
-        for gw in gateways:
-            clientauth_api = '{}://{}:{}/api/clientauth/{}'.format(
-                http_mode,
-                gw,
-                settings.config.api_port,
-                client_iqn)
-            logger.debug("updating client {} on {}".format(client_iqn,
-                                                           gw))
-            api = APIRequest(clientauth_api, data=api_vars)
-            api.put()
-            if api.response.status_code == 200:
-                logger.info("client update successful on {}".format(gw))
-                continue
-            else:
-                return jsonify(message="client update failed on "
-                                       "{}".format(gw)), \
-                       api.response.status_code
-
-        logger.info("All gateways updated")
-        return jsonify(message="ok"), 200
-
-    else:
-        # the local update failed, so abort further updates
-        return jsonify(message="Client updated failed on local "
-                               "LIO instance"), api.response.status_code
+    return jsonify(message="client auth {}".format(resp_text)), \
+           resp_code
 
 
-@app.route('/api/clientauth/<client_iqn>', methods=['PUT'])
+@app.route('/api/_clientauth/<client_iqn>', methods=['PUT'])
 @requires_restricted_auth
-def manage_client_auth(client_iqn):
+def _clientauth(client_iqn):
     """
     Manage client authentication credentials on the local gateway
     Internal Use ONLY
@@ -848,17 +844,18 @@ def manage_client_auth(client_iqn):
 
     return jsonify(message=status_text), status_code
 
-@app.route('/api/all_clientlun/<client_iqn>', methods=['PUT', 'DELETE'])
+
+@app.route('/api/clientlun/<client_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
-def all_client_luns(client_iqn):
+def clientlun(client_iqn):
     """
-    Coordinate the addition(PUT) and removal(DELETE) of a disk from a client
+    Coordinate the addition(PUT) and removal(DELETE) of a disk for a client
     :param client_iqn: (str) IQN of the client
     :param disk: (str) rbd image name of the format pool.image
     **RESTRICTED**
     """
 
-    http_mode = 'https' if settings.config.api_secure else 'http'
+    # http_mode = 'https' if settings.config.api_secure else 'http'
 
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
@@ -897,51 +894,18 @@ def all_client_luns(client_iqn):
                 "image_list": image_list,
                 "chap": chap}
 
-    clientlun_api = '{}://127.0.0.1:{}/api/clientlun/{}'.format(http_mode,
-                                                                settings.config.api_port,
-                                                                client_iqn)
+    gateways.insert(0, '127.0.0.1')
+    resp_text, resp_code = call_api(gateways, '_clientlun', client_iqn,
+                                    http_method='put',
+                                    api_vars=api_vars)
 
-    api = APIRequest(clientlun_api, data=api_vars)
-    api.put()
-
-    if api.response.status_code == 200:
-
-        logger.info("disk mapping update for {} successful".format(client_iqn))
-
-        for gw in gateways:
-            clientlun_api = '{}://{}:{}/api/clientlun/{}'.format(
-                http_mode,
-                gw,
-                settings.config.api_port,
-                client_iqn)
-
-            logger.debug("Updating disk map for {} on GW {}".format(
-                client_iqn,
-                gw))
-            api = APIRequest(clientlun_api, data=api_vars)
-            api.put()
-
-            if api.response.status_code == 200:
-                logger.debug("gateway '{}' updated".format(gw))
-                continue
-            else:
-                logger.error("disk mapping update on {} failed".format(gw))
-                return jsonify(message="disk map updated failed on "
-                                       "{}".format(gw)), \
-                       api.response.status_code
-
-        return jsonify(message="ok"), 200
-
-    else:
-        # disk map update failed at the first hurdle!
-        logger.error("disk map update failed on the local LIO instance")
-        return jsonify(message="failed to update local LIO instance"), \
-               api.response.status_code
+    return jsonify(message="client masking update {}".format(resp_text)), \
+           resp_code
 
 
-@app.route('/api/clientlun/<client_iqn>', methods=['GET', 'PUT'])
+@app.route('/api/_clientlun/<client_iqn>', methods=['GET', 'PUT'])
 @requires_restricted_auth
-def manage_client_luns(client_iqn):
+def _clientlun(client_iqn):
     """
     Manage the addition/removal of disks from a client on the local gateway
     Internal Use ONLY
@@ -973,9 +937,9 @@ def manage_client_luns(client_iqn):
         return jsonify(message=status_text), status_code
 
 
-@app.route('/api/all_client/<client_iqn>', methods=['PUT', 'DELETE'])
+@app.route('/api/client/<client_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
-def all_client(client_iqn):
+def client(client_iqn):
     """
     Handle the client create/delete actions across gateways
     :param client_iqn: (str) IQN of the client to create or delete
@@ -988,7 +952,7 @@ def all_client(client_iqn):
     method = {"PUT": 'create',
               "DELETE": 'delete'}
 
-    http_mode = 'https' if settings.config.api_secure else 'http'
+    # http_mode = 'https' if settings.config.api_secure else 'http'
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
     gateways = [key for key in config.config['gateways']
@@ -1006,106 +970,35 @@ def all_client(client_iqn):
         return jsonify(message=client_usable), 400
 
     if request.method == 'PUT':
+        # creating a client is done locally first, then applied to the
+        # other gateways
+        gateways.insert(0, '127.0.0.1')
 
-        client_api = '{}://127.0.0.1:{}/api/client/{}'.format(
-            http_mode,
-            settings.config.api_port,
-            client_iqn)
+        resp_text, resp_code = call_api(gateways, '_client', client_iqn,
+                                        http_method='put',
+                                        api_vars=api_vars)
 
-        logger.debug("Processing client CREATE for {}".format(client_iqn))
-        api = APIRequest(client_api, data=api_vars)
-        api.put()
-        if api.response.status_code == 200:
-            logger.info("Client {} added to local LIO".format(client_iqn))
-
-            for gw in gateways:
-                client_api = '{}://{}:{}/api/client/{}'.format(
-                    http_mode,
-                    gw,
-                    settings.config.api_port,
-                    client_iqn)
-
-                logger.debug("sending request to {} to create {}".format(
-                    gw,
-                    client_iqn))
-                api = APIRequest(client_api, data=api_vars)
-                api.put()
-
-                if api.response.status_code == 200:
-                    logger.info(
-                        "Client '{}' added to {}".format(client_iqn, gw))
-                    continue
-                else:
-                    # client create failed against the remote LIO instance
-                    msg = api.response.json()['message']
-                    logger.error("Client create for {} failed on {} "
-                                 ": {}".format(
-                        client_iqn,
-                        gw,
-                        msg))
-
-                    return jsonify(message=msg), 500
-
-            # all gateways processed return a success state to the caller
-            return jsonify(message='ok'), 200
-
-        else:
-            # client create failed against the local LIO instance
-            msg = api.response.json()['message']
-            logger.error("Client create on local LIO instance failed "
-                         "for {} : {}".format(client_iqn,
-                                              msg))
-            return jsonify(message=msg), 500
+        return jsonify(message="client create/update {}".format(resp_text)),\
+               resp_code
 
     else:
         # DELETE client request
         # Process flow: remote gateways > local > delete config object entry
-        for gw in gateways:
-            client_api = '{}://{}:{}/api/client/{}'.format(http_mode,
-                                                           gw,
-                                                           settings.config.api_port,
-                                                           client_iqn)
-            logger.info("- removing '{}' from {}".format(client_iqn, gw))
-            api = APIRequest(client_api, data=api_vars)
-            api.delete()
+        gateways.append('127.0.0.1')
 
-            if api.response.status_code == 200:
-                logger.info("- '{}' removed".format(client_iqn))
-                continue
-            elif api.response.status_code == 400:
-                logger.error("- '{}' is in use on {}".format(client_iqn, gw))
-                return jsonify(message="Client in use"), 400
-            else:
-                msg = api.response.json()['message']
-                logger.error("Failed to remove {} from {}".format(
-                    client_iqn,
-                    gw))
-                return jsonify(message="failed to remove client '{}' on "
-                                       "{}".format(client_iqn, msg)), 500
+        resp_text, resp_code = call_api(gateways, '_client', client_iqn,
+                                        http_method='delete',
+                                        api_vars=api_vars)
 
-        # At this point the other gateways have removed the client, so
-        # remove from the local LIO instance
-        client_api = '{}://127.0.0.1:{}/api/client/{}'.format(http_mode,
-                                                              settings.config.api_port,
-                                                              client_iqn)
-        api = APIRequest(client_api, data=api_vars)
-        api.delete()
-
-        if api.response.status_code == 200:
-            logger.info("successfully removed '{}'".format(client_iqn))
-            return jsonify(message="ok"), 200
-
-        else:
-            return jsonify(message="Unable to delete {} from local LIO "
-                                   "instance".format(client_iqn)), \
-                   api.response.status_code
+        return jsonify(message="client delete {}".format(resp_text)), \
+               resp_code
 
 
-@app.route('/api/client/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
+@app.route('/api/_client/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
-def manage_client(client_iqn):
+def _client(client_iqn):
     """
-    Manage a client definition to the local gateway
+    Manage a client definition on the local gateway
     Internal Use ONLY
     :param client_iqn: iscsi name for the client
     **RESTRICTED**
@@ -1163,6 +1056,234 @@ def manage_client(client_iqn):
         else:
             logger.error("Delete request for non existent client!")
             return jsonify(message="Client does not exist!"), 404
+
+@app.route('/api/hostgroups', methods=['GET'])
+@requires_restricted_auth
+def hostgroups():
+    """
+    Return the hostgroup names defined to the configuration
+    **RESTRICTED**
+    """
+    if request.method == 'GET':
+        return jsonify({"groups": config.config['groups'].keys()}), 200
+
+
+@app.route('/api/hostgroup/<group_name>', methods=['GET', 'PUT', 'DELETE'])
+@requires_restricted_auth
+def hostgroup(group_name):
+    """
+    co-ordinate the management of host groups across iSCSI gateway hosts
+    **RESTRICTED**
+    :param group_name: (str) group name
+    :param: members (list) list of client iqn's that are members of this group
+    :param: disks (list) list of disks that each member should have masked
+    :return:
+    """
+    http_mode = 'https' if settings.config.api_secure else 'http'
+    valid_hostgroup_actions = ['add', 'remove']
+
+    local_gw = this_host()
+    gw_list = [key for key in config.config['gateways']
+               if isinstance(config.config['gateways'][key], dict)]
+    gw_list.remove(local_gw)
+
+    action = request.form.get('action', 'add')
+    if action.lower() not in valid_hostgroup_actions:
+        return jsonify(message="Invalid hostgroup action specified"), 405
+
+    if request.method == 'GET':
+        # return the requested definition
+        if group_name in config.config['groups'].keys():
+            return jsonify(config.config['groups'].get(group_name)), 200
+        else:
+            # group name does not exist
+            return jsonify(message="Group name does not exist"), 404
+
+    elif request.method == 'PUT':
+
+        if group_name in config.config['groups']:
+            host_group = config.config['groups'].get(group_name)
+            current_members = host_group.get('members')
+            current_disks = host_group.get('disks')
+        else:
+            current_members = []
+            current_disks = []
+
+        changed_members = request.form.get('member', '')
+        if changed_members == '':
+            changed_members = []
+        else:
+            changed_members = changed_members.split(',')
+        changed_disks = request.form.get('disk', '')
+        if changed_disks == '':
+            changed_disks =[]
+        else:
+            changed_disks = changed_disks.split(',')
+
+        if action.lower() == 'add':
+            group_members = set(current_members + changed_members)
+            group_disks = set(current_disks + changed_disks)
+        else:
+            # remove members
+            group_members = [mbr for mbr in current_members
+                             if mbr not in changed_members]
+            group_disks = [disk for disk in current_disks
+                           if disk not in changed_disks]
+
+        api_vars = {"members": ','.join(group_members),
+                    "disks": ','.join(group_disks)}
+
+        # updated = []
+        gw_list.insert(0, '127.0.0.1')
+        logger.debug("gateway update order is {}".format(','.join(gw_list)))
+
+        resp_text, resp_code = call_api(gw_list, '_hostgroup', group_name,
+                                        http_method='put', api_vars=api_vars)
+
+        return jsonify(message="hostgroup create/update {}".format(resp_text)),\
+               resp_code
+
+    else:
+        # Delete request just purges the entry from the config, so we only
+        # need to run against the local gateway
+
+        if not config.config['groups'].get(group_name, None):
+            return jsonify(message="Group name '{}' not "
+                                   "found".format(group_name)), 404
+
+        # At this point the group name is valid, so go ahead and remove it
+        api_endpoint = ("{}://{}:{}/api/"
+                        "_hostgroup/{}".format(http_mode,
+                                               '127.0.0.1',
+                                               settings.config.api_port,
+                                               group_name
+                                               ))
+
+        api = APIRequest(api_endpoint)
+        api.delete()
+
+        if api.response.status_code == 200:
+            logger.debug("Group definition {} removed".format(group_name))
+            return jsonify(message="Group definition '{}' "
+                                   "deleted".format(group_name)), 200
+        else:
+            return jsonify(message="Delete of group '{}'"
+                                   " failed : {}".format(group_name,
+                                                         api.response.json()['message'])), 400
+
+
+@app.route('/api/_hostgroup/<group_name>', methods=['GET', 'PUT', 'DELETE'])
+@requires_restricted_auth
+def _hostgroup(group_name):
+    """
+    Manage a hostgroup definition on the local iscsi gateway
+    Internal Use ONLY
+    **RESTRICTED**
+    :param group_name:
+    :return:
+    """
+    if request.method == 'GET':
+        # return the requested definition
+        if group_name in config.config['groups'].keys():
+            return jsonify(config.config['groups'].get(group_name)), 200
+        else:
+            # group name does not exist
+            return jsonify(message="Group name does not exist"), 404
+
+    elif request.method == 'PUT':
+
+        members = request.form.get('members', [])
+        if members == '':
+            members = []
+        else:
+            members = members.split(',')
+        disks = request.form.get('disks', [])
+        if disks == '':
+            disks = []
+        else:
+            disks = disks.split(',')
+
+        # create/update a host group definition
+        grp = Group(logger, group_name, members, disks)
+
+        grp.apply()
+
+        if not grp.error:
+            return jsonify(message="Group created/updated"), 200
+        else:
+            return jsonify(message="{}".format(grp.error_msg)), 400
+
+    else:
+        # request is for a delete of a host group
+        grp = Group(logger, group_name)
+        grp.purge()
+        if not grp.error:
+            return jsonify(message="Group '{}' removed".format(group_name)), \
+                   200
+        else:
+            return jsonify(message=grp.error_msg), 400
+
+
+def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
+    """
+    Generic API handler to process a given request across multiple gateways
+    :param gateway_list: (list)
+    :param endpoint: (str) http api endpoint name to call
+    :param element: (str) object to act upon
+    :param http_method: (str) put or get http method
+    :param api_vars: (dict) variables to pass to the api call
+    :return:
+    """
+
+    http_mode = 'https' if settings.config.api_secure else 'http'
+    updated = []
+
+    logger.debug("gateway update order is {}".format(','.join(gateway_list)))
+
+    for gw in gateway_list:
+        logger.debug("processing GW '{}'".format(gw))
+        api_endpoint = ("{}://{}:{}/api/"
+                        "{}/{}".format(http_mode,
+                                       gw,
+                                       settings.config.api_port,
+                                       endpoint,
+                                       element
+                                       ))
+
+        api = APIRequest(api_endpoint, data=api_vars)
+        api_method = getattr(api, http_method)
+        api_method()
+
+        if api.response.status_code == 200:
+            updated.append(gw)
+            logger.info("{} update on {}, successful".format(endpoint, gw))
+            continue
+        else:
+            logger.error("{} change on {} failed with "
+                         "{}".format(endpoint,
+                                     gw,
+                                     api.response.status_code))
+            if gw == '127.0.0.1':
+                gw = this_host()
+
+            if len(updated) > 0:
+
+                aborted = [gw_name for gw_name in gateway_list
+                           if gw_name not in updated]
+                fail_msg = ("failed on {}, "
+                            "applied to {}, "
+                            "aborted {}. ".format(gw,
+                                                  ','.join(updated),
+                                                  ','.join(aborted)))
+
+            else:
+                fail_msg = "failed on {}. ".format(gw)
+            fail_msg += api.response.json()['message']
+            logger.debug(fail_msg)
+
+            return fail_msg, api.response.status_code
+
+    return "successful", 200
 
 
 def pre_reqs_errors():
@@ -1356,7 +1477,8 @@ if __name__ == '__main__':
     file_handler = logging.FileHandler('/var/log/rbd-target-api.log', mode='w')
     file_handler.setLevel(logging.DEBUG)
     file_format = logging.Formatter(
-        "%(asctime)s [%(levelname)8s] - %(message)s")
+        "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "
+        "- %(message)s")
     file_handler.setFormatter(file_format)
 
     logger.addHandler(syslog_handler)
