@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 
-# import ceph_iscsi_config.settings as settings
 import socket
-import json
 import requests
 import sys
 import rados
 import rbd
 import re
+
 
 from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
@@ -17,7 +16,7 @@ from ceph_iscsi_config.utils import (get_ip, ipv4_addresses, gen_file_hash,
                                      valid_size, convert_2_bytes)
 
 
-__author__ = 'pcuzner@redhat.com'
+__author__ = 'Paul Cuzner'
 
 class Colors(object):
 
@@ -234,6 +233,12 @@ def valid_disk(**kwargs):
 
     if mode == 'create':
 
+        if kwargs['count'].isdigit():
+            if not 1 <= int(kwargs['count']) <= 10:
+                return "invalid count specified, must be an integer (1-10)"
+        else:
+            return "invalid count specified, must be an integer (1-10)"
+
         if kwargs['count'] == '1':
             new_disks = {disk_key}
         else:
@@ -394,6 +399,12 @@ def valid_client(**kwargs):
             return ("{} is not defined yet - nothing to "
                     "delete".format(client_iqn))
 
+        this_client = config['clients'].get(client_iqn)
+        if this_client.get('group_name', None):
+            return ("Unable to delete '{}' - it belongs to "
+                    "group {}".format(client_iqn,
+                                      this_client.get('group_name')))
+
         # client to delete must not be logged in - we're just checking locally,
         # since *all* nodes are set up the same, and a client login request
         # would normally login to each gateway
@@ -428,6 +439,12 @@ def valid_client(**kwargs):
         return 'ok'
 
     elif mode == 'disk':
+
+        this_client = config['clients'].get(client_iqn)
+        if this_client.get('group_name', None):
+            return ("Unable to manage disks for '{}' - it belongs to "
+                    "group {}".format(client_iqn,
+                                      this_client.get('group_name')))
 
         if 'image_list' not in parms_passed:
             return ("Disk changes require 'image_list' to be set, containing"
@@ -549,3 +566,4 @@ def get_port_state(ip_address, port):
         result = 16
 
     return result
+
