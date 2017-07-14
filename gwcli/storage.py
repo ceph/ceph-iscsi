@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 import os
-import socket
-import json
 
 import rados
 import rbd
@@ -12,8 +10,8 @@ from gwcli.node import UIGroup, UINode
 from gwcli.client import Clients
 
 from gwcli.utils import (human_size, readcontents, console_message,
-                         GatewayAPIError, GatewayLIOError, GatewayError,
-                         this_host, get_other_gateways, APIRequest)
+                         GatewayAPIError, GatewayError,
+                         this_host, APIRequest)
 
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes
 
@@ -22,7 +20,7 @@ import ceph_iscsi_config.settings as settings
 # FIXME - this ignores the warning issued when verify=False is used
 from requests.packages import urllib3
 
-__author__ = 'pcuzner@redhat.com'
+__author__ = 'Paul Cuzner'
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -46,7 +44,6 @@ class Disks(UIGroup):
         UIGroup.__init__(self, 'disks', parent)
         self.disk_info = {}
         self.disk_lookup = {}
-        self.logger = self.parent.logger
 
     def refresh(self, disk_info):
         self.logger.debug("Refreshing disk information from the config object")
@@ -61,9 +58,9 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_create(self, pool=None, image=None, size=None):
+    def ui_command_create(self, pool=None, image=None, size=None, count=1):
         """
-        Create a LUN and assign to the gateway.
+        Create a LUN and assign to the gateway(s).
 
         The create process needs the pool name, rbd image name
         and the size parameter. 'size' should be a numeric suffixed
@@ -71,12 +68,20 @@ class Disks(UIGroup):
         """
         # NB the text above is shown on a help create request in the CLI
 
-        self.logger.debug("CMD: /disks/ create pool={} "
-                          "image={} size={}".format(pool,
-                                                    image,
-                                                    size))
+        if '.' in pool:
+            self.logger.debug("user provided combined pool.image format rqst")
+            if not size:
+                size = image
+            pool, image = pool.split('.')
 
-        self.create_disk(pool=pool, image=image, size=size)
+
+        self.logger.debug("CMD: /disks/ create pool={} "
+                          "image={} size={} count={}".format(pool,
+                                                             image,
+                                                             size,
+                                                             count))
+
+        self.create_disk(pool=pool, image=image, size=size, count=count)
 
     def _valid_pool(self, pool=None):
         """
@@ -104,12 +109,14 @@ class Disks(UIGroup):
                               "images. Must be replicated".format(pool_type))
             return False
 
-    def create_disk(self, pool=None, image=None, size=None, parent=None):
+    def create_disk(self, pool=None, image=None, size=None, count=None,
+                    parent=None):
 
         if not parent:
             parent = self
 
         local_gw = this_host()
+
         disk_key = "{}.{}".format(pool, image)
 
         if not self._valid_pool(pool):
@@ -118,13 +125,13 @@ class Disks(UIGroup):
         self.logger.debug("Creating/mapping disk {}/{}".format(pool,
                                                                image))
 
-        # make call to local api server's all_ method
-        disk_api = '{}://127.0.0.1:{}/api/all_disk/{}'.format(self.http_mode,
+        # make call to local api server's disk endpoint
+        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
                                                               settings.config.api_port,
                                                               disk_key)
 
         api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
-                    'mode': 'create'}
+                    'count': count, 'mode': 'create'}
 
         self.logger.debug("Issuing disk create request")
 
@@ -134,22 +141,35 @@ class Disks(UIGroup):
         if api.response.status_code == 200:
             # rbd create and map successful across all gateways so request
             # it's details and add to the UI
-            self.logger.debug("- LUN is ready on all gateways")
+            self.logger.debug("- LUN(s) ready on all gateways")
+            self.logger.info("ok")
 
             ceph_pools = self.parent.ceph.local_ceph.pools
             ceph_pools.refresh()
 
-            self.logger.debug("Updating UI for the new disk")
-            disk_api = disk_api.replace('/all_disk/', '/disk/')
-            api = APIRequest(disk_api)
-            api.get()
+            self.logger.debug("Updating UI for the new disk(s)")
+            for n in range(1, (int(count)+1), 1):
 
-            if api.response.status_code == 200:
-                image_config = api.response.json()
-                Disk(parent, disk_key, image_config)
-                self.logger.info('ok')
-            else:
-                raise GatewayAPIError("Unable to retrieve disk details from the API")
+                if count > 1:
+                    disk_key = "{}.{}{}".format(pool, image, n)
+                else:
+                    disk_key = "{}.{}".format(pool, image)
+
+                disk_api = ('{}://127.0.0.1:{}/api/disk/'
+                            '{}'.format(self.http_mode,
+                                        settings.config.api_port,
+                                        disk_key))
+
+                api = APIRequest(disk_api)
+                api.get()
+
+                if api.response.status_code == 200:
+                    image_config = api.response.json()
+                    Disk(parent, disk_key, image_config)
+                    self.logger.debug("{} added to the UI".format(disk_key))
+                else:
+                    raise GatewayAPIError("Unable to retrieve disk details "
+                                          "for '{}' from the API".format(disk_key))
 
         else:
             self.logger.error("Failed : {}".format(api.response.json()['message']))
@@ -243,7 +263,7 @@ class Disks(UIGroup):
 
         api_vars = {'purge_host': local_gw}
 
-        disk_api = '{}://{}:{}/api/all_disk/{}'.format(self.http_mode,
+        disk_api = '{}://{}:{}/api/disk/{}'.format(self.http_mode,
                                                        local_gw,
                                                        settings.config.api_port,
                                                        image_id)
@@ -258,8 +278,10 @@ class Disks(UIGroup):
             del self.disk_info[image_id]
             del self.disk_lookup[image_id]
         else:
-            raise GatewayLIOError("Failed to remove the device from the "
-                                  "local machine")
+            self.logger.debug("delete request failed - "
+                              "{}".format(api.response.status_code))
+            self.logger.error("{}".format(api.response.json()['message']))
+            return
 
         ceph_pools = self.parent.ceph.local_ceph.pools
         ceph_pools.refresh()
@@ -322,8 +344,8 @@ class Disk(UINode):
         self.pool, self.rbd_image = image_id.split('.', 1)
 
         UINode.__init__(self, image_id, parent)
+
         self.image_id = image_id
-        self.logger = self.parent.logger
         self.size = 0
         self.size_h = ''
         self.features = 0
@@ -412,6 +434,7 @@ class Disk(UINode):
             # the gateways do not have there rbd-target-gw daemons reloaded
             error_msg = "The API has returned disks that are not on this " \
                         "server...reload rbd-target-api?"
+
             self.logger.critical(error_msg)
             raise GatewayError(error_msg)
         else:
@@ -434,23 +457,7 @@ class Disk(UINode):
         # resize is actually managed by the same lun and api endpoint as
         # create so this logic is very similar to a 'create' request
 
-        # if not size:
-        #     self.logger.error("Specify a size value (current size "
-        #                       "is {})".format(self.size_h))
-        #     return
-        #
         size_rqst = size.upper()
-        # if not valid_size(size_rqst):
-        #     self.logger.error("Size parameter value is not valid syntax "
-        #                       "(must be of the form 100G, or 1T)")
-        #     return
-        #
-        # new_size = convert_2_bytes(size_rqst)
-        # if self.size >= new_size:
-        #     # current size is larger, so nothing to do
-        #     self.logger.error("New size isn't larger than the current "
-        #                       "image size, ignoring request")
-        #     return
 
         # At this point the size request needs to be honoured
         self.logger.debug("Resizing {} to {}".format(self.image_id,
@@ -459,9 +466,10 @@ class Disk(UINode):
         local_gw = this_host()
 
         # Issue the api request for the resize
-        disk_api = '{}://127.0.0.1:{}/api/all_disk/{}'.format(self.http_mode,
-                                                              settings.config.api_port,
-                                                              self.image_id)
+        disk_api = ('{}://127.0.0.1:{}/api/'
+                    'disk/{}'.format(self.http_mode,
+                                     settings.config.api_port,
+                                     self.image_id))
 
         api_vars = {'pool': self.pool, 'size': size_rqst,
                     'owner': local_gw, 'mode': 'resize'}
