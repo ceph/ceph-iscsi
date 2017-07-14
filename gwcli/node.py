@@ -2,14 +2,16 @@
 
 from configshell_fb import ConfigNode
 from gwcli.utils import console_message
+import logging
 
-__author__ = 'pcuzner@redhat.com'
+__author__ = 'Paul Cuzner'
 
 
 class UICommon(ConfigNode):
 
     def __init__(self, name, parent=None, shell=None):
         ConfigNode.__init__(self, name, parent, shell)
+        self.logger = logging.getLogger('gwcli')
 
     def ui_command_goto(self, shortcut='/'):
         if shortcut in self.shell.prefs['bookmarks']:
@@ -25,6 +27,7 @@ class UICommon(ConfigNode):
                 break
             obj = obj.parent
         return obj
+
 
 class UIGroup(UICommon):
 
@@ -63,7 +66,6 @@ class UINode(UIGroup):
         :return: (str) object meta data based on object's display_attributes
                  list
         """
-
 
         display_text = ''
 
@@ -113,8 +115,8 @@ class UINode(UIGroup):
                                                      max_field_size,
                                                      attr_value))
 
-
         return display_text
+
 
 class UIRoot(UICommon):
     """
@@ -124,5 +126,6 @@ class UIRoot(UICommon):
     def __init__(self, shell, as_root=False):
         UICommon.__init__(self, '/', shell=shell)
         self.as_root = as_root
+
 
 
