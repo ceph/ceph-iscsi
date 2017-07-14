@@ -16,8 +16,8 @@ from gwcli.gateway import ISCSIRoot
 
 import ceph_iscsi_config.settings as settings
 
-__author__ = 'pcuzner@redhat.com'
-__version__ = '2.1'
+__author__ = 'Paul Cuzner'
+__version__ = '2.4'
 
 
 class GatewayCLI(ConfigShell):
@@ -90,7 +90,7 @@ def main():
 
     shell = GatewayCLI('~/.gwcli')
 
-    root_node = ISCSIRoot(shell, logger)
+    root_node = ISCSIRoot(shell)
 
     root_node.interactive = False if options.cli_command else True
     settings.config.interactive = False if options.cli_command else True
@@ -119,6 +119,7 @@ def main():
             shell.run_interactive()
         except ExecutionError as msg:
             shell.log.error(str(msg))
+
 
 def log_in_color(fn):
 
@@ -155,8 +156,9 @@ if __name__ == "__main__":
 
     file_handler = logging.FileHandler(log_path, mode='a')
 
-    file_format = logging.Formatter('%(asctime)s %(levelname)-8s - '
-                                    '%(message)s')
+    file_format = logging.Formatter('%(asctime)s %(levelname)-8s '
+                                    '[%(filename)s:%(lineno)s:%(funcName)s()]'
+                                    ' %(message)s')
 
     file_handler.setFormatter(file_format)
     file_handler.setLevel(logging.DEBUG)
