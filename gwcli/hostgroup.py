@@ -9,7 +9,19 @@ __author__ = "Paul Cuzner"
 
 class HostGroups(UIGroup):
 
-    help_intro = "hello"
+    help_intro = '''
+                 Hosts groups provide a more convenient way of managing multiple
+                 hosts that require access to the same set of LUNs. The host 
+                 group defines the clients and the LUNs (rbd images) that all 
+                 members of the group should have masked to them.
+
+                 Once a client is a member of a host group, the disks that are
+                 masked to the client can only be managed at the group level. 
+
+                 Deleting a host group, simply removes the group membership for
+                 hosts. Existing LUN masking will remain in place.
+
+    '''
 
     def __init__(self, parent):
         UIGroup.__init__(self, 'host-groups', parent)
@@ -107,7 +119,17 @@ class HostGroups(UIGroup):
 
 class HostGroup(UIGroup):
 
-    help_intro = "hello"
+    help_intro = '''
+                 Hosts and disks may be added and removed from a host group
+                 definition.
+                 
+                 This is managed through the host and disk subcommands
+                 e.g.
+                 
+                 host add|remove iqn.1994-05.com.redhat:rh7-client
+                 disk add|remove rbd.disk_1
+                 
+    '''
 
     valid_actions = ['add', 'remove']
 
