@@ -1,12 +1,12 @@
 .\" Manpage for gwcli
 .\" Contact pcuzner@redhat.com to correct errors or typos.
-.TH gwcli 8 "Ceph iSCSI Gateway Tools" "1 Dec 2016" "Ceph iSCSI Gateway Tools"
+.TH gwcli 8 "Ceph iSCSI Gateway Tools" "23 Jul 2017" "Ceph iSCSI Gateway Tools"
 .SH NAME
 \fBgwcli\fR \- manage iscsi gateway configuration from the command line
 .SH DESCRIPTION
 \fBgwcli\fR is a configuration shell interface used for viewing, editing and saving the configuration of a ceph/iSCSI gateway environment. It enables the administrator to define rbd devices, map them across gateway nodes and export them to various clients over iSCSI. In addition to managing the iSCSI related elements of the configuration, the shell provides an overview of the ceph cluster, describing the available pools and the capacity they provide. Since rbd images are thin provisioned, the capacity information also indicates the capacity over-commit of the pools, enabling the admin to make more informed choices when allocating new rbd images.
 .PP
-iSCSI services are implemented by the kernel's LIO target subsystem layer, with iSCSI settings enforced by the rbd-target-gw daemon. The targetcli command may still be used to see lower level detail of the LIO environment, but all changes \fBmust\fR be made using the gwcli.
+iSCSI services are implemented by the kernel's LIO target subsystem layer, with iSCSI settings enforced by the rbd-target-gw daemon. The targetcli command may still be used to view lower level detail of the LIO environment, but all changes \fBmust\fR be made using the gwcli.
 .PP
 The gwcli shell is similar to the targetcli interface, and is also based on 'configshell'. The layout of the UI is a tree format, and is navigated in much the same way as a filesystem.
 .SH USAGE
@@ -82,6 +82,10 @@ o- / ................................................................... [...]
       o- gateways ...................................... [Up: 2/2, Portals: 2]
       | o- rh7-gw1 ..................................... [192.168.122.69 (UP)]
       | o- rh7-gw2 .................................... [192.168.122.104 (UP)]
+      o- host-groups ............................................ [Groups : 1]
+      | o- group1 ....................................... [Hosts: 1, Disks: 1]
+      |   o- iqn.1994-05.com.redhat:rh7-client ........................ [host]
+      |   o- rbd.disk_5 ............................................... [disk]
       o- hosts .................................................... [Hosts: 2]
         o- iqn.1994-05.com.redhat:myhost1 ......... [Auth: None, Disks: 1(1G)]
         | o- lun 0 .......................... [rbd.disk_1(1G), \fBOwner: rh7-gw2]\fR]
@@ -125,6 +129,23 @@ Gateways provide the access points for rbd images over iSCSI, so there should be
 .TP
 \fB/iscsi-target/<iqn>/ create <node_name> <portal_ip_address>
 Gateways are defined by a node name (preferably a shortname, but it must resolve), and an IPv4 address that the iSCSI 'service' will be bound to (i.e. the iSCSI portal IP address). When adding a gateway, the candidate machine will be checked to ensure the relevant files and daemons are in place.
+.SH HOST-GROUPS
+Host groups provide a more convenient way of managing multiple servers that must share the same disk masking configuration. For example in a RHV/oVirt or Vmware environment, each host needs access to the same LUNs. Host groups allow you to create a logical group which contains the hosts and the disks that each host in the group should have access to. Please note that sharing devices across hosts needs a cluster aware filesystem or equivalent locking to avoid data corruption.
+.PP
+.TP
+\fB/iscsi-target/<iqn>/host-groups/ create | delete <group-name>
+Create or delete a given group name. Deleting a group definition does \fBnot\fR remove the hosts or LUN masking, it simply removes the logical grouping used for management purposes.
+.PP
+.TP
+\fB/iscsi-target/<iqn>/host-groups/<group_name>/ host add | remove <client-iqn>
+The host subcommand within a group definition allows you to add and remove hosts from the group. When adding a host, it must not have existing LUN masking in place - this restriction ensure lun id consistency across all hosts within the host group. Removing a host from a group does \fBnot\fR automatically remove it's LUN masking.
+.TP
+\fB/iscsi-target/<iqn>/host-groups/<group_name>/ disk add | remove <pool>.<image_name>
+The disk subcommand enables you to add and remove disks to/from all members of the host group.
+.PP
+.RS
+\fBNB.\fROnce a client is a member of a host group, it's disks \fBcan only\fR be managed at the group level.
+.RE
 .SH HOSTS
 The 'hosts' section defines the iSCSI client definitions (NodeACLs) that provide access to the rbd images. The CLI provides the ability to create and delete clients, define/update chap authentication and add and remove rbd images for the client.
 .PP
@@ -196,7 +217,7 @@ refreshes the ceph information present in the UI
 \fBinfo\fR
 when run at the root of the shell (/), info will show you configuration settings such as http mode, API port, local ceph cluster name and 2ndary API trusted IP addresses.
 .TP
-\fBgoto [ hosts | gateways | 'bookmark']\fR
+\fBgoto [ gateways | hosts | host-groups | 'bookmark']\fR
 to ease navigation within the UI, gwcli automatically creates bookmarks for hosts and gateways. This allows you to switch to those sub-trees in the UI by simply using '\fBgoto hosts\fR'. The 'goto' command will also work for any other bookmarks you create.
 .PP
 .SH FILES
@@ -210,4 +231,4 @@ log containing a record of all commands executed within the gwcli shell on this 
 .SH AUTHOR
 Written by Paul Cuzner (pcuzner@redhat.com)
 .SH REPORTING BUGS
-Report bugs via <https://github.com/pcuzner/ceph-iscsi-cli/issues>
+Report bugs via <https://github.com/ceph/ceph-iscsi-cli/issues>
