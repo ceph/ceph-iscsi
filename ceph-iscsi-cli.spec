@@ -47,7 +47,7 @@ mkdir -p %{buildroot}%{_mandir}/man8
 install -m 0644 gwcli.8 %{buildroot}%{_mandir}/man8/
 gzip %{buildroot}%{_mandir}/man8/gwcli.8
 mkdir -p %{buildroot}%{_sysconfdir}/systemd/system/rbd-target-gw.service.d
-install -m 0644 .%{sysconfdir}/systemd/system/rbd-target-gw.service.d/dependencies.conf %{buildroot}%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/
+install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependencies.conf %{buildroot}%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/
 
 %post
 /bin/systemctl --system daemon-reload &> /dev/null || :
