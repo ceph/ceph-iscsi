@@ -98,6 +98,8 @@ class Group(object):
 
     def apply(self):
 
+        config_dict = self.config.config
+
         if self.group_name not in self.config.config['groups']:
 
             # New Group definition
@@ -109,7 +111,6 @@ class Group(object):
                 return
 
             # this is a new group definition, and must have members
-            config_dict = self.config.config
             if self.group_members:
                 self.logger.debug("Validating group members :{}".format(self.group_members))
                 for mbr in self.group_members:
@@ -170,6 +171,15 @@ class Group(object):
                                  "- no changes needed")
                 return
 
+            for mbr in members.added:
+                self.logger.debug("validating '{}' is ok to add to "
+                                  "group {}".format(mbr, self.group_name))
+
+                if not self._valid_client(mbr, config_dict):
+                    self.logger.debug("'{}' failed checks")
+                    return
+
+
             # At this point we know there are changes to make
             all_disks = self.config.config['disks'].keys()
             all_clients = self.config.config['clients'].keys()
@@ -182,11 +192,18 @@ class Group(object):
             self.logger.debug("clients are {}".format(all_clients))
             if self.group_members:
                 if not members.added.issubset(all_clients):
-                    self._set_error("Clients (members) must exist in the configuration")
+                    self._set_error("Clients (members) must exist in the "
+                                    "configuration")
                     return
 
             # at this point the disk list and member list are valid
             image_list = self.disks
+
+            if members.added:
+                # add the group_name to the client's meta data
+                for client_iqn in members.added:
+                    self.add_client(client_iqn)
+
             if len(disks.added | disks.removed) > 0:
                 # process all clients in the group with the new
                 # image list
@@ -207,6 +224,13 @@ class Group(object):
             self.logger.debug("Group set to {}".format(json.dumps(this_group)))
             self.config.update_item("groups", self.group_name, this_group)
             self.config.commit()
+
+    def add_client(self, client_iqn):
+        client_metadata = self.config.config['clients'][client_iqn]
+        client_metadata['group_name'] = self.group_name
+        self.config.update_item("clients", client_iqn, client_metadata)
+        self.logger.info("Added {} to group {}".format(client_iqn,
+                                                       self.group_name))
 
     def update_client(self, client_iqn, image_list):
 
