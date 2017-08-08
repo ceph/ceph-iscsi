@@ -2,6 +2,7 @@
 
 from gwcli.node import UIGroup, UINode
 from gwcli.utils import APIRequest
+from gwcli.client import MappedLun
 import ceph_iscsi_config.settings as settings
 
 __author__ = "Paul Cuzner"
@@ -105,12 +106,19 @@ class HostGroups(UIGroup):
         self.logger.debug("removing group from the UI")
         child = [child for child in self.children
                  if child.name == group_name][0]
-
         self.delete(child)
 
         self.logger.info('ok')
 
     def delete(self, child):
+        self.logger.debug("removing '{}' from local client"
+                          "definitions".format(child.name))
+        ui_root = self.get_ui_root()
+        clients = ui_root.target.client_group
+        for iqn in clients:
+            if clients[iqn].get('group_name') == child.name:
+                clients[iqn]['group_name'] = ''
+
         self.remove_child(child)
 
     groups = property(_get_groups,
@@ -155,18 +163,20 @@ class HostGroup(UIGroup):
 
         # basic checks
         ui_root = self.get_ui_root()
-        clients = ui_root.target.client_group.keys()
+        clients = ui_root.target.client_group
         if client_iqn not in clients:
-            self.logger.error("'{}' is not in the configuration".format(client_iqn))
+            self.logger.error("'{}' is not in the "
+                              "configuration".format(client_iqn))
             return
-        current_group = clients[client_iqn].get('group_name')
+        current_group = clients[client_iqn].get('group_name', None)
         if action == 'add' and current_group:
             self.logger.error("'{}' already belongs to "
                               "'{}'".format(client_iqn,
                                             current_group))
             return
         elif action == 'remove' and current_group != self.name:
-            self.logger.error("'{}' does not belong to this group".format(client_iqn))
+            self.logger.error("'{}' does not belong to this "
+                              "group".format(client_iqn))
             return
 
         # Basic checks passed, hand-off to the API now
@@ -181,15 +191,19 @@ class HostGroup(UIGroup):
 
         api = APIRequest(group_api, data=api_vars)
         api.put()
-        self.logger.debug("- api call responded {}".format(api.response.status_code))
+        self.logger.debug("- api call responded "
+                          "{}".format(api.response.status_code))
         if api.response.status_code != 200:
-            self.logger.error("host group change failed")
+            self.logger.error("host group change failed: "
+                              "{}".format(api.response.json()['message']))
             return
 
         # group updated, so update the UI
         self.logger.debug("Updating the UI")
         if action == 'add':
             HostGroupMember(self, 'host', client_iqn)
+            clients[client_iqn]['group_name'] = self.name
+
         elif action == 'remove':
             child = [child for child in self.children
                      if child.name == client_iqn][0]
@@ -198,6 +212,12 @@ class HostGroup(UIGroup):
         self.logger.info('ok')
 
     def delete(self, child):
+
+        if child.member_type == 'host':
+            ui_root = self.get_ui_root()
+            clients = ui_root.target.client_group
+            clients[child.name]['group_name'] = ''
+
         self.remove_child(child)
 
     def ui_command_disk(self, action, disk_name):
@@ -235,7 +255,7 @@ class HostGroup(UIGroup):
             self.logger.error("host group change failed")
             return
 
-        # group updated, so update the UI
+        # group updated, so update the host-groups UI elements
         self.logger.debug("Updating the UI")
         if action == 'add':
             HostGroupMember(self, 'disk', disk_name)
@@ -244,7 +264,42 @@ class HostGroup(UIGroup):
                      if child.name == disk_name][0]
             self.delete(child)
 
+        self.update_clients_UI(action, disk_name)
+
         self.logger.info('ok')
+
+    def update_clients_UI(self, action, disk_name):
+
+        self.logger.debug("process each member of the group")
+
+        grp_clients = [mbr.name for mbr in self.children
+                       if mbr.member_type == 'host']
+
+        ui_root = self.get_ui_root()
+        if action == 'add':
+            # let's get an updated version of the client/lun mapping
+            config = ui_root._get_config()
+            clients = config['clients']
+
+        target_subtree = [child for child in ui_root.target.children][0]
+        clients_subtree = target_subtree.client_group
+
+        for client in clients_subtree.children:
+            if client.name in grp_clients:
+                if action == 'add':
+                    client_luns = clients[client.name].get('luns')
+                    lun_id = client_luns[disk_name].get('lun_id')
+                    self.logger.debug("adding {} to {}".format(disk_name,
+                                                               client.name))
+                    client.add_lun(disk_name, lun_id)
+
+                else:
+                    # remove the disk from the client UI subtree
+                    self.logger.debug("removing {} from {}".format(disk_name,
+                                                                   client.name))
+                    mapped_lun = [lun for lun in client.children
+                                  if lun.rbd_name == disk_name][0]
+                    client.remove_lun(mapped_lun)
 
     def summary(self):
         counts = {'disk': 0, 'host': 0}
