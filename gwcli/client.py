@@ -127,7 +127,6 @@ class Clients(UIGroup):
         :param action: add or remove
         :param rbd_path: disk name (str) i.e. <pool>.<rbd_image>
         :param client_iqn: client IQN (str)
-        :return: None
         """
 
         if action == 'add':
@@ -188,7 +187,6 @@ class Client(UINode):
             if sess['parent_nodeacl'].node_wwn == self.client_iqn:
                 return sess['state']
         return ''
-
 
     def summary(self):
 
@@ -387,18 +385,10 @@ class Client(UINode):
 
                 if api.response.status_code == 200:
                     lun_dict = api.response.json()['message']
-                    lun_id = lun_dict[disk]['lun_id']
-                    MappedLun(self, disk, lun_id)
 
-                    # update the objects lun list (so ui info cmd picks
-                    # up the change
-                    self.luns[disk] = {'lun_id': lun_id}
-                    self.parent.update_lun_map('add', disk, self.client_iqn)
-                    active_maps = len(self.parent.lun_map[disk]) - 1
-                    if active_maps > 0:
-                        self.logger.warning("Warning: '{}' mapped to {} other "
-                                            "client(s)".format(disk,
-                                                               active_maps))
+                    # now update the UI
+                    lun_id = lun_dict[disk]['lun_id']
+                    self.add_lun(disk, lun_id)
 
                 else:
                     self.logger.error("Query for disk '{}' meta data "
@@ -409,13 +399,9 @@ class Client(UINode):
 
                 # this was a remove request, so simply delete the child
                 # MappedLun object corresponding to this rbd name
-
                 mlun = [lun for lun in self.children
                         if lun.rbd_name == disk][0]
-                self.remove_child(mlun)
-                del self.luns[disk]
-                self.parent.update_lun_map('remove', disk, self.client_iqn)
-
+                self.remove_lun(mlun)
 
             self.logger.debug("configuration update successful")
             self.logger.info('ok')
@@ -429,8 +415,39 @@ class Client(UINode):
                                             api.response.json()['message']))
             return
 
-    logged_in = property(_get_logged_in_state,
-                         doc="login state of the client")
+    def add_lun(self, disk, lun_id):
+
+        MappedLun(self, disk, lun_id)
+
+        # update the objects lun list (so ui info cmd picks
+        # up the change
+        self.luns[disk] = {'lun_id': lun_id}
+
+        self.parent.update_lun_map('add',
+                                   disk,
+                                   self.client_iqn)
+
+        active_maps = len(self.parent.lun_map[disk]) - 1
+        if active_maps > 0:
+            self.logger.warning("Warning: '{}' mapped to {} other "
+                                "client(s)".format(disk,
+                                                   active_maps))
+
+    def remove_lun(self, lun):
+        self.remove_child(lun)
+        del self.luns[lun.rbd_name]
+        self.parent.update_lun_map('remove',
+                                   lun.rbd_name,
+                                   self.client_iqn)
+
+    @property
+    def logged_in(self):
+
+        r = root.RTSRoot()
+        for sess in r.sessions:
+            if sess['parent_nodeacl'].node_wwn == self.client_iqn:
+                return sess['state']
+        return ''
 
 
 class MappedLun(UINode):
