@@ -1116,7 +1116,7 @@ def hostgroup(group_name):
             changed_members = changed_members.split(',')
         changed_disks = request.form.get('disk', '')
         if changed_disks == '':
-            changed_disks =[]
+            changed_disks = []
         else:
             changed_disks = changed_disks.split(',')
 
@@ -1209,6 +1209,7 @@ def _hostgroup(group_name):
         grp.apply()
 
         if not grp.error:
+            config.refresh()
             return jsonify(message="Group created/updated"), 200
         else:
             return jsonify(message="{}".format(grp.error_msg)), 400
