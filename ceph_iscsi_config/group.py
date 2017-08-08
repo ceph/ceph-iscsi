@@ -176,7 +176,7 @@ class Group(object):
                                   "group {}".format(mbr, self.group_name))
 
                 if not self._valid_client(mbr, config_dict):
-                    self.logger.debug("'{}' failed checks")
+                    self.logger.debug("'{}' failed checks".format(mbr))
                     return
 
 
