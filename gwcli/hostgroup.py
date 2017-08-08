@@ -111,7 +111,7 @@ class HostGroups(UIGroup):
         self.logger.info('ok')
 
     def delete(self, child):
-        self.logger.debug("removing '{}' from local client"
+        self.logger.debug("removing '{}' from local client "
                           "definitions".format(child.name))
         ui_root = self.get_ui_root()
         clients = ui_root.target.client_group
