@@ -33,6 +33,9 @@ class Settings(object):
                 "pub_key": 'iscsi-gateway-pub.key'
                 }
 
+    target_defaults = {"osd_op_timeout": 30
+                       }
+
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):
 
         self.size_suffixes = ['M', 'G', 'T']
@@ -45,12 +48,21 @@ class Settings(object):
         if len(dataset) == 0:
             # no config file present, set up defaults
             self._define_settings(Settings.defaults)
+            self._define_settings(Settings.target_defaults)
         else:
             # If we have a file use it to override the defaults
             if config.has_section("config"):
                 runtime_settings = dict(Settings.defaults)
                 runtime_settings.update(dict(config.items("config")))
                 self._define_settings(runtime_settings)
+
+            if config.has_section("target"):
+                target_settings = dict(Settings.target_defaults)
+                target_settings.update(dict(config.items("target")))
+                self._define_settings(target_settings)
+            else:
+                # We always want these values set to at least the defaults.
+                self._define_settings(Settings.target_defaults)
 
         self.cephconf = '/etc/ceph/{}.conf'.format(self.cluster_name)
         if self.api_secure:

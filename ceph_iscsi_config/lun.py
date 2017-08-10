@@ -600,9 +600,11 @@ class LUN(object):
 
         new_lun = None
         try:
-            # config string = rbd identifier / config_key (pool/image)
-            cfgstring = "rbd/{}/{}".format(self.pool,
-                                         self.image)
+            # config string = rbd identifier / config_key (pool/image) /
+            # optional osd timeout
+            cfgstring = "rbd/{}/{}/osd_op_timeout={}".format(self.pool,
+                                         self.image,
+                                         settings.config.osd_op_timeout)
 
             new_lun = UserBackedStorageObject(name=self.config_key,
                                               config=cfgstring,
