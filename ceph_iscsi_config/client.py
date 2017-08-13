@@ -159,8 +159,12 @@ class GWClient(object):
             # and cleanup before the initiator has begun recovery and
             # failed over.
             self.acl.set_attribute('dataout_timeout', '20')        # default  3
-            self.acl.set_attribute('nopin_response_timeout', '10') # default 30
-            self.acl.set_attribute('nopin_timeout', '10')          # default 15
+            # LIO default 30
+            self.acl.set_attribute('nopin_response_timeout','{}'.format(
+                                   settings.config.nopin_response_timeout))
+            # LIO default 15
+            self.acl.set_attribute('nopin_timeout', '{}'.format(
+                                   settings.config.nopin_timeout))
         except RTSLibError as err:
             self.logger.error("(Client.define_client) FAILED to define "
                               "{}".format(self.iqn))

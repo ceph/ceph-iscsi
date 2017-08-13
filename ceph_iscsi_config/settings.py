@@ -33,7 +33,9 @@ class Settings(object):
                 "pub_key": 'iscsi-gateway-pub.key'
                 }
 
-    target_defaults = {"osd_op_timeout": 30
+    target_defaults = {"osd_op_timeout": 30,
+                       "nopin_response_timeout" : 5,
+                       "nopin_timeout" : 5
                        }
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):
