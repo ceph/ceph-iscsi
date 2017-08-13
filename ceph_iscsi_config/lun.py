@@ -610,18 +610,30 @@ class LUN(object):
                                               config=cfgstring,
                                               size=self.size_bytes,
                                               wwn=in_wwn)
-
-            new_lun.set_attribute("cmd_time_out", 0);
         except RTSLibError as err:
             self.error = True
             self.error_msg = ("failed to add {} to LIO - "
                              "error({})".format(self.config_key,
                                                 str(err)))
             self.logger.error(self.error_msg)
+            return None
 
-        else:
-            self.logger.info("(LUN.add_dev_to_lio) Successfully added {}"
-                             " to LIO".format(self.config_key))
+        try:
+            new_lun.set_attribute("cmd_time_out", 0)
+            new_lun.set_attribute("qfull_time_out",
+                                  settings.config.qfull_timeout)
+        except RTSLibError as err:
+            self.error = True
+            self.error_msg = ("Could not set LIO device attribute "
+                             "cmd_time_out/qfull_time_out for device: {}. "
+                             "Kernel not supported. - "
+                             "error({})".format(self.config_key, str(err)))
+            self.logger.error(self.error_msg)
+            new_lun.delete()
+            return None
+
+        self.logger.info("(LUN.add_dev_to_lio) Successfully added {}"
+                         " to LIO".format(self.config_key))
 
         return new_lun
 
