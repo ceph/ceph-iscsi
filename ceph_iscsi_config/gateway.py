@@ -308,14 +308,13 @@ class GWTarget(object):
                                  "group id {}".format(stg_object.name, tpg.tag))
                 group_name = "ao"
                 alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
-                # alua_tpg.alua_access_state = 0
-                alua_tpg.preferred = 1
+                alua_tpg.alua_access_state = 0
             else:
                 self.logger.info("setting {} to ALUA/ActiveNONOptimised "
                                  "group id {}".format(stg_object.name, tpg.tag))
                 group_name = "ano{}".format(tpg.tag)
                 alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
-                # alua_tpg.alua_access_state = 1
+                alua_tpg.alua_access_state = 1
         except RTSLibError as err:
                 self.logger.info("ALUA group id {} for stg obj {} lun {} "
                                  "already made".format(tpg.tag, stg_object, lun))
@@ -329,17 +328,13 @@ class GWTarget(object):
                 # drop down in case we are restarting due to error and we
                 # were not able to bind to a lun last time.
 
-        # alua_tpg.alua_access_type = 1
-
-        # start ports in Standby, and let the initiator drive the initial
-        # transition to AO.
         self.logger.debug("ALUA defined, updating state")
-        alua_tpg.alua_access_state = 2
-        alua_tpg.alua_access_type = 3
+        # Use implicit failover
+        alua_tpg.alua_access_type = 1
 
         alua_tpg.alua_support_offline = 0
-        alua_tpg.alua_support_unavailable = 0
-        alua_tpg.alua_support_standby = 1
+        alua_tpg.alua_support_unavailable = 1
+        alua_tpg.alua_support_standby = 0
         alua_tpg.alua_support_transitioning = 1
         alua_tpg.implicit_trans_secs = 60
         alua_tpg.nonop_delay_msecs = 0
