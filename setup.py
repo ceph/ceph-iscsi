@@ -27,7 +27,7 @@ class StripExtension(distutils.command.install_scripts.install_scripts):
 
 setup(
     name="gwcli",
-    version="2.4",
+    version="2.5",
     description="cli interface to iscsi gateways based on configshell_fb modules",
     long_description=long_description,
     author="Paul Cuzner",

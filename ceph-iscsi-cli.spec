@@ -1,5 +1,5 @@
 Name:		ceph-iscsi-cli
-Version:	2.1
+Version:	2.5
 Release:	1%{?dist}
 Summary:	CLI configuration tool to manage multiple iSCSI gateways
 Group:		Applications/System
@@ -14,7 +14,7 @@ BuildRequires: python-setuptools
 BuildRequires: systemd
 
 Requires: python-rtslib >= 2.1
-Requires: ceph-iscsi-config >= 2.1
+Requires: ceph-iscsi-config >= 2.3
 Requires: python-requests >= 2.6
 Requires: python-configshell >= 1.1
 Requires: python-flask >= 0.10.1
@@ -67,6 +67,9 @@ install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependenc
 %{_mandir}/man8/gwcli.8.gz
 
 %changelog
+* Tue Aug 15 2017 Jason Dillaman <dillaman@redhat.com> 2.5-1
+- version bump to 2.5
+
 * Sat Jan 21 2017 Paul Cuzner <pcuzner@redhat.com> 2.1-1
 - updated for TCMU support (krbd/device mapper support removed)
 - rbd-target-api restructured to remove python-flask-restful dependency
