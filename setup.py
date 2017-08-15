@@ -28,7 +28,7 @@ class StripExtension(distutils.command.install_scripts.install_scripts):
 
 setup(
     name="ceph_iscsi_config",
-    version="2.2",
+    version="2.3",
     description="Common classes/functions used to configure iscsi gateways "
                 "backed by Ceph/RBD",
     long_description=long_description,

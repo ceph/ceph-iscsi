@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        2.2
+Version:        2.3
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -57,6 +57,16 @@ install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Tue Aug 15 2017 Jason Dillaman <dillaman@redhat.com> - 2.3-1
+- group: additional debug msgs added and validation logic changed
+- settings : fix missing default value api_ssl_verify
+- test_group: simple script testing add/update and removal of a host group
+- group: updated to handle updates to the group definition
+- utils: add a simple class to show list items that are added/removed
+- client:bypass setup_luns if the client is under group_name control
+- group.py: initial commit introducing host group management
+- common: update config handling to allow new sections to be added to the config
+
 * Fri Jan 12 2017 Paul Cuzner <pcuzner@redhat.com> - 2.2-1
 - remove redundant environment variable in settings
 - provide a sample cfg file in /usr/share/doc
