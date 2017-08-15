@@ -17,7 +17,7 @@ from gwcli.gateway import ISCSIRoot
 import ceph_iscsi_config.settings as settings
 
 __author__ = 'Paul Cuzner'
-__version__ = '2.4'
+__version__ = '2.5'
 
 
 class GatewayCLI(ConfigShell):
