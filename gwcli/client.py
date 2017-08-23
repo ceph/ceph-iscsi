@@ -228,7 +228,7 @@ class Client(UINode):
                      hostname or iqn
         password ... the password must be between 12-16 chars in length
                      containing alphanumeric characters plus the following
-                     special characters !,&,_
+                     special characters @,_,-
 
         """
 

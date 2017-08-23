@@ -334,7 +334,7 @@ def valid_credentials(credentials_str, auth_type='chap'):
         # password is 12-16 chars long containing any alphanumeric
         # or !,_,& symbol
         usr_regex = re.compile("^[\w\\.\:]+")
-        pw_regex = re.compile("^[\w\!\&\_]{12,16}$")
+        pw_regex = re.compile("^[\w\@\-\_]{12,16}$")
         if not usr_regex.search(user_name) or not pw_regex.search(password):
             return False
 
