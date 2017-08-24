@@ -299,10 +299,10 @@ class ISCSITarget(UIGroup):
         for gw_name in gw_list:
 
             gw_api = ('{}://{}:{}/api/'
-                      'gateway/{}'.format(self.http_mode,
-                                          gw_name,
-                                          settings.config.api_port,
-                                          gw_name))
+                      '_gateway/{}'.format(self.http_mode,
+                                           gw_name,
+                                           settings.config.api_port,
+                                           gw_name))
 
             api = APIRequest(gw_api)
             api.delete()
