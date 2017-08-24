@@ -545,11 +545,6 @@ def disk(image_id):
 
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
-    logger.debug("other gateways - {}".format(gateways))
-    gateways.remove(local_gw)
-    logger.debug("other gw's {}".format(gateways))
 
     if request.method == 'GET':
 
@@ -561,6 +556,23 @@ def disk(image_id):
                                    "found".format(image_id)), 404
 
     elif request.method == 'PUT':
+        # This is a create/resize operation, so first confirm the gateways
+        # are in place (we need gateways to perform the lun masking tasks
+        gateways = [key for key in config.config['gateways']
+                    if isinstance(config.config['gateways'][key], dict)]
+        logger.debug("All gateways: {}".format(gateways))
+
+        # Any disk operation needs at least 2 gateways to be present
+        if len(gateways) < 2:
+            msg = "at least 2 gateways must exist before disk operations " \
+                  "are permitted"
+            logger.warning("disk create request failed: {}".format(msg))
+            return jsonify(message=msg), 400
+
+        # at this point we have a disk request, and the gateways are available
+        # for the LUN masking operations
+        gateways.remove(local_gw)
+        logger.debug("Other gateways: {}".format(gateways))
 
         # pool = request.form.get('pool')
         size = request.form.get('size')

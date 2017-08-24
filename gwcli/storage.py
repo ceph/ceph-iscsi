@@ -98,16 +98,15 @@ class Disks(UIGroup):
         local_cluster = [clusters[cluster_name] for cluster_name in clusters
                          if clusters[cluster_name]['local']][0]['object']
         pools = local_cluster.pools
-        pool_lookup = pools.pool_lookup
+        pool_object = pools.pool_lookup.get(pool, None)
+        if pool_object:
+            if pool_object.type == 'replicated':
+                self.logger.debug("pool '{}' is ok to use".format(pool))
+                return True
 
-        pool_type = pool_lookup[pool].type
-        if pool_type == 'replicated':
-            self.logger.debug("pool '{}' is ok to use".format(pool))
-            return True
-        else:
-            self.logger.error("Invalid pool type ({}) for rbd "
-                              "images. Must be replicated".format(pool_type))
-            return False
+        self.logger.error("Invalid pool ({}). Must already exist and "
+                          "be replicated".format(pool))
+        return False
 
     def create_disk(self, pool=None, image=None, size=None, count=None,
                     parent=None):
