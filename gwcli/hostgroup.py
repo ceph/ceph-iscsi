@@ -203,6 +203,12 @@ class HostGroup(UIGroup):
         if action == 'add':
             HostGroupMember(self, 'host', client_iqn)
             clients[client_iqn]['group_name'] = self.name
+            # add disks in the group to the host
+            self.logger.debug('fetching the complete group definition')
+            group_info = self._fetch_group()
+            self.logger.debug('syncing group clients')
+            for disk in group_info.get('disks'):
+                self.update_clients_UI('add', disk)
 
         elif action == 'remove':
             child = [child for child in self.children
@@ -210,6 +216,20 @@ class HostGroup(UIGroup):
             self.delete(child)
 
         self.logger.info('ok')
+
+    def _fetch_group(self):
+        group_api = ('{}://{}:{}/api/hostgroup/'
+                     '{}'.format(self.http_mode,
+                                 "127.0.0.1",
+                                 settings.config.api_port,
+                                 self.name))
+        api = APIRequest(group_api)
+        api.get()
+        if api.response.status_code == 200:
+            return api.response.json()
+        else:
+            # problem getting hostgroup definition
+            pass
 
     def delete(self, child):
 
@@ -288,10 +308,17 @@ class HostGroup(UIGroup):
             if client.name in grp_clients:
                 if action == 'add':
                     client_luns = clients[client.name].get('luns')
-                    lun_id = client_luns[disk_name].get('lun_id')
-                    self.logger.debug("adding {} to {}".format(disk_name,
-                                                               client.name))
-                    client.add_lun(disk_name, lun_id)
+                    client_ui_disks = [lun.rbd_name for lun in client.children]
+                    if disk_name in client_ui_disks:
+                        self.logger.debug("skipping add of {} to "
+                                          "{}".format(disk_name,
+                                                      client.name))
+                        continue
+                    else:
+                        lun_id = client_luns[disk_name].get('lun_id')
+                        self.logger.debug("adding {} to {}".format(disk_name,
+                                                                   client.name))
+                        client.add_lun(disk_name, lun_id)
 
                 else:
                     # remove the disk from the client UI subtree
