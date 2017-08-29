@@ -1,11 +1,10 @@
 #!/usr/bin/env python2
 
+import re
+
 from gwcli.node import UIGroup, UINode
 from gwcli.utils import APIRequest
-from gwcli.client import MappedLun
 import ceph_iscsi_config.settings as settings
-
-__author__ = "Paul Cuzner"
 
 
 class HostGroups(UIGroup):
@@ -13,16 +12,28 @@ class HostGroups(UIGroup):
     help_intro = '''
                  Hosts groups provide a more convenient way of managing multiple
                  hosts that require access to the same set of LUNs. The host 
-                 group defines the clients and the LUNs (rbd images) that all 
-                 members of the group should have masked to them.
+                 group 'policy' defines the clients and the LUNs (rbd images) 
+                 that should be associated together.
 
-                 Once a client is a member of a host group, the disks that are
-                 masked to the client can only be managed at the group level. 
+                 There are two commands used to manage the host group
+                 
+                 create <group_name>
+                 delete <group_name>
 
-                 Deleting a host group, simply removes the group membership for
-                 hosts. Existing LUN masking will remain in place.
+                 Since the same disks will be seen by multiple systems, you 
+                 should only use this feature for hosts that are cluster aware.
+                 Failing to adhere to this constraint is likely to result in 
+                 **data loss**
+                 
+                 Once a group has been created you can associate clients and 
+                 LUNs to the group with the 'host' and 'disk' sub-commands. 
+                 
+                 Note that a client can only belong to a single group definition, 
+                 but a disk can be defined across several groups.
 
     '''
+
+    group_name_length = 32
 
     def __init__(self, parent):
         UIGroup.__init__(self, 'host-groups', parent)
@@ -45,7 +56,8 @@ class HostGroups(UIGroup):
         for group_name in groups:
             HostGroup(self, group_name, groups[group_name])
 
-    def _get_groups(self):
+    @property
+    def groups(self):
         return [child.name for child in self.children]
 
     def summary(self):
@@ -53,12 +65,22 @@ class HostGroups(UIGroup):
 
     def ui_command_create(self, group_name):
         """
-        Create a host group definition
+        Create a host group definition. Group names can be use up to 32
+        alphanumeric characters, including '_', '-' and '@'. Note that once a
+        group is it can not be renamed.
         """
         self.logger.debug("CMD: ../host-groups/ create {}".format(group_name))
 
         if group_name in self.groups:
             self.logger.error("Group {} already defined".format(group_name))
+            return
+
+        grp_regex = re.compile(
+            "^[\w\@\-\_]{{1,{}}}$".format(HostGroups.group_name_length))
+        if not grp_regex.search(group_name):
+            self.logger.error("Invalid group name - max of {} chars of "
+                              "alphanumeric and -,_,@ "
+                              "characters".format(HostGroups.group_name_length))
             return
 
         # this is a new group
@@ -82,8 +104,14 @@ class HostGroups(UIGroup):
 
     def ui_command_delete(self, group_name):
         """
-        Delete a host group definition
+        Delete a host group definition. The delete process will remove the group
+        definition and remove the group name association within any client.
+
+        Note the deletion of a group will not remove the lun masking already
+        defined to clients. If this is desired, it will need to be performed
+        manually once the group is deleted.
         """
+
         self.logger.debug("CMD: ../host-groups/ delete {}".format(group_name))
 
         if group_name not in self.groups:
@@ -121,22 +149,24 @@ class HostGroups(UIGroup):
 
         self.remove_child(child)
 
-    groups = property(_get_groups,
-                      doc="return a list of defined host groups")
-
 
 class HostGroup(UIGroup):
 
     help_intro = '''
-                 Hosts and disks may be added and removed from a host group
-                 definition.
+                 A host group provides a simple way to manage the LUN masking 
+                 of a number of iscsi clients as a single unit. The host group
+                 contains hosts (iscsi clients) and disks (rbd images). 
                  
-                 This is managed through the host and disk subcommands
+                 Once a host is defined to a group, it's lun masking must be 
+                 managed through the group. In fact attempts to manage the 
+                 disks of a client directly are blocked.
+                 
+                 The following commands enable you to manage the membership of
+                 the host group.
+
                  e.g.
-                 
                  host add|remove iqn.1994-05.com.redhat:rh7-client
                  disk add|remove rbd.disk_1
-                 
     '''
 
     valid_actions = ['add', 'remove']
@@ -153,22 +183,29 @@ class HostGroup(UIGroup):
 
     def ui_command_host(self, action, client_iqn):
         """
-        Add or remove a host from a host group
-        :return:
+        use the 'host' sub-command to add and remove hosts from a host group.
+        Adding a host will automatically map the host group's disks to that
+        specific host. Removing a host however, does not change the hosts
+        disk masking - it simply removes the host from group.
+
+        e.g.
+        host add|remove iqn.1994-05.com.redhat:rh7-client
         """
+
         if action not in HostGroup.valid_actions:
             self.logger.error("Invalid request - must be "
                               "host add|remove <client_iqn>")
             return
 
         # basic checks
-        ui_root = self.get_ui_root()
-        clients = ui_root.target.client_group
-        if client_iqn not in clients:
+        client_group = self._get_client_group()
+        client_map = client_group.client_map
+        if client_iqn not in client_map:
             self.logger.error("'{}' is not in the "
                               "configuration".format(client_iqn))
             return
-        current_group = clients[client_iqn].get('group_name', None)
+
+        current_group = client_map[client_iqn].group_name
         if action == 'add' and current_group:
             self.logger.error("'{}' already belongs to "
                               "'{}'".format(client_iqn,
@@ -202,13 +239,7 @@ class HostGroup(UIGroup):
         self.logger.debug("Updating the UI")
         if action == 'add':
             HostGroupMember(self, 'host', client_iqn)
-            clients[client_iqn]['group_name'] = self.name
-            # add disks in the group to the host
-            self.logger.debug('fetching the complete group definition')
-            group_info = self._fetch_group()
-            self.logger.debug('syncing group clients')
-            for disk in group_info.get('disks'):
-                self.update_clients_UI('add', disk)
+            self.update_clients_UI([client_iqn])
 
         elif action == 'remove':
             child = [child for child in self.children
@@ -217,33 +248,23 @@ class HostGroup(UIGroup):
 
         self.logger.info('ok')
 
-    def _fetch_group(self):
-        group_api = ('{}://{}:{}/api/hostgroup/'
-                     '{}'.format(self.http_mode,
-                                 "127.0.0.1",
-                                 settings.config.api_port,
-                                 self.name))
-        api = APIRequest(group_api)
-        api.get()
-        if api.response.status_code == 200:
-            return api.response.json()
-        else:
-            # problem getting hostgroup definition
-            pass
-
     def delete(self, child):
 
         if child.member_type == 'host':
-            ui_root = self.get_ui_root()
-            clients = ui_root.target.client_group
-            clients[child.name]['group_name'] = ''
+            client_group = self._get_client_group()
+            client = client_group.client_map[child.name]
+            client.group_name = ''
 
         self.remove_child(child)
 
     def ui_command_disk(self, action, disk_name):
         """
-        Add or remove a disk from a host group
-        :return:
+        use the 'disk' sub-command to add or remove a disk from a specific
+        host group. Removing disks should be done with care, as the remove
+        operation will be executed across all hosts defined to the host group.
+
+        e.g.
+        disk add|remove rbd.disk_1
         """
 
         if action not in HostGroup.valid_actions:
@@ -284,49 +305,38 @@ class HostGroup(UIGroup):
                      if child.name == disk_name][0]
             self.delete(child)
 
-        self.update_clients_UI(action, disk_name)
+        self.update_clients_UI(self.members)
 
         self.logger.info('ok')
 
-    def update_clients_UI(self, action, disk_name):
+    @property
+    def members(self):
+        return [child.name for child in self.children
+                if child.member_type == 'host']
 
-        self.logger.debug("process each member of the group")
-
-        grp_clients = [mbr.name for mbr in self.children
-                       if mbr.member_type == 'host']
-
+    def _get_client_group(self):
         ui_root = self.get_ui_root()
-        if action == 'add':
-            # let's get an updated version of the client/lun mapping
-            config = ui_root._get_config()
-            clients = config['clients']
+        # we only support one target, so take the first child
+        iscsi_target = list(ui_root.target.children)[0]
 
-        target_subtree = [child for child in ui_root.target.children][0]
-        clients_subtree = target_subtree.client_group
+        return iscsi_target.client_group
 
-        for client in clients_subtree.children:
-            if client.name in grp_clients:
-                if action == 'add':
-                    client_luns = clients[client.name].get('luns')
-                    client_ui_disks = [lun.rbd_name for lun in client.children]
-                    if disk_name in client_ui_disks:
-                        self.logger.debug("skipping add of {} to "
-                                          "{}".format(disk_name,
-                                                      client.name))
-                        continue
-                    else:
-                        lun_id = client_luns[disk_name].get('lun_id')
-                        self.logger.debug("adding {} to {}".format(disk_name,
-                                                                   client.name))
-                        client.add_lun(disk_name, lun_id)
+    def update_clients_UI(self, client_list):
+        self.logger.debug("rereading the config object")
+        root = self.get_ui_root()
+        config = root._get_config()
+        clients = config['clients']
 
-                else:
-                    # remove the disk from the client UI subtree
-                    self.logger.debug("removing {} from {}".format(disk_name,
-                                                                   client.name))
-                    mapped_lun = [lun for lun in client.children
-                                  if lun.rbd_name == disk_name][0]
-                    client.remove_lun(mapped_lun)
+        client_group = self._get_client_group()     # Clients Object
+        clients_to_update = [client for client in client_group.children
+                             if client.name in client_list]
+
+        # refresh the client with the new config
+        self.logger.debug("resync'ing client lun maps")
+        for client in clients_to_update:
+            client.drop_luns()
+            client.luns = clients[client.client_iqn].get('luns', {})
+            client.refresh_luns()
 
     def summary(self):
         counts = {'disk': 0, 'host': 0}
@@ -338,7 +348,13 @@ class HostGroup(UIGroup):
 
 
 class HostGroupMember(UINode):
-    help_intro = "hello"
+    help_intro = '''
+                    The entries here show the hosts and disks that are held
+                    within a specific host group definition. Care should be 
+                    taken when removing disks from a host group, as the remove
+                    operation will be performed across each client within the 
+                    group.
+                 '''
 
     def __init__(self, parent, member_type, name):
         UINode.__init__(self, name, parent)
