@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 
 # import ceph_iscsi_config.settings as settings
 import json
@@ -6,8 +6,6 @@ import json
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.utils import ListComparison
-
-__author__ = 'pcuzner@redhat.com'
 
 
 class Group(object):
@@ -44,12 +42,19 @@ class Group(object):
         self.group_members = members
         self.disks = disks
 
-        self.logger.info(self.group_members)
-        self.logger.info(self.group_name)
-        self.logger.info(self.disks)
+        self.logger.debug("Group : name={}".format(self.group_name))
+        self.logger.debug("Group : members={}".format(self.group_members))
+        self.logger.debug("Group : disks={}".format(self.disks))
 
-    @staticmethod
-    def _check_config(logger, config_object):
+    @classmethod
+    def _check_config(cls, logger, config_object):
+        """
+        look at the current config object to determine whether it needs the
+        group section seeding
+        :param logger: (logging object) destination for log messages
+        :param config_object: Instance of the Config class
+        :return: Null
+        """
 
         if 'groups' in config_object.config:
             logger.debug("Config object contains a 'groups' section - config "
@@ -76,154 +81,218 @@ class Group(object):
         self.error_msg = error_msg
         self.logger.debug("Error: {}".format(self.error_msg))
 
-    def _valid_client(self, client_iqn, config):
+    def _valid_client(self, action, client_iqn):
+        """
+        validate the addition of a specific client
+        :param action: (str) add or remove request
+        :param client_iqn: (str) iqn of the client to add tot he group
+        :param config: (dict) dict representation of the config object
+        :return: (bool) true/false whether the client should be accepted
+        """
 
-        client = config['clients'].get(client_iqn, {})
-        if not client:
-            self._set_error("Group member ({}) doesn't "
-                            "exist".format(client_iqn))
-            return False
-        elif client.get('luns'):
-            self._set_error("Client '{}' already has luns. "
-                            "Only clients without prior lun maps "
-                            "can be added to a group".format(client_iqn))
-            return False
-        elif client.get('group_name'):
-            self._set_error("Client already assigned to {} - a client "
-                            "can only belong to one host "
-                            "group".format(client.get('group_name')))
-            return False
+        config = self.config.config     # use a local var for readability
+
+        self.logger.debug("checking '{}'".format(client_iqn))
+        # to validate the request, pass through a 'negative' filter
+
+        if action == 'add':
+            client = config['clients'].get(client_iqn, {})
+            if not client:
+                self._set_error("client '{}' doesn't exist".format(client_iqn))
+                return False
+            elif client.get('luns'):
+                self._set_error("Client '{}' already has luns. "
+                                "Only clients without prior lun maps "
+                                "can be added to a group".format(client_iqn))
+                return False
+            elif client.get('group_name'):
+                self._set_error("Client already assigned to {} - a client "
+                                "can only belong to one host "
+                                "group".format(client.get('group_name')))
+                return False
+        else:
+            # client_iqn must exist in the group
+            if client_iqn not in config['groups'][self.group_name].get('members'):
+                self._set_error("client '{}' is not a member of "
+                                "{}".format(client_iqn,
+                                            self.group_name))
+                return False
+
+        # to reach here the request is considered valid
+        self.logger.debug("'{}' client '{}' for group '{}'"
+                          " is valid".format(action,
+                                             client_iqn,
+                                             self.group_name))
+        return True
+
+    def _valid_disk(self, action, disk):
+
+        self.logger.debug("checking disk '{}'".format(disk))
+        if action == 'add':
+
+            if disk not in self.config.config['disks']:
+                self._set_error("disk '{}' doesn't exist".format(disk))
+                return False
+        else:
+            if disk not in self.config.config['groups'][self.group_name]['disks']:
+                self._set_error("disk '{}' is not in the group".format(disk))
+                return False
 
         return True
 
-    def apply(self):
+    def _next_lun(self):
+        """
+        Look at the disk list for the group and return the 1st available free
+        LUN id used for adding disks to the group
+        :return: (int) lun Id
+        """
 
+        lun_range = list(range(0, 256, 1))      # 0->255
+        group = self.config.config['groups'][self.group_name]
+        group_disks = group.get('disks')
+        for d in group_disks:
+            lun_range.remove(group_disks[d].get('lun_id'))
+
+        return lun_range[0]
+
+    def apply(self):
+        """
+        setup/manage the group definition
+        :return: NULL
+        """
+        group_seed = {
+            "members": [],
+            "disks": {}
+        }
+
+        new_group = False
         config_dict = self.config.config
 
-        if self.group_name not in self.config.config['groups']:
+        if self.group_name not in config_dict['groups']:
 
             # New Group definition
-            self.logger.debug("Group mgmt processing new request for "
-                              "{}".format(self.group_name))
+            self.logger.debug("Processing request for new group "
+                              "'{}'".format(self.group_name))
             if len(set(self.group_members)) != len(self.group_members):
                 self._set_error("Member must contain unique clients - no "
-                                "duplicatoion")
+                                "duplication")
                 return
-
-            # this is a new group definition, and must have members
-            if self.group_members:
-                self.logger.debug("Validating group members :{}".format(self.group_members))
-                for mbr in self.group_members:
-                    if not self._valid_client(mbr, config_dict):
-                        return
-            else:
-                self.logger.debug("Group defined without members")
-
-            self.logger.debug("Validating requested disks - {}".format(self.disks))
-            bad_disks = [disk_name for disk_name in self.disks
-                         if disk_name not in self.config.config['disks']]
-
-            if not self.disks:
-                self.logger.debug("Group defined without any disks")
-            elif bad_disks:
-                self._set_error("disk(s) {} do not"
-                                " exist".format(','.join(bad_disks)))
-                return
-
-            # Group definition is ok to use
-            self.logger.info("Group request is proceeding")
-
-            # update the respective client definitions
-            self.logger.debug("Applying the group definition for "
-                              "{}".format(self.group_name))
-            image_list = self.disks
-            for mbr in self.group_members:
-
-                self.update_client(mbr, image_list)
-                if self.error:
-                    return
 
             # update the config object to include the new group definition
-            self.logger.debug("Adding group definition to the config object")
-            group_def = {"members": self.group_members,
-                         "disks": self.disks}
-            self.config.add_item("groups", self.group_name, group_def)
-            self.config.commit()
+            self.logger.debug("New group definition required")
 
+            new_group = True
+            config_dict['groups'][self.group_name] = group_seed
+
+        # Now the group definition is at least seeded, so let's look at the
+        # member and disk information passed
+
+        # validate the members exist
+        # validate the disks exist
+        this_group = config_dict['groups'][self.group_name]
+
+        members = ListComparison(this_group.get('members'),
+                                 self.group_members)
+        disks = ListComparison(this_group.get('disks').keys(),
+                               self.disks)
+
+        if set(self.disks) != set(this_group.get('disks')) or \
+            set(self.group_members) != set(this_group.get('members')):
+            group_changed = True
         else:
+            group_changed = False
 
-            # Existing Group definition update
-            self.logger.debug("Updating existing group: "
-                              "{}".format(self.group_name))
 
-            this_group = self.config.config['groups'][self.group_name]
-            members = ListComparison(this_group.get('members'),
-                                     self.group_members)
-            disks = ListComparison(this_group.get('disks'),
-                                   self.disks)
+        if not group_changed and not new_group:
+            # no changes required
+            self.logger.info("Current group definition matches request "
+                             "- no changes needed")
+            return
 
-            group_changes = (members.added | members.removed | disks.added |
-                             disks.removed)
-
-            if not group_changes:
-                # no changes required
-                self.logger.info("Current group definition matches request "
-                                 "- no changes needed")
+        self.logger.info("Validating client membership")
+        for mbr in members.added:
+            if not self._valid_client('add', mbr):
+                self.logger.error("'{}' failed checks".format(mbr))
+                return
+        for mbr in members.removed:
+            if not self._valid_client('remove', mbr):
+                self.logger.error("'{}' failed checks".format(mbr))
                 return
 
-            for mbr in members.added:
-                self.logger.debug("validating '{}' is ok to add to "
-                                  "group {}".format(mbr, self.group_name))
+        self.logger.debug("Client membership checks passed")
+        self.logger.debug("clients added are : {}".format(members.added))
+        self.logger.debug("clients removed are: {}".format(members.removed))
 
-                if not self._valid_client(mbr, config_dict):
-                    self.logger.debug("'{}' failed checks".format(mbr))
-                    return
+        # client membership is valid, check disks
+        self.logger.info("Validating disk membership")
+        for disk_name in disks.added:
+            if not self._valid_disk('add', disk_name):
+                self.logger.error("'{}' failed checks".format(disk_name))
+                return
+        for disk_name in disks.removed:
+            if not self._valid_disk('remove', disk_name):
+                self.logger.error("'{}' failed checks".format(disk_name))
+                return
 
+        self.logger.info("Disk membership checks passed")
+        self.logger.debug("disks added are : {}".format(disks.added))
+        self.logger.debug("disks removed are: {}".format(disks.removed))
 
-            # At this point we know there are changes to make
-            all_disks = self.config.config['disks'].keys()
-            all_clients = self.config.config['clients'].keys()
+        # client(s) and disk(s) passed validation
+        # handle disk membership updates first, then clients
+        group_disks = this_group.get('disks', {})
+        if disks.added:
+            # update the groups disk list
+            for disk in disks.added:
+                lun_seq = self._next_lun()
+                group_disks[disk] = {"lun_id": lun_seq}
+                self.logger.debug("- adding '{}' to group '{}' @ "
+                                  "lun id {}".format(disk,
+                                                     self.group_name,
+                                                     lun_seq))
 
-            if self.disks:
-                if not disks.added.issubset(all_disks):
-                    self._set_error("Disks must exist in the configuration")
-                    return
-            self.logger.debug("members added {}".format(members.added))
-            self.logger.debug("clients are {}".format(all_clients))
-            if self.group_members:
-                if not members.added.issubset(all_clients):
-                    self._set_error("Clients (members) must exist in the "
-                                    "configuration")
-                    return
+        if disks.removed:
+            # remove disk from the group definition
+            for disk in disks.removed:
+                del group_disks[disk]
+                self.logger.debug("- removed '{}' from group "
+                                  "{}".format(disk,
+                                              self.group_name))
 
-            # at this point the disk list and member list are valid
-            image_list = self.disks
+        # sort the groups disks by 'lun_id'
+        # FIXME dict sort is python2 specific
+        image_list = sorted(group_disks.iteritems(),
+                              key=lambda (k,v): v['lun_id'])
 
-            if members.added:
-                # add the group_name to the client's meta data
-                for client_iqn in members.added:
-                    self.add_client(client_iqn)
+        # handle client membership
+        if members.changed:
+            for client_iqn in members.added:
+                self.add_client(client_iqn)
+                self.update_client(client_iqn, image_list)
+            for client_iqn in members.removed:
+                self.remove_client(client_iqn)
 
-            if len(disks.added | disks.removed) > 0:
-                # process all clients in the group with the new
-                # image list
-                for mbr in self.group_members:
-
-                    self.update_client(mbr, image_list)
+        # handle disk changes
+        if disks.changed:
+            # process all *existing* clients in the group with the
+            # updated image list
+            for client_iqn in self.group_members:
+                if client_iqn not in members.added:
+                    self.update_client(client_iqn, image_list)
                     if self.error:
                         return
 
-            if members.removed:
-                for mbr in members.removed:
-                    self.remove_client(mbr)
-                # remove the member(s) from the group
+        this_group['members'] = self.group_members
+        this_group['disks'] = group_disks
 
-            this_group['members'] = self.group_members
-            this_group['disks'] = self.disks
-
-            self.logger.debug("Group set to {}".format(json.dumps(this_group)))
-            self.config.update_item("groups", self.group_name, this_group)
-            self.config.commit()
+        self.logger.debug("Group updated to {}".format(json.dumps(this_group)))
+        if new_group:
+            self.config.add_item("groups", self.group_name,
+                                 this_group)
+        else:
+            self.config.update_item("groups", self.group_name,
+                                    this_group)
+        self.config.commit()
 
     def add_client(self, client_iqn):
         client_metadata = self.config.config['clients'][client_iqn]
