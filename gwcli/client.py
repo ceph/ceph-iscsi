@@ -9,16 +9,22 @@ import ceph_iscsi_config.settings as settings
 
 import rtslib_fb.root as root
 
-# FIXME - this ignores the warning issued when verify=False is used
+# this ignores the warning issued when verify=False is used
 from requests.packages import urllib3
-
-__author__ = 'Paul Cuzner'
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+
 class Clients(UIGroup):
     help_intro = '''
-                 Clients bla
+                 The host section shows the clients that have been defined 
+                 across each of the gateways in the configuration.
+                 
+                 Clients may be created or deleted, but once defined they can 
+                 not be renamed.
+                 
+                 e.g.
+                 create iqn.1994-05.com.redhat:rh7-client4
                  '''
 
     def __init__(self, parent):
@@ -27,6 +33,7 @@ class Clients(UIGroup):
         # lun_map dict is indexed by the rbd name, pointing to a list
         # of clients that have that rbd allocated.
         self.lun_map = {}
+        self.client_map = {}
 
         # record the shortcut
         shortcut = self.shell.prefs['bookmarks'].get('hosts', None)
@@ -48,6 +55,7 @@ class Clients(UIGroup):
         context of the new client definition for auth and disk configuration
         operations.
 
+        e.g.
         > create <client_iqn>
 
         """
@@ -84,7 +92,8 @@ class Clients(UIGroup):
         the client has logged out of the iscsi gateways. Attempting to delete a
         client that has an open session will fail the request
 
-        > delete <client_iqn>
+        e.g.
+        delete <client_iqn>
 
         """
 
@@ -123,7 +132,8 @@ class Clients(UIGroup):
 
     def update_lun_map(self, action, rbd_path, client_iqn):
         """
-        Update the lun_map lookup dict
+        Update the lun_map lookup dict, each element points to a 'set' of
+        clients that have the lun mapped
         :param action: add or remove
         :param rbd_path: disk name (str) i.e. <pool>.<rbd_image>
         :param client_iqn: client IQN (str)
@@ -151,7 +161,7 @@ class Clients(UIGroup):
                                  "rbd from lun_map that is not defined")
 
     def delete(self, child):
-
+        del self.client_map[child.client_iqn]
         self.remove_child(child)
 
     def summary(self):
@@ -159,6 +169,19 @@ class Clients(UIGroup):
 
 
 class Client(UINode):
+    help_intro = '''
+                 Client definitions can be managed through two sub-commands;
+                 'auth' and 'disk'. These commands allow you to manage the 
+                 CHAP authentication for the client (1-WAY) and change the 
+                 rbd images masked to a specific client.
+                  
+                 Lun masking automatically associates a specific LUN id to the
+                 for an rbd image, simplifying the workflow. The lun id's 
+                 assigned can be seen by running the 'info' command. This will 
+                 show all the clients details that are stored within the 
+                 iscsi gateway configuration.
+                 
+                 '''
 
     display_attributes = ["client_iqn", "logged_in", "auth",
                           "group_name", "luns"]
@@ -166,6 +189,8 @@ class Client(UINode):
     def __init__(self, parent, client_iqn, client_settings):
         UINode.__init__(self, client_iqn, parent)
         self.client_iqn = client_iqn
+        self.parent.client_map[client_iqn] = self
+        self.group_name = ''
 
         for k, v in client_settings.iteritems():
             self.__setattr__(k, v)
@@ -175,6 +200,14 @@ class Client(UINode):
             self.chap = CHAP(self.auth['chap'])
             self.auth['chap'] = self.chap.chap_str
 
+        self.refresh_luns()
+
+    def drop_luns(self):
+        luns = self.children.copy()
+        for lun in luns:
+            self.remove_lun(lun)
+
+    def refresh_luns(self):
         for rbd_path in self.luns.keys():
             lun_id = self.luns[rbd_path]['lun_id']
             self.parent.update_lun_map('add', rbd_path, self.client_iqn)
@@ -187,6 +220,9 @@ class Client(UINode):
             if sess['parent_nodeacl'].node_wwn == self.client_iqn:
                 return sess['state']
         return ''
+
+    def __str__(self):
+        return self.get_info()
 
     def summary(self):
 
@@ -222,13 +258,17 @@ class Client(UINode):
         Client authentication can be set to use CHAP by supplying the
         a string of the form <username>/<password>
 
-        > auth nochap | chap=myserver/mypassword2016
+        e.g.
+        auth nochap | chap=username/password
 
-        username ... The username is freeform, but would normally be the
-                     hostname or iqn
+        username ... The username is freeform, but would typically be the
+                     host's shortname or iqn
         password ... the password must be between 12-16 chars in length
-                     containing alphanumeric characters plus the following
+                     containing alphanumeric characters, plus the following
                      special characters @,_,-
+
+        Specifying 'nochap' will remove chap authentication for the client
+        across all gateways.
 
         """
 
@@ -273,14 +313,19 @@ class Client(UINode):
     def ui_command_disk(self, action='add', disk=None, size=None):
         """
         Disks can be added or removed from the client one at a time using
-        the disk sub-command. Note that the disk MUST already be defined
+        the 'disk' sub-command. Note that the disk MUST already be defined
         within the configuration
 
-        > disk add|remove <disk_name>
+        e.g.
+        disk add|remove <disk_name>
 
         Adding a disk will result in the disk occupying the client's next
-        available lun id.
-        Removing a disk will preserve existing lun id allocations
+        available lun id. Once allocated removing a LUN will not change the
+        LUN id associations for the client.
+
+        Note that if the client is a member of a host group, disk management
+        *must* be performed at the group level. Attempting to add/remove disks
+        at the client level will fail.
 
         """
 
