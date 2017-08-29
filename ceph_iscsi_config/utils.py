@@ -324,19 +324,36 @@ class ListComparison(object):
     def __init__(self, current_list, new_list):
         """
         compare two lists to identify changes
-        :param current_list:
-        :param new_list:
+        :param current_list : list of current values (existing state)
+        :param new_list: list if new values (desired state)
         """
         self.current = current_list
         self.new = new_list
+        self.changed = False
 
-    def _added(self):
-        return set(self.new) - set(self.current)
+    @property
+    def added(self):
+        """
+        provide a list of added items
+        :return: (list) in the sequence provided
+        """
+        additions = set(self.new) - set(self.current)
+        if len(additions) > 0:
+            self.changed = True
 
-    def _removed(self):
-        return set(self.current) - set(self.new)
+        # simply returning the result of the set comparison does not preserve
+        # the list item sequence. By iterating over the new list we can
+        # return the expected sequence
+        return [item for item in self.new if item in additions]
 
-    added = property(_added,
-                     doc="return a list of added items to the list")
-    removed = property(_removed,
-                       doc="return a list of items removed from the list")
+    @property
+    def removed(self):
+        """
+        calculate the removed items between two lists using set comparisons
+        :return: (list) removed items
+        """
+        removals = set(self.current) - set(self.new)
+        if len(removals) > 0:
+            self.changed = True
+        return list(removals)
+
