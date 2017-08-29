@@ -33,8 +33,6 @@ from gwcli.utils import (this_host, APIRequest, valid_gateway,
 
 from gwcli.client import Client
 
-__author__ = "pcuzner@redhat.com"
-
 app = Flask(__name__)
 
 
@@ -1116,7 +1114,7 @@ def hostgroup(group_name):
         if group_name in config.config['groups']:
             host_group = config.config['groups'].get(group_name)
             current_members = host_group.get('members')
-            current_disks = host_group.get('disks')
+            current_disks = host_group.get('disks').keys()
         else:
             current_members = []
             current_disks = []
