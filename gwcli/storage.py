@@ -108,8 +108,10 @@ class Disks(UIGroup):
                           "be replicated".format(pool))
         return False
 
-    def create_disk(self, pool=None, image=None, size=None, count=None,
+    def create_disk(self, pool=None, image=None, size=None, count=1,
                     parent=None):
+
+        rc = 0
 
         if not parent:
             parent = self
@@ -169,9 +171,11 @@ class Disks(UIGroup):
                 else:
                     raise GatewayAPIError("Unable to retrieve disk details "
                                           "for '{}' from the API".format(disk_key))
-
         else:
             self.logger.error("Failed : {}".format(api.response.json()['message']))
+            rc = 8
+
+        return rc
 
     def find_hosts(self):
         hosts = []

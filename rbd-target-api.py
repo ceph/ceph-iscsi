@@ -33,8 +33,6 @@ from gwcli.utils import (this_host, APIRequest, valid_gateway,
 
 from gwcli.client import Client
 
-__author__ = "pcuzner@redhat.com"
-
 app = Flask(__name__)
 
 
@@ -555,19 +553,20 @@ def disk(image_id):
             return jsonify(message="rbd image {} not "
                                    "found".format(image_id)), 404
 
-    elif request.method == 'PUT':
-        # This is a create/resize operation, so first confirm the gateways
-        # are in place (we need gateways to perform the lun masking tasks
-        gateways = [key for key in config.config['gateways']
-                    if isinstance(config.config['gateways'][key], dict)]
-        logger.debug("All gateways: {}".format(gateways))
+    # This is a create/resize operation, so first confirm the gateways
+    # are in place (we need gateways to perform the lun masking tasks
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("All gateways: {}".format(gateways))
 
-        # Any disk operation needs at least 2 gateways to be present
-        if len(gateways) < 2:
-            msg = "at least 2 gateways must exist before disk operations " \
-                  "are permitted"
-            logger.warning("disk create request failed: {}".format(msg))
-            return jsonify(message=msg), 400
+    # Any disk operation needs at least 2 gateways to be present
+    if len(gateways) < 2:
+        msg = "at least 2 gateways must exist before disk operations " \
+              "are permitted"
+        logger.warning("disk create request failed: {}".format(msg))
+        return jsonify(message=msg), 400
+
+    if request.method == 'PUT':
 
         # at this point we have a disk request, and the gateways are available
         # for the LUN masking operations
@@ -1116,7 +1115,7 @@ def hostgroup(group_name):
         if group_name in config.config['groups']:
             host_group = config.config['groups'].get(group_name)
             current_members = host_group.get('members')
-            current_disks = host_group.get('disks')
+            current_disks = host_group.get('disks').keys()
         else:
             current_members = []
             current_disks = []

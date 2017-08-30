@@ -246,8 +246,9 @@ def valid_disk(**kwargs):
             new_disks = set(['{}{}'.format(disk_key, ctr)
                              for ctr in range(1, limit)])
 
-        if new_disks.issubset(set(config['disks'])):
-            return "rbd image(s) of that name/prefix are already defined"
+        if any(new_disk in config['disks'] for new_disk in new_disks):
+            return ("at least one rbd image(s) with that name/prefix is "
+                    "already defined")
 
         gateways_defined = len([key for key in config['gateways']
                                if isinstance(config['gateways'][key],

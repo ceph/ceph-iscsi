@@ -69,7 +69,10 @@ class UINode(UIGroup):
 
         display_text = ''
 
-        field_list = self.display_attributes if self.display_attributes else []
+        if not self.display_attributes:
+            return "'info' not available for this item"
+
+        field_list = self.display_attributes
         max_field_size = len(max(field_list, key=len))
         for k in field_list:
             attr_label = k.replace('_', ' ').title()
