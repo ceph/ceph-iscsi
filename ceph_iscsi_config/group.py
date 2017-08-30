@@ -86,7 +86,6 @@ class Group(object):
         validate the addition of a specific client
         :param action: (str) add or remove request
         :param client_iqn: (str) iqn of the client to add tot he group
-        :param config: (dict) dict representation of the config object
         :return: (bool) true/false whether the client should be accepted
         """
 
