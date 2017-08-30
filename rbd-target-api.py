@@ -553,19 +553,20 @@ def disk(image_id):
             return jsonify(message="rbd image {} not "
                                    "found".format(image_id)), 404
 
-    elif request.method == 'PUT':
-        # This is a create/resize operation, so first confirm the gateways
-        # are in place (we need gateways to perform the lun masking tasks
-        gateways = [key for key in config.config['gateways']
-                    if isinstance(config.config['gateways'][key], dict)]
-        logger.debug("All gateways: {}".format(gateways))
+    # This is a create/resize operation, so first confirm the gateways
+    # are in place (we need gateways to perform the lun masking tasks
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("All gateways: {}".format(gateways))
 
-        # Any disk operation needs at least 2 gateways to be present
-        if len(gateways) < 2:
-            msg = "at least 2 gateways must exist before disk operations " \
-                  "are permitted"
-            logger.warning("disk create request failed: {}".format(msg))
-            return jsonify(message=msg), 400
+    # Any disk operation needs at least 2 gateways to be present
+    if len(gateways) < 2:
+        msg = "at least 2 gateways must exist before disk operations " \
+              "are permitted"
+        logger.warning("disk create request failed: {}".format(msg))
+        return jsonify(message=msg), 400
+
+    if request.method == 'PUT':
 
         # at this point we have a disk request, and the gateways are available
         # for the LUN masking operations
