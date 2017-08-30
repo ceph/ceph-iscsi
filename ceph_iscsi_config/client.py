@@ -16,8 +16,6 @@ import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.common import Config, ansible_control
 from ceph_iscsi_config.utils import encryption_available
 
-__author__ = 'pcuzner@redhat.com'
-
 
 class GWClient(object):
     """
@@ -35,15 +33,29 @@ class GWClient(object):
         Instantiate an instance of an LIO client
         :param client_iqn: (str) iscsi iqn string
         :param image_list: (list) list of rbd images (pool/image) to attach
-                           to this client
+                           to this client or list of tuples (disk, lunid)
         :param chap: (str) chap credentials in the format 'user/password'
         :return:
         """
 
         self.iqn = client_iqn
+        self.lun_lookup = {}        # only used for hostgroup based definitions
+        self.requested_images = []
 
-        # images are in comma separated pool.image_name format
-        self.requested_images = image_list
+        # image_list is normally a list of strings (pool.image_name) but
+        # group processing forces a specific lun id allocation to masked disks
+        # in this scenario the image list is a tuple
+        if image_list:
+
+            if isinstance(image_list[0], tuple):
+                # tuple format ('disk_name', {'lun_id': 0})...
+                for disk_item in image_list:
+                    disk_name = disk_item[0]
+                    lun_id = disk_item[1].get('lun_id')
+                    self.requested_images.append(disk_name)
+                    self.lun_lookup[disk_name] = lun_id
+            else:
+                self.requested_images = image_list
 
         self.chap = chap                        # parameters for auth
         self.mutual = ''
@@ -256,7 +268,11 @@ class GWClient(object):
         if image in self.metadata['luns'].keys():
             lun_id = self.metadata['luns'][image]['lun_id']
         else:
-            lun_id = self.lun_id_list[0]     # pick the lowest available lun ID
+            if image in self.lun_lookup:
+                # this indicates a lun map for a group managed client
+                lun_id = self.lun_lookup[image]
+            else:
+                lun_id = self.lun_id_list[0]  # pick lowest available lun ID
 
         self.logger.debug("(Client._add_lun) Adding {} to {} at "
                           "id {}".format(image, self.iqn, lun_id))
