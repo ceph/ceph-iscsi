@@ -175,7 +175,7 @@ class Client(UINode):
                  CHAP authentication for the client (1-WAY) and change the 
                  rbd images masked to a specific client.
                   
-                 Lun masking automatically associates a specific LUN id to the
+                 LUN masking automatically associates a specific LUN id to the
                  for an rbd image, simplifying the workflow. The lun id's 
                  assigned can be seen by running the 'info' command. This will 
                  show all the clients details that are stored within the 
@@ -313,11 +313,12 @@ class Client(UINode):
     def ui_command_disk(self, action='add', disk=None, size=None):
         """
         Disks can be added or removed from the client one at a time using
-        the 'disk' sub-command. Note that the disk MUST already be defined
-        within the configuration
+        the 'disk' sub-command. Note that if the disk does not currently exist
+        in the configuration, the cli will attempt to create it for you.
 
         e.g.
-        disk add|remove <disk_name>
+        disk add <disk_name> <size>
+        disk remove <disk_name>
 
         Adding a disk will result in the disk occupying the client's next
         available lun id. Once allocated removing a LUN will not change the
