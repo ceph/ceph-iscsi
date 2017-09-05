@@ -1,6 +1,6 @@
 Name:           ceph-iscsi-config
 Version:        2.3
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
 License:        GPLv3
@@ -57,6 +57,9 @@ install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Mon Sep 04 2017 Paul Cuzner <pcuzner@redhat.com> - 2.3-2
+- host group management updates
+
 * Tue Aug 15 2017 Jason Dillaman <dillaman@redhat.com> - 2.3-1
 - group: additional debug msgs added and validation logic changed
 - settings : fix missing default value api_ssl_verify

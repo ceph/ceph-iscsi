@@ -42,6 +42,11 @@ class Group(object):
         self.group_members = members
         self.disks = disks
 
+        if group_name in self.config.config['groups']:
+            self.new_group = False
+        else:
+            self.new_group = True
+
         self.logger.debug("Group : name={}".format(self.group_name))
         self.logger.debug("Group : members={}".format(self.group_members))
         self.logger.debug("Group : disks={}".format(self.disks))
@@ -92,8 +97,8 @@ class Group(object):
         config = self.config.config     # use a local var for readability
 
         self.logger.debug("checking '{}'".format(client_iqn))
-        # to validate the request, pass through a 'negative' filter
 
+        # to validate the request, pass through a 'negative' filter
         if action == 'add':
             client = config['clients'].get(client_iqn, {})
             if not client:
@@ -164,12 +169,11 @@ class Group(object):
             "disks": {}
         }
 
-        new_group = False
         config_dict = self.config.config
 
-        if self.group_name not in config_dict['groups']:
+        if self.new_group:
 
-            # New Group definition
+            # New Group definition, so seed it
             self.logger.debug("Processing request for new group "
                               "'{}'".format(self.group_name))
             if len(set(self.group_members)) != len(self.group_members):
@@ -177,17 +181,14 @@ class Group(object):
                                 "duplication")
                 return
 
-            # update the config object to include the new group definition
             self.logger.debug("New group definition required")
 
-            new_group = True
+            # new_group = True
             config_dict['groups'][self.group_name] = group_seed
 
         # Now the group definition is at least seeded, so let's look at the
         # member and disk information passed
 
-        # validate the members exist
-        # validate the disks exist
         this_group = config_dict['groups'][self.group_name]
 
         members = ListComparison(this_group.get('members'),
@@ -201,44 +202,57 @@ class Group(object):
         else:
             group_changed = False
 
+        if group_changed or self.new_group:
 
-        if not group_changed and not new_group:
+            if self.valid_request(members, disks):
+                self.update_metadata(members, disks)
+            else:
+                self._set_error("Group request failed validation")
+                return
+
+        else:
             # no changes required
-            self.logger.info("Current group definition matches request "
-                             "- no changes needed")
-            return
+            self.logger.info("Current group definition matches request")
+
+        self.enforce_policy()
+
+    def valid_request(self, members, disks):
 
         self.logger.info("Validating client membership")
         for mbr in members.added:
             if not self._valid_client('add', mbr):
                 self.logger.error("'{}' failed checks".format(mbr))
-                return
+                return False
         for mbr in members.removed:
             if not self._valid_client('remove', mbr):
                 self.logger.error("'{}' failed checks".format(mbr))
-                return
+                return False
 
         self.logger.debug("Client membership checks passed")
-        self.logger.debug("clients added are : {}".format(members.added))
-        self.logger.debug("clients removed are: {}".format(members.removed))
+        self.logger.debug("clients to add : {}".format(members.added))
+        self.logger.debug("clients to remove : {}".format(members.removed))
 
         # client membership is valid, check disks
         self.logger.info("Validating disk membership")
         for disk_name in disks.added:
             if not self._valid_disk('add', disk_name):
                 self.logger.error("'{}' failed checks".format(disk_name))
-                return
+                return False
         for disk_name in disks.removed:
             if not self._valid_disk('remove', disk_name):
                 self.logger.error("'{}' failed checks".format(disk_name))
-                return
+                return False
 
         self.logger.info("Disk membership checks passed")
-        self.logger.debug("disks added are : {}".format(disks.added))
-        self.logger.debug("disks removed are: {}".format(disks.removed))
+        self.logger.debug("disks to add : {}".format(disks.added))
+        self.logger.debug("disks to remove : {}".format(disks.removed))
 
-        # client(s) and disk(s) passed validation
-        # handle disk membership updates first, then clients
+        return True
+
+    def update_metadata(self, members, disks):
+
+        config_dict = self.config.config
+        this_group = config_dict['groups'].get(self.group_name, {})
         group_disks = this_group.get('disks', {})
         if disks.added:
             # update the groups disk list
@@ -258,40 +272,57 @@ class Group(object):
                                   "{}".format(disk,
                                               self.group_name))
 
-        # sort the groups disks by 'lun_id'
-        # FIXME dict sort is python2 specific
-        image_list = sorted(group_disks.iteritems(),
-                              key=lambda (k,v): v['lun_id'])
+        if disks.added or disks.removed:
+            # update each clients meta data
+            self.logger.debug("updating clients LUN masking with "
+                              "{}".format(json.dumps(group_disks)))
+
+            for client_iqn in self.group_members:
+                self.update_disk_md(client_iqn, group_disks)
 
         # handle client membership
         if members.changed:
             for client_iqn in members.added:
                 self.add_client(client_iqn)
-                self.update_client(client_iqn, image_list)
+                self.update_disk_md(client_iqn, group_disks)
             for client_iqn in members.removed:
                 self.remove_client(client_iqn)
-
-        # handle disk changes
-        if disks.changed:
-            # process all *existing* clients in the group with the
-            # updated image list
-            for client_iqn in self.group_members:
-                if client_iqn not in members.added:
-                    self.update_client(client_iqn, image_list)
-                    if self.error:
-                        return
 
         this_group['members'] = self.group_members
         this_group['disks'] = group_disks
 
-        self.logger.debug("Group updated to {}".format(json.dumps(this_group)))
-        if new_group:
+        self.logger.debug("Group '{}' updated to "
+                          "{}".format(self.group_name,
+                                      json.dumps(this_group)))
+        if self.new_group:
             self.config.add_item("groups", self.group_name,
                                  this_group)
         else:
             self.config.update_item("groups", self.group_name,
                                     this_group)
         self.config.commit()
+
+
+    def enforce_policy(self):
+
+        config_dict = self.config.config
+        this_group = config_dict['groups'][self.group_name]
+        group_disks = this_group.get('disks')
+        host_group = this_group.get('members')
+
+        # FIXME this approach is python2 specific
+        image_list = sorted(group_disks.iteritems(),
+                              key=lambda (k,v): v['lun_id'])
+
+        for client_iqn in host_group:
+            self.update_client(client_iqn, image_list)
+            if self.error:
+                # Applying the policy failed, so report and abort
+                self.logger.error("Unable to apply policy to {} "
+                                  ": {}".format(client_iqn,
+                                                self.error_msg))
+                return
+
 
     def add_client(self, client_iqn):
         client_metadata = self.config.config['clients'][client_iqn]
@@ -300,28 +331,30 @@ class Group(object):
         self.logger.info("Added {} to group {}".format(client_iqn,
                                                        self.group_name))
 
+    def update_disk_md(self, client_iqn, group_disks):
+        md = self.config.config['clients'].get(client_iqn)
+        md['luns'] = group_disks
+        self.config.update_item("clients", client_iqn, md)
+        self.logger.info("updated {} disk map to "
+                         "{}".format(client_iqn,
+                                     json.dumps(group_disks)))
+
     def update_client(self, client_iqn, image_list):
 
         client = GWClient(self.logger, client_iqn, image_list, '')
-        client.define_client()                          # set up clients ACL
+        client.define_client()                          # sets up tpg lun list
 
-        # grab the metadata from the current definition
+        # grab the client's metadata from the config (needed by setup_luns)
         client.metadata = self.config.config['clients'][client_iqn]
         client.setup_luns()
 
         if client.error:
             self._set_error(client.error_msg)
-            return
-        else:
-            self.logger.info("Updating config object for "
-                             "client '{}'".format(client_iqn))
-            client.metadata['group_name'] = self.group_name
-            self.config.update_item("clients", client_iqn, client.metadata)
 
     def remove_client(self, client_iqn):
         client_md = self.config.config["clients"][client_iqn]
 
-        # remove the group_name setting from each client
+        # remove the group_name setting from the client
         client_md['group_name'] = ''
         self.config.update_item("clients", client_iqn, client_md)
         self.logger.info("Removed {} from group {}".format(client_iqn,
