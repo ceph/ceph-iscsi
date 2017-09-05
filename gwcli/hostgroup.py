@@ -93,11 +93,14 @@ class HostGroups(UIGroup):
         api = APIRequest(group_api)
         api.put()
         if api.response.status_code != 200:
-            self.logger.error("Failed to create the host group")
+            self.logger.error("Failed : "
+                              "{}".format(api.response.json()["message"]))
             return
 
         self.logger.debug('Adding group to the UI')
         HostGroup(self, group_name)
+
+        self.logger.info('ok')
 
         # Switch to the new group
         return self.ui_command_cd(group_name)
@@ -115,7 +118,7 @@ class HostGroups(UIGroup):
         self.logger.debug("CMD: ../host-groups/ delete {}".format(group_name))
 
         if group_name not in self.groups:
-            self.logger.error("Group '{}' does not exist")
+            self.logger.error("Group '{}' does not exist".format(group_name))
             return
 
         # OK, so the group exists...
@@ -139,13 +142,16 @@ class HostGroups(UIGroup):
         self.logger.info('ok')
 
     def delete(self, child):
-        self.logger.debug("removing '{}' from local client "
-                          "definitions".format(child.name))
-        ui_root = self.get_ui_root()
-        clients = ui_root.target.client_group
-        for iqn in clients:
-            if clients[iqn].get('group_name') == child.name:
-                clients[iqn]['group_name'] = ''
+
+        client_group = child._get_client_group()
+        client_map = client_group.client_map
+        group_clients = [client_iqn for client_iqn in client_map
+                         if client_map[client_iqn].group_name == child.name]
+
+        for iqn in group_clients:
+
+            self.logger.debug("removing group name from {}".format(iqn))
+            client_map[iqn].group_name = ''
 
         self.remove_child(child)
 
@@ -201,8 +207,8 @@ class HostGroup(UIGroup):
         client_group = self._get_client_group()
         client_map = client_group.client_map
         if client_iqn not in client_map:
-            self.logger.error("'{}' is not in the "
-                              "configuration".format(client_iqn))
+            self.logger.error("'{}' is not managed by a "
+                              "group".format(client_iqn))
             return
 
         current_group = client_map[client_iqn].group_name
@@ -231,7 +237,7 @@ class HostGroup(UIGroup):
         self.logger.debug("- api call responded "
                           "{}".format(api.response.status_code))
         if api.response.status_code != 200:
-            self.logger.error("host group change failed: "
+            self.logger.error("Failed :"
                               "{}".format(api.response.json()['message']))
             return
 
@@ -272,11 +278,19 @@ class HostGroup(UIGroup):
                               "disk add|remove <disk_image>")
             return
 
-        # simple sanity check - does the disk exist?
+        # simple sanity checks
+        # 1. does the disk exist in the configuration
         ui_root = self.get_ui_root()
         if disk_name not in [disk.name for disk in ui_root.disks.children]:
             self.logger.error("Disk '{}' is not defined within the "
                               "configuration".format(disk_name))
+            return
+        # 2. is the disk already in this host group - failing to trap this
+        # scenario will result in an exception during the UI update since an
+        # object in the 'tree' will already exist!
+        if disk_name in self.disks:
+            self.logger.error("'{}' is already defined to this "
+                              "host-group".format(disk_name))
             return
 
         # Basic checks passed, hand-off to the API
@@ -293,7 +307,8 @@ class HostGroup(UIGroup):
         api.put()
         self.logger.debug("- api call responded {}".format(api.response.status_code))
         if api.response.status_code != 200:
-            self.logger.error("host group change failed")
+            self.logger.error("Failed: "
+                              "{}".format(api.response.json()['message']))
             return
 
         # group updated, so update the host-groups UI elements
@@ -313,6 +328,10 @@ class HostGroup(UIGroup):
     def members(self):
         return [child.name for child in self.children
                 if child.member_type == 'host']
+    @property
+    def disks(self):
+        return [child.name for child in self.children
+                if child.member_type == 'disk']
 
     def _get_client_group(self):
         ui_root = self.get_ui_root()
@@ -333,7 +352,9 @@ class HostGroup(UIGroup):
 
         # refresh the client with the new config
         self.logger.debug("resync'ing client lun maps")
+        client_map = client_group.client_map
         for client in clients_to_update:
+            client_map[client.client_iqn].group_name = self.name
             client.drop_luns()
             client.luns = clients[client.client_iqn].get('luns', {})
             client.refresh_luns()
