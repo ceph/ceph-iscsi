@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import json
-
+import threading
 from gwcli.node import UIGroup, UINode, UIRoot
 
 from gwcli.hostgroup import HostGroups
@@ -373,6 +373,10 @@ class GatewayGroup(UIGroup):
 
         UIGroup.__init__(self, 'gateways', parent)
 
+        self.thread_lock = threading.Lock()
+        self.check_interval = 5             # check gateway state every 5 secs
+        self.last_state = 0
+
         # record the shortcut
         shortcut = self.shell.prefs['bookmarks'].get('gateways', None)
         if not shortcut or shortcut is not self.path:
@@ -382,12 +386,20 @@ class GatewayGroup(UIGroup):
             self.shell.log.debug("Bookmarked %s as %s."
                                  % (self.path, 'gateways'))
 
+    @property
+    def gateways_down(self):
+        return len([gw for gw in self.children
+                    if gw.state != 'UP'])
+
+
     def load(self, gateway_group):
         # define the host entries from the gateway_group dict
         gateway_list = [gw for gw in gateway_group
                         if isinstance(gateway_group[gw], dict)]
         for gateway_name in gateway_list:
             Gateway(self, gateway_name, gateway_group[gateway_name])
+
+        self.check_gateways()
 
     def ui_command_info(self):
 
@@ -396,16 +408,47 @@ class GatewayGroup(UIGroup):
         for child in self.children:
             console_message(child)
 
+    def check_gateways(self):
+
+        check_thread = threading.Timer(self.check_interval,
+                                       self.check_gateways)
+        check_thread.daemon = True
+        check_thread.start()
+        self.refresh()
+
+    def refresh(self, mode='auto'):
+
+        self.thread_lock.acquire()
+
+        if len(self.children) > 0:
+            for gw in self.children:
+                gw.refresh(mode)
+        else:
+            pass
+
+        gateways_down = self.gateways_down
+        if gateways_down != self.last_state:
+            if gateways_down == 0:
+                self.logger.info("\nAll gateways online")
+            else:
+                err_str = "gateway is" if gateways_down == 1 else "gateways are"
+                self.logger.warning("\n{} {} down - updates will "
+                                    "be disabled".format(gateways_down,
+                                                         err_str))
+            self.last_state = gateways_down
+
+        self.thread_lock.release()
+
+
     def ui_command_refresh(self):
         """
         refresh allows you to refresh the connection status of each of the
         configured gateways (i.e. check the up/down state).
         """
-
-        if len(self.children) > 0:
-            self.logger.debug("{} gateways to refresh".format(len(self.children)))
-            for gw in self.children:
-                gw.refresh()
+        num_gw = len(self.children)
+        if num_gw > 0:
+            self.logger.debug("{} gateways to refresh".format(num_gw))
+            self.refresh(mode='interactive')
         else:
             self.logger.error("No gateways to refresh")
 
@@ -548,10 +591,11 @@ class Gateway(UINode):
                               }
         self.refresh()
 
-    def refresh(self):
+    def refresh(self, mode="interactive"):
 
-        self.logger.debug("- checking iSCSI/API ports on "
-                          "{}".format(self.name))
+        if mode == 'interactive':
+            self.logger.debug("- checking iSCSI/API ports on "
+                              "{}".format(self.name))
         self._get_state()
 
         up_count = len([self.service_state[s]["state"]

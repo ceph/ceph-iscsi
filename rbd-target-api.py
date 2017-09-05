@@ -29,7 +29,7 @@ from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
                                      gen_file_hash, valid_rpm)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
-                         valid_disk, valid_client)
+                         valid_disk, valid_client, GatewayAPIError)
 
 from gwcli.client import Client
 
@@ -1236,6 +1236,55 @@ def _hostgroup(group_name):
             return jsonify(message=grp.error_msg), 400
 
 
+@app.route('/api/_ping', methods=['GET'])
+@requires_restricted_auth
+def _ping():
+    """
+    Simple "is alive" ping responder.
+    Used internally to determine whether gateways are ready to process requests
+    """
+
+    if request.method == 'GET':
+        return jsonify(message='pong'), \
+               200
+    else:
+        return jsonify(message="Invalid ping call - Only GET is supported"), \
+               400
+
+
+def target_ready(gateway_list):
+    """
+    function which determines whether all gateways in the configuration are
+    up and ready to process commands
+    :param gateway_list: (list) list of gateway names/IP addresses
+    :return: (str) either 'ok' or an error description
+    """
+    http_mode = 'https' if settings.config.api_secure else 'http'
+    target_state = {"status": 'OK',
+                    "summary": ''}
+
+    for gw in gateway_list:
+        api_endpoint = ("{}://{}:{}/api/_ping".format(http_mode,
+                                                      gw,
+                                                      settings.config.api_port))
+        try:
+            api = APIRequest(api_endpoint)
+            api.get()
+        except GatewayAPIError:
+            target_state['status'] = 'NOTOK'
+            target_state['summary'] += ',{}(Down)'.format(gw)
+        else:
+            if api.response.status_code == 200:
+                target_state['summary'] += ',{}(Up)'.format(gw)
+                continue
+            else:
+                target_state['summary'] += ',{}(Unknown)'.format(gw)
+
+    target_state['summary'] = target_state['summary'][1:]   # ignore 1st char
+
+    return target_state
+
+
 def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
     """
     Generic API handler to process a given request across multiple gateways
@@ -1244,8 +1293,14 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
     :param element: (str) object to act upon
     :param http_method: (str) put or get http method
     :param api_vars: (dict) variables to pass to the api call
-    :return:
+    :return: (str, int) string description and http status code
     """
+
+    target_state = target_ready(gateway_list)
+    if target_state.get('status') != 'OK':
+        return ('failed, gateway(s) unavailable:'
+                '{}'.format(target_state.get('summary'))), \
+               503
 
     http_mode = 'https' if settings.config.api_secure else 'http'
     updated = []
