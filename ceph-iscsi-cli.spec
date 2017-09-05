@@ -67,6 +67,12 @@ install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependenc
 %{_mandir}/man8/gwcli.8.gz
 
 %changelog
+* Mon Sep 04 2017 Paul Cuzner <pcuzner@redhat.com> 2.5-2
+- automatically check state of gateways every 5 seconds
+- hostgroup logic updated
+- added an isalive api endpoint to check state of gateways
+- abort any change request, when there are offline iscsi gateways
+
 * Tue Aug 15 2017 Jason Dillaman <dillaman@redhat.com> 2.5-1
 - version bump to 2.5
 
