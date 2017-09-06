@@ -160,8 +160,8 @@ class RBDDev(object):
             ioctx = cluster.open_ioctx(self.pool)
             with rbd.Image(ioctx, self.image) as rbd_image:
 
-                if rbd_image.features() & RBDDev.supported_features() != \
-                    RBDDev.supported_features():
+                if rbd_image.features() & RBDDev.required_features() != \
+                    RBDDev.required_features():
                     valid_state = False
 
         return valid_state
@@ -178,6 +178,14 @@ class RBDDev(object):
             feature_int += getattr(rbd, feature)
 
         return feature_int
+
+    @classmethod
+    def required_features(cls):
+        """
+        Return an int representing the required features for LIO export
+        :return: int
+        """
+        return rbd.RBD_FEATURE_EXCLUSIVE_LOCK
 
     current_size = property(_get_size_bytes,
                             doc="return the current size of the rbd(bytes)")
