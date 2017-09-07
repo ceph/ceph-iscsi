@@ -10,6 +10,7 @@ import OpenSSL
 import threading
 import time
 import inspect
+import re
 
 from functools import wraps
 from rpm import labelCompare
@@ -540,6 +541,12 @@ def disk(image_id):
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5001/api/all_disk/rbd.new2_
     """
+
+    disk_regex = re.compile("^\w+(\.)(\w+)")
+    if not disk_regex.search(image_id):
+        logger.debug("disk request rejected due to invalid image name")
+        return jsonify(message="image id format is invalid - must be "
+                               "pool.image_name"), 400
 
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
