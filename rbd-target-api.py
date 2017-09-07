@@ -628,6 +628,7 @@ def disk(image_id):
         api_vars = {'purge_host': local_gw}
 
         # process other gateways first
+        gateways.remove(local_gw)
         gateways.append(local_gw)
 
         resp_text, resp_code = call_api(gateways, '_disk',
