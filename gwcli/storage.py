@@ -251,12 +251,24 @@ class Disks(UIGroup):
         destructive action that could lead to data loss, so please ensure
         the rbd image name is correct!
 
-        > delete <rbd_image_name>
+        > delete <disk_name>
+        e.g.
+        > delete rbd.disk_1
+
+        "disk_name" refers to the name of the disk as shown in the UI, for
+        example rbd.disk_1.
 
         Also note that the delete process is a synchronous task, so the larger
         the rbd image is, the longer the delete will take to run.
 
         """
+
+        # Perform a quick 'sniff' test on the request
+        if image_id not in [disk.image_id for disk in self.children]:
+            self.logger.error("Disk '{}' is not defined to the "
+                              "configuration".format(image_id))
+            return
+
         self.logger.debug("CMD: /disks delete {}".format(image_id))
 
         self.logger.debug("Starting delete for rbd {}".format(image_id))
