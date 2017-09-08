@@ -285,13 +285,19 @@ class HostGroup(UIGroup):
             self.logger.error("Disk '{}' is not defined within the "
                               "configuration".format(disk_name))
             return
-        # 2. is the disk already in this host group - failing to trap this
-        # scenario will result in an exception during the UI update since an
-        # object in the 'tree' will already exist!
-        if disk_name in self.disks:
-            self.logger.error("'{}' is already defined to this "
-                              "host-group".format(disk_name))
-            return
+
+        # 2. For an 'add' request, the disk must not already be in the host
+        # group. Whereas, for a remove request the disk must exist.
+        if action == 'add':
+            if disk_name in self.disks:
+                self.logger.error("'{}' is already defined to this "
+                                  "host-group".format(disk_name))
+                return
+        else:
+            if disk_name not in self.disks:
+                self.logger.error("'{}' is not a member of this "
+                                  "group".format(disk_name))
+                return
 
         # Basic checks passed, hand-off to the API
         group_api = ('{}://{}:{}/api/hostgroup/'
