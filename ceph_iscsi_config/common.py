@@ -39,6 +39,8 @@ class CephCluster(object):
             self.error = True
             self.error_msg = "Unable to connect to the cluster (keyring missing?) - {}".format(err)
 
+    def __del__(self):
+        self.cluster.shutdown()
 
     def shutdown(self):
         self.cluster.shutdown()
@@ -64,29 +66,17 @@ class Config(object):
         self.config_name = cfg_name
         self.pool = pool
         self.ceph = None
-        self.platform = Config.get_platform()
         self.error = False
         self.reset = False
         self.error_msg = ""
         self.txn_list = []
         self.config_locked = False
 
-        if self.platform == 'rbd':
-            self.ceph = CephCluster()
-            if self.ceph.error:
-                self.error = True
-                self.error_msg = self.ceph.error_msg
-                return
-            else:
-                # connection to the ceph cluster is OK to use
-                self.get_config = self._get_ceph_config
-                self.commit_config = self._commit_rbd
-        else:
+        self.ceph = CephCluster()
+        if self.ceph.error:
             self.error = True
-            self.error_msg = "Unsupported platform - rbd only (for now!)"
-
-        self.config = self.get_config()
-        self.changed = False
+            self.error_msg = self.ceph.error_msg
+            return
 
     def _read_config_object(self, ioctx):
         """
@@ -157,6 +147,9 @@ class Config(object):
 
         return cfg_dict
 
+    def get_config(self):
+        return _get_ceph_config()
+
     def lock(self):
 
         ioctx = self.ceph.cluster.open_ioctx(self.pool)
@@ -216,9 +209,6 @@ class Config(object):
             self.changed = True
 
         self.unlock()
-
-    def _get_glfs_config(self):
-        pass
 
     def refresh(self):
         self.logger.debug("config refresh - current config is {}".format(self.config))
@@ -341,27 +331,8 @@ class Config(object):
         if post_action == 'close':
             self.ceph.shutdown()
 
-    def _commit_glfs(self, config_str):
-        pass
-
     def commit(self, post_action='close'):
-
-        self.commit_config(post_action)
-
-
-    @classmethod
-    def get_platform(cls):
-
-        """
-        determine whether we have the rbd command in the current path to denote whether the
-        envrionment is rbd or gluster based
-        :return: rbd (future...gluster?)
-        """
-        if (any(os.access(os.path.join(path, 'rbd'), os.X_OK)
-                for path in os.environ["PATH"].split(os.pathsep))):
-            return 'rbd'
-
-        return ''
+        self._commit_rbd(post_action)
 
 
 def ansible_control():
