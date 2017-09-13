@@ -232,20 +232,15 @@ class CephCluster(UIGroup):
     @property
     def healthy_mon(self):
         """
-        Return the first mon in a healthy state
+        Return the first mon in quorum state
         :return: (str) name of the 1st monitor in a healthy state
         """
 
-        healthy_mon = 'UNKNOWN'
-
-        if 'health' in self.ceph_status:
-            mons = self.ceph_status['health']['timechecks']['mons']
-            for mon in mons:
-                if mon['health'] == 'HEALTH_OK':
-                    healthy_mon = mon['name']
-                    break
-
-        return healthy_mon
+        quorum_mons = self.ceph_status.get('quorum_names', [])
+        if quorum_mons:
+            return quorum_mons[0]
+        else:
+            return "UNKNOWN"
 
 
 class CephPools(UIGroup):
