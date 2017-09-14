@@ -6,12 +6,21 @@ After=sys-kernel-config.mount network-online.target tcmu-runner.service
 Wants=network-online.target tcmu-runner.service
 
 [Service]
+LimitNOFILE=1048576
+LimitNPROC=1048576
 EnvironmentFile=-/etc/sysconfig/ceph
 Type=simple
 User=root
 Group=root
 ExecStart=/usr/bin/rbd-target-gw
 ExecReload=/usr/bin/kill -HUP $MAINPID
+PrivateDevices=yes
+ProtectHome=true
+ProtectSystem=full
+PrivateTmp=true
+Restart=on-failure
+StartLimitInterval=30min
+StartLimitBurst=3
 
 [Install]
 WantedBy=multi-user.target
