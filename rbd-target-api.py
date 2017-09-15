@@ -1426,17 +1426,21 @@ def pre_reqs_errors():
     errors_found = []
 
     dist, rel, dist_id = platform.linux_distribution(full_distribution_name=0)
-    if dist.lower() not in valid_dists or rel not in valid_versions:
-        errors_found.append("OS is unsupported")
 
-    # first check rpm versions are OK
-    for rpm in required_rpms:
-        if not valid_rpm(rpm):
-            logger.error("RPM check for {} failed")
-            errors_found.append("{} rpm must be installed at >= "
-                                "{}-{}".format(rpm['name'],
-                                               rpm['version'],
-                                               rpm['release']))
+    if dist.lower() in valid_dists:
+        if rel not in valid_versions:
+            errors_found.append("OS version is unsupported")
+
+        # check rpm versions are OK
+        for rpm in required_rpms:
+            if not valid_rpm(rpm):
+                logger.error("RPM check for {} failed")
+                errors_found.append("{} rpm must be installed at >= "
+                                    "{}-{}".format(rpm['name'],
+                                                   rpm['version'],
+                                                   rpm['release']))
+    else:
+        errors_found.append("OS is unsupported")
 
     # check the running kernel is OK (required kernel has patches to rbd.ko)
     os_info = os.uname()
