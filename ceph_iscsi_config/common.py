@@ -78,6 +78,9 @@ class Config(object):
             self.error_msg = self.ceph.error_msg
             return
 
+        self.config = self.get_config()
+        self.changed = False
+
     def _read_config_object(self, ioctx):
         """
         Return config string from the config object. The string is checked to see if it's valid
@@ -148,7 +151,7 @@ class Config(object):
         return cfg_dict
 
     def get_config(self):
-        return _get_ceph_config()
+        return self._get_ceph_config()
 
     def lock(self):
 
