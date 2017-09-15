@@ -1414,10 +1414,10 @@ def pre_reqs_errors():
     required_rpms = [
         {"name": "python-rtslib",
          "version": "2.1.fb64",
-         "release": "0.1.20170815.gitec364f3.el7cp"},
+         "release": "0.1"},
         {"name": "tcmu-runner",
          "version": "1.3.0",
-         "release": "0.2.3.el7cp"}
+         "release": "0.2.3"}
     ]
 
     k_vers = '3.10.0'
