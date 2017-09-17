@@ -6,10 +6,8 @@ import rados
 import glob
 import os
 
-from gwcli.utils import human_size
+from gwcli.utils import human_size, console_message, os_cmd
 import ceph_iscsi_config.settings as settings
-
-__author__ = 'Paul Cuzner'
 
 
 class CephGroup(UIGroup):
@@ -22,8 +20,8 @@ class CephGroup(UIGroup):
                  The ceph component of the shell is intended to provide
                  you with an overview of the ceph cluster. Information is
                  initially gathered when you start this shell, but can be
-                 refreshed later using the refresh subcommand. Data is shown
-                 that covers the health of the ceph cluster, together with
+                 refreshed later using the 'refresh' subcommand. Data is shown
+                 that covers the health of the ceph cluster(s), together with
                  an overview of the rados pools and overall topology.
 
                  The pools section is useful when performing allocation tasks
@@ -79,7 +77,6 @@ class CephGroup(UIGroup):
             keyring = glob.glob(os.path.join(CephGroup.ceph_config_dir,
                                              '{}*.keyring'.format(name)))
             if not keyring:
-                # cluster has a keyring
                 self.logger.debug("Skipping {} - no keyring found".format(conf))
                 continue
 
@@ -95,10 +92,11 @@ class CephGroup(UIGroup):
     @staticmethod
     def valid_conf(config_file):
         """
-        check whether the given file is a valid conf file for a cluster
-        :param self:
-        :return:
+        Dummy check function
+        :param config_file: (str) config file path
+        :return: TRUE
         """
+
         return True
 
     def ui_command_refresh(self):
@@ -106,16 +104,8 @@ class CephGroup(UIGroup):
         refresh command updates the health and capacity state of the ceph
         meta data shown within the interface
         """
-        # pass
         self.refresh()
-
-    # def update_state(self):
-    #     with rados.Rados(conffile=self.conf) as cluster:
-    #         cmd = {'prefix': 'status', 'format': 'json'}
-    #         ret, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
-    #
-    #     self.ceph_status = json.loads(buf_s)
-    #     self.health_status = self.ceph_status['health']['overall_status']
+        self.logger.info("ok")
 
     def refresh(self):
 
@@ -131,21 +121,6 @@ class CephGroup(UIGroup):
         """
         return "Clusters: {}".format(len(self.children)), None
 
-    # def _get_healthy_mon(self):
-    #
-    #     healthy_mon = 'UNKNOWN'
-    #
-    #     if 'health' in self.ceph_status:
-    #         mons = self.ceph_status['health']['timechecks']['mons']
-    #         for mon in mons:
-    #             if mon['health'] == 'HEALTH_OK':
-    #                 healthy_mon = mon['name']
-    #                 break
-    #
-    #     return healthy_mon
-    #
-    # healthy_mon = property(_get_healthy_mon,
-    #                        doc="Return the first mon in a healthy state")
 
 class CephCluster(UIGroup):
 
@@ -153,10 +128,13 @@ class CephCluster(UIGroup):
 
         self.conf = conf_file
         self.keyring = keyring
+        self.cluster_name = cluster_name
         UIGroup.__init__(self, cluster_name, parent)
 
         self.ceph_status = {}
         self.health_status = ''
+        self.health_list = []
+        self.version = self.cluster_version
 
         self.pools = CephPools(self)
 
@@ -171,14 +149,71 @@ class CephCluster(UIGroup):
         """
 
         self.refresh()
+        self.logger.info("ok")
+
+    def ui_command_info(self):
+
+        color = {"HEALTH_OK": "green",
+                 "HEALTH_WARN": "yellow",
+                 "HEALTH_ERR": "red"}
+
+        status = self.ceph_status
+        osdmap = status['osdmap']['osdmap']
+        output = "Cluster name: {}\n".format(self.cluster_name)
+        output += "Ceph version: {}\n".format(self.version)
+        output += "Health      : {}\n".format(self.health_status)
+        if self.health_status != 'HEALTH_OK':
+            output += " - {}\n".format(','.join(self.health_list))
+
+        mon_names = [mon.get('name') for mon in status["monmap"]["mons"]]
+
+        q_str = "quorum {}".format(','.join(status['quorum_names']))
+        q_out = set(mon_names) - set(status['quorum_names'])
+        if q_out:
+            q_str += ", out of quorum: {}".format(','.join(q_out))
+        output += "\nMONs : {:>4} ({})\n".format(self.topology.num_mons,
+                                                 q_str)
+        output += "OSDs : {:>4} ({} up, {} in)\n".format(self.topology.num_osds,
+                                                        osdmap['num_up_osds'],
+                                                        osdmap['num_in_osds'])
+        output += "Pools: {:>4}\n".format(self.num_pools)
+        raw = status['pgmap']['bytes_total']
+        output += "Raw capacity: {}\n".format(human_size(raw))
+        output += "\nConfig : {}\n".format(self.conf)
+        output += "Keyring: {}\n".format(os.path.join(CephGroup.ceph_config_dir,
+                                                      self.keyring))
+
+        console_message(output, color=color[self.health_status])
+
+    @property
+    def cluster_version(self):
+
+        vers_out = os_cmd("ceph -c {} version".format(self.conf))
+
+        # RHEL packages include additional info, that we don't need
+        version_str = vers_out.split()[2]
+        return '.'.join(version_str.split('.')[:3])
 
     def update_state(self):
+
+        self.logger.debug("Querying ceph for state information")
         with rados.Rados(conffile=self.conf) as cluster:
             cmd = {'prefix': 'status', 'format': 'json'}
             ret, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
 
-        self.ceph_status = json.loads(buf_s)
-        self.health_status = self.ceph_status['health']['overall_status']
+        status = json.loads(buf_s)
+        self.ceph_status = status
+
+        # assume a luminous or above ceph cluster
+        self.health_status = status['health'].get('status',
+                                                  status['health'].get('overall_status'))
+        self.health_list = [check.get('summary') for check in
+                            status['health'].get('summary')
+                            if "monitoring scripts" not in check.get('summary')]
+
+    @property
+    def num_pools(self):
+        return len([pool for pool in self.pools.children])
 
     def refresh(self):
 
@@ -186,23 +221,27 @@ class CephCluster(UIGroup):
         self.pools.refresh()
 
     def summary(self):
-        return self.health_status, None
 
-    def _get_healthy_mon(self):
+        color_lookup = {"HEALTH_OK": True,
+                        "HEALTH_WARN": None,
+                        "HEALTH_ERR": False}
 
-        healthy_mon = 'UNKNOWN'
+        return self.health_status, \
+               color_lookup[self.health_status]
 
-        if 'health' in self.ceph_status:
-            mons = self.ceph_status['health']['timechecks']['mons']
-            for mon in mons:
-                if mon['health'] == 'HEALTH_OK':
-                    healthy_mon = mon['name']
-                    break
+    @property
+    def healthy_mon(self):
+        """
+        Return the first mon in quorum state
+        :return: (str) name of the 1st monitor in a healthy state
+        """
 
-        return healthy_mon
+        quorum_mons = self.ceph_status.get('quorum_names', [])
+        if quorum_mons:
+            return quorum_mons[0]
+        else:
+            return "UNKNOWN"
 
-    healthy_mon = property(_get_healthy_mon,
-                           doc="Return the first mon in a healthy state")
 
 class CephPools(UIGroup):
     help_intro = '''
@@ -243,9 +282,10 @@ class CephPools(UIGroup):
 
         # existing_pools = [pool.name for pool in self.children]
 
-
         # get a breakdown of the osd's to retrieve the pool types
-        # SLEDGEHAMMER meets NUT
+        # i.e. is it replica 3 or EC 4+2 etc
+        # This is overkill and hacky, but the bindings don't provide
+        # pool type information...so it's SLEDGEHAMMER meets NUT time
         self.logger.debug("Fetching ceph osd information")
         with rados.Rados(conffile=self.parent.conf) as cluster:
             cmd = {'prefix': 'osd dump', 'format': 'json'}
@@ -255,10 +295,6 @@ class CephPools(UIGroup):
         for pool in json.loads(buf_s)['pools']:
             name = pool['pool_name']
             pools[name] = pool
-
-        # # Get the pools defined
-        # with rados.Rados(conffile=self.parent.conf) as cluster:
-        #     pools = cluster.list_pools()
 
         for pool_name in pools:
             # if pool_name not in existing_pools:
@@ -286,7 +322,7 @@ class CephPools(UIGroup):
                     self.pool_lookup[pool_name].update(pool_data)
 
     def summary(self):
-        return "Pools: {}".format(len(self.children)), True
+        return "Pools: {}".format(self.parent.num_pools), True
 
 
 class RadosPool(UINode):
@@ -327,9 +363,8 @@ class RadosPool(UINode):
         msg.append("Commit: {}/{} ({}%)".format(human_size(self.commit),
                                                 human_size(self.max_bytes),
                                                 self.overcommit_PCT))
-        #msg.append("Avail: {}".format(human_size(self.max_bytes)))
         msg.append("Used: {}".format(human_size(self.used_bytes)))
-        #msg.append("Commit%: {}%".format(self.overcommit_PCT))
+
         return ', '.join(msg), True
 
 

@@ -2,16 +2,13 @@
 
 import json
 import threading
-from gwcli.node import UIGroup, UINode, UIRoot
 
+from gwcli.node import UIGroup, UINode, UIRoot
 from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks
 from gwcli.client import Clients, CHAP
-from gwcli.utils import (this_host,
-                         GatewayAPIError, GatewayError,
-                         APIRequest,
-                         console_message, get_port_state,
-                         valid_iqn)
+from gwcli.utils import (this_host, GatewayAPIError, GatewayError,
+                         APIRequest, console_message, valid_iqn)
 
 import ceph_iscsi_config.settings as settings
 
@@ -24,8 +21,6 @@ from gwcli.ceph import CephGroup
 # disabled - so this disable_warnings stops the user interface from being
 # bombed
 from requests.packages import urllib3
-
-__author__ = 'Paul Cuzner'
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -89,7 +84,6 @@ class ISCSIRoot(UIRoot):
             self.logger.critical("Unable to access the configuration "
                                  "object : {}".format(self.error_msg))
             raise GatewayError
-
 
     def _get_config(self, endpoint=None):
 
@@ -181,7 +175,13 @@ class ISCSIRoot(UIRoot):
 
 class ISCSITarget(UIGroup):
     help_intro = '''
-                 The iscsi-target group shows you...bla
+                 The iscsi-target group defines the ISCSI Target that the 
+                 group of gateways will be known as by iSCSI initiators (clients).
+                 
+                 Only one iSCSI target is allowed, but each target can consist
+                 of 2-4 gateway nodes. Multiple gateways are needed to deliver 
+                 high availability storage to the iSCSI client.
+
                  '''
 
     def __init__(self, parent):
@@ -189,13 +189,12 @@ class ISCSITarget(UIGroup):
         self.gateway_group = {}
         self.client_group = {}
 
-
     def ui_command_create(self, target_iqn):
         """
-        Create a gateway target. This target is defined across all gateway nodes,
+        Create an iSCSI target. This target is defined across all gateway nodes,
         providing the client with a single 'image' for iscsi discovery.
 
-        Only ONE target is supported, at this time.
+        Only ONE iSCSI target is supported, at this time.
         """
 
         self.logger.debug("CMD: /iscsi create {}".format(target_iqn))
@@ -334,10 +333,12 @@ class ISCSITarget(UIGroup):
     def summary(self):
         return "Targets: {}".format(len(self.children)), None
 
+
 class Target(UIGroup):
 
     help_info = '''
-                The iscsi target bla
+                The iscsi target is the name that the group of gateways are 
+                known as by the iscsi initiators (clients).
                 '''
 
     def __init__(self, target_iqn, parent):
@@ -357,14 +358,9 @@ class GatewayGroup(UIGroup):
     help_intro = '''
                  The gateway-group shows you the high level details of the
                  iscsi gateway nodes that have been configured. It also allows
-                 you to add further gateways to the configuration, but when
-                 creating new gateways, it is your responsibility to ensure the
-                 following requirements are met:
-                 - device-mapper-mulitpath
-                 - ceph_iscsi_config
-
-                 In addition multipath.conf must be set up specifically for use
-                 as a gateway.
+                 you to add further gateways to the configuration, but this
+                 requires the API service instance to be started on the new 
+                 gateway host
 
                  If in doubt, use Ansible :)
                  '''
@@ -374,7 +370,7 @@ class GatewayGroup(UIGroup):
         UIGroup.__init__(self, 'gateways', parent)
 
         self.thread_lock = threading.Lock()
-        self.check_interval = 5             # check gateway state every 5 secs
+        self.check_interval = 10           # check gateway state every 'n' secs
         self.last_state = 0
 
         # record the shortcut
@@ -390,7 +386,6 @@ class GatewayGroup(UIGroup):
     def gateways_down(self):
         return len([gw for gw in self.children
                     if gw.state != 'UP'])
-
 
     def load(self, gateway_group):
         # define the host entries from the gateway_group dict
@@ -429,10 +424,10 @@ class GatewayGroup(UIGroup):
         gateways_down = self.gateways_down
         if gateways_down != self.last_state:
             if gateways_down == 0:
-                self.logger.info("\nAll gateways online")
+                self.logger.info("\nAll gateways accessible")
             else:
                 err_str = "gateway is" if gateways_down == 1 else "gateways are"
-                self.logger.warning("\n{} {} down - updates will "
+                self.logger.warning("\n{} {} inaccessible - updates will "
                                     "be disabled".format(gateways_down,
                                                          err_str))
             self.last_state = gateways_down
@@ -452,7 +447,8 @@ class GatewayGroup(UIGroup):
         else:
             self.logger.error("No gateways to refresh")
 
-    def ui_command_create(self, gateway_name, ip_address, nosync=False):
+    def ui_command_create(self, gateway_name, ip_address, nosync=False,
+                          skipchecks='false'):
         """
         Define a gateway to the gateway group for this iscsi target. The
         first host added should be the gateway running the command
@@ -465,16 +461,21 @@ class GatewayGroup(UIGroup):
                          the sync step is bypassed - so the new gateway
                          will need to have it's rbd-target-gw daemon
                          restarted to apply the current configuration
+                         (default = False)
+        skipchecks ..... set this to true to force gateway validity checks
+                         to be bypassed(default = False). This is a developer
+                         option ONLY. Skipping these checks has the potential
+                         to result in an unstable configuration.
         """
 
         self.logger.debug("CMD: ../gateways/ create {} {} "
-                          "nosync={}".format(gateway_name,
-                                             ip_address,
-                                             nosync))
+                          "nosync={} skipchecks={}".format(gateway_name,
+                                                           ip_address,
+                                                           nosync,
+                                                           skipchecks))
 
         local_gw = this_host()
         current_gateways = [tgt.name for tgt in self.children]
-
 
         if gateway_name != local_gw and len(current_gateways) == 0:
             # the first gateway defined must be the local machine. By doing
@@ -484,6 +485,10 @@ class GatewayGroup(UIGroup):
             # defined only a request from 127.0.0.1 is acceptable to the api
             self.logger.error("The first gateway defined must be the local "
                               "machine")
+            return
+
+        if skipchecks not in ['true', 'false']:
+            self.logger.error("skipchecks must be either true or false")
             return
 
         if local_gw in current_gateways:
@@ -501,6 +506,8 @@ class GatewayGroup(UIGroup):
             sync_text = ("sync'ing {} disk(s) and "
                          "{} client(s)".format(len(config['disks']),
                                                len(config['clients'])))
+        if skipchecks == 'true':
+            self.logger.warning("OS version/package checks have been bypassed")
 
         self.logger.info("Adding gateway, {}".format(sync_text))
 
@@ -509,6 +516,7 @@ class GatewayGroup(UIGroup):
                                          settings.config.api_port)
         gw_rqst = gw_api + '/gateway/{}'.format(gateway_name)
         gw_vars = {"nosync": nosync,
+                   "skipchecks": skipchecks,
                    "ip_address": ip_address}
 
         api = APIRequest(gw_rqst, data=gw_vars)
@@ -549,13 +557,10 @@ class GatewayGroup(UIGroup):
                                                 gw_count),
                 up_count == gw_count)
 
-
-    def _interactive_shell(self):
+    @property
+    def interactive(self):
+        """determine whether the cli is running in interactive mode"""
         return self.parent.parent.parent.interactive
-
-    interactive = property(_interactive_shell,
-                           doc="determine whether the cli is running in "
-                               "interactive mode")
 
 
 class Gateway(UINode):
@@ -584,11 +589,18 @@ class Gateway(UINode):
             self.__setattr__(k, v)
 
         self.state = "DOWN"
-        self.service_state = {"iscsi": {"state": "DOWN",
-                                        "port": Gateway.TCP_PORT},
-                              "api": {"state": "DOWN",
-                                      "port": settings.config.api_port}
-                              }
+        self.service_state = {"iscsi": "DOWN",
+                              "api": "DOWN"}
+
+        self.refresh()
+
+    def ui_command_refresh(self):
+        """
+        The refresh command will initiate a check against the gateway node,
+        checking that the API is available, and that the iscsi port is
+        listening
+        """
+
         self.refresh()
 
     def refresh(self, mode="interactive"):
@@ -598,29 +610,31 @@ class Gateway(UINode):
                               "{}".format(self.name))
         self._get_state()
 
-        up_count = len([self.service_state[s]["state"]
-                        for s in self.service_state
-                        if self.service_state[s]["state"] == "UP"])
-
-        if up_count == len(self.service_state):
-            self.state = "UP"
-        elif up_count == 0:
-            self.state = "DOWN"
-        else:
-            self.state = "PARTIAL"
-
     def _get_state(self):
         """
-        Determine iSCSI and gateway API service state
+        Determine iSCSI and gateway API service state using the _ping api
+        endpoint
         :return:
         """
 
-        for svc in self.service_state:
+        lookup = {200: {"status": "UP", "iscsi": "UP", "api": "UP"},
+                  503: {"status": "PARTIAL", "iscsi": "DOWN", "api": "UP"},
+                  999: {"status": "UNKNOWN", "iscsi": "UNKNOWN", "api": "DOWN"}
+                  }
 
-            result = get_port_state(self.portal_ip_address,
-                                    self.service_state[svc]["port"])
+        gw_api = '{}://{}:{}/api/_ping'.format(self.http_mode,
+                                               self.name,
+                                               settings.config.api_port)
+        api = APIRequest(gw_api)
+        try:
+            api.get()
+            rc = api.response.status_code
+        except GatewayAPIError:
+            rc = 999
 
-            self.service_state[svc]["state"] = "UP" if result == 0 else "DOWN"
+        self.state = lookup[rc].get('status')
+        self.service_state['iscsi'] = lookup[rc].get('iscsi')
+        self.service_state['api'] = lookup[rc].get('api')
 
     def summary(self):
 

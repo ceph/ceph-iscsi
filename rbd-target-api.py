@@ -11,6 +11,7 @@ import threading
 import time
 import inspect
 import re
+import platform
 
 from functools import wraps
 from rpm import labelCompare
@@ -242,6 +243,9 @@ def gateway(gateway_name=None):
     :param gateway_name: (str) gateway name
     :param ip_address: (str) ipv4 dotted quad for the address iSCSI should use
     :param nosync: (bool) whether to sync the LIO objects to the new gateway
+           default: FALSE
+    :param skipchecks: (bool) whether to skip OS/software versions checks
+           default: FALSE
     **RESTRICTED**
     """
 
@@ -253,11 +257,22 @@ def gateway(gateway_name=None):
 
     ip_address = request.form.get('ip_address')
     nosync = request.form.get('nosync', False)
+    skipchecks = request.form.get('skipchecks', 'false')
 
     # first confirm that the request is actually valid, if not return a 400
     # error with the error description
     current_config = config.config
-    gateway_usable = valid_gateway(gateway_name, ip_address, current_config)
+
+    if skipchecks.lower() == 'true':
+        logger.warning("Gateway request received, with validity checks "
+                       "disabled")
+        gateway_usable = 'ok'
+    else:
+        logger.info("gateway validation needed for {}".format(gateway_name))
+        gateway_usable = valid_gateway(gateway_name,
+                                       ip_address,
+                                       current_config)
+
     if gateway_usable != 'ok':
         return jsonify(message=gateway_usable), 400
 
@@ -1244,20 +1259,42 @@ def _hostgroup(group_name):
             return jsonify(message=grp.error_msg), 400
 
 
+def iscsi_active():
+
+    state = False
+
+    with open('/proc/net/tcp') as tcp_data:
+        for con in tcp_data:
+            field = con.split()
+            if '0CBC' in field[1] and field[3] == '0A':
+                # iscsi port is up (x'0cbc' = 3260), and listening (x'0a')
+                state = True
+                break
+    return state
+
+
 @app.route('/api/_ping', methods=['GET'])
 @requires_restricted_auth
 def _ping():
     """
     Simple "is alive" ping responder.
-    Used internally to determine whether gateways are ready to process requests
     """
 
     if request.method == 'GET':
+
+        gw_config = config.config['gateways']
+        if this_host() in gw_config:
+            if iscsi_active():
+                rc = 200
+            else:
+                rc = 503
+        else:
+            # host is not yet defined, which means the port check would fail
+            # so just return a 200 OK back to the caller
+            rc = 200
+
         return jsonify(message='pong'), \
-               200
-    else:
-        return jsonify(message="Invalid ping call - Only GET is supported"), \
-               400
+               rc
 
 
 def target_ready(gateway_list):
@@ -1280,13 +1317,16 @@ def target_ready(gateway_list):
             api.get()
         except GatewayAPIError:
             target_state['status'] = 'NOTOK'
-            target_state['summary'] += ',{}(Down)'.format(gw)
+            target_state['summary'] += ',{}(iscsi Unknown, API down)'.format(gw)
         else:
             if api.response.status_code == 200:
-                target_state['summary'] += ',{}(Up)'.format(gw)
                 continue
+            elif api.response.status_code == 503:
+                target_state['status'] = 'NOTOK'
+                target_state['summary'] += ',{}(iscsi down, API up)'.format(gw)
             else:
-                target_state['summary'] += ',{}(Unknown)'.format(gw)
+                target_state['status'] = 'NOTOK'
+                target_state['summary'] += ',{}(UNKNOWN state)'.format(gw)
 
     target_state['summary'] = target_state['summary'][1:]   # ignore 1st char
 
@@ -1368,27 +1408,39 @@ def pre_reqs_errors():
     :return: list of configuration errors detected
     """
 
+    valid_dists = ["redhat"]
+    valid_versions = ['7.4']
+
     required_rpms = [
-        # {"name": "device-mapper-multipath",
-        #  "version": "0.4.9",
-        #  "release": "99.el7"},
         {"name": "python-rtslib",
-         "version": "2.1.fb57",
-         "release": "5.el7"}
+         "version": "2.1.fb64",
+         "release": "0.1"},
+        {"name": "tcmu-runner",
+         "version": "1.3.0",
+         "release": "0.2.3"}
     ]
 
     k_vers = '3.10.0'
-    k_rel = '503.el7'
+    k_rel = '695.el7'
 
     errors_found = []
-    # first check rpm versions are OK
-    for rpm in required_rpms:
-        if not valid_rpm(rpm):
-            logger.error("RPM check for {} failed")
-            errors_found.append("{} rpm must be installed at >= "
-                                "{}-{}".format(rpm['name'],
-                                               rpm['version'],
-                                               rpm['release']))
+
+    dist, rel, dist_id = platform.linux_distribution(full_distribution_name=0)
+
+    if dist.lower() in valid_dists:
+        if rel not in valid_versions:
+            errors_found.append("OS version is unsupported")
+
+        # check rpm versions are OK
+        for rpm in required_rpms:
+            if not valid_rpm(rpm):
+                logger.error("RPM check for {} failed")
+                errors_found.append("{} rpm must be installed at >= "
+                                    "{}-{}".format(rpm['name'],
+                                                   rpm['version'],
+                                                   rpm['release']))
+    else:
+        errors_found.append("OS is unsupported")
 
     # check the running kernel is OK (required kernel has patches to rbd.ko)
     os_info = os.uname()
