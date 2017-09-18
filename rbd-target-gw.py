@@ -26,6 +26,15 @@ from ceph_iscsi_config.lio import LIO, Gateway
 from ceph_iscsi_config.utils import this_host, human_size
 
 
+def exception_handler(exception_type, exception, traceback,
+                      debug_hook=sys.excepthook):
+
+    # attempt to clear the LIO config, returning it to an uninitialised state
+    clearconfig()
+
+    debug_hook(exception_type, exception, traceback)
+
+
 def ceph_rm_blacklist(blacklisted_ip):
     """
     Issue a ceph osd blacklist rm command for a given IP on this host
@@ -46,6 +55,43 @@ def ceph_rm_blacklist(blacklisted_ip):
         logger.critical("blacklist removal failed. Run"
                         " 'ceph osd blacklist rm {}'".format(blacklisted_ip))
         return False
+
+
+def clearconfig():
+    """
+    Clear the LIO configuration of the settings defined by the config object
+    We could simply call the clear_existing method of rtsroot - but if the
+    admin has defined additional non ceph iscsi exports they'd loose everything
+
+    :param local_gw: (str) gateway name
+    :return: (int) 0 = LIO configuration removed/not-required
+                   4 = LUN removal problem encountered
+                   8 = Gateway (target/tpgs) removal failed
+    """
+
+    local_gw = this_host()
+
+    # clear the current config, based on the config objects settings
+    lio = LIO()
+    gw = Gateway(config)
+
+    # This will fail incoming IO, but wait on outstanding IO to
+    # complete normally. We rely on the initiator multipath layer
+    # to handle retries like a normal path failure.
+    logger.info("Removing iSCSI target from LIO")
+    gw.drop_target(local_gw)
+    if gw.error:
+        logger.error("rbd-target-gw failed to remove target objects")
+        return 8
+
+    logger.info("Removing LUNs from LIO")
+    lio.drop_lun_maps(config, False)
+    if lio.error:
+        logger.error("rbd-target-gw failed to remove LUN objects")
+        return 4
+
+    logger.info("Active Ceph iSCSI gateway configuration removed")
+    return 0
 
 
 def signal_stop(*args):
@@ -74,27 +120,9 @@ def signal_stop(*args):
                     " - nothing to do")
         sys.exit(0)
 
-    # At this point, we're working with a config object that has an entry for
-    # this host
+    rc = clearconfig()
 
-    lio = LIO()
-    gw = Gateway(config)
-
-    # This will fail incoming IO, but wait on outstanding IO to
-    # complete normally. We rely on the initiator multipath layer
-    # to handle retries like a normal path failure.
-    logger.debug("Removing iSCSI target from LIO")
-    gw.drop_target(local_gw)
-    if gw.error:
-        logger.error("rbd-target-gw failed to remove target objects")
-
-    logger.debug("Removing LUNs from LIO")
-    lio.drop_lun_maps(config, False)
-    if lio.error:
-        logger.error("rbd-target-gw failed to remove lun objects")
-
-    logger.info("Active gateway configuration removed")
-    sys.exit(0)
+    sys.exit(rc)
 
 
 def signal_reload(*args):
@@ -178,6 +206,8 @@ def osd_blacklist_cleanup():
 
 def halt(message):
     logger.critical(message)
+    logger.critical("Removing Ceph iSCSI configuration from LIO")
+    clearconfig()
     sys.exit(16)
 
 
@@ -190,42 +220,22 @@ def get_tpgs():
     return len([tpg.tag for tpg in root.RTSRoot().tpgs])
 
 
-def apply_config():
+def portals_active():
     """
-    main procesing logic that takes the config object from rados and applies
-    it to the local LIO instance using the config module classes (also used by
-    the ansible playbooks)
-    :return: return code 0 = all is OK, anything
+    use the get_tpgs function to determine whether there are tpg's defined
+    :return: (bool) indicating whether there are tpgs defined
+    """
+    return get_tpgs() > 0
+
+
+def define_gateway():
+    """
+    define the iSCSI target and tpgs
+    :return: (object) gateway object
     """
 
-    # access config_loading from the outer scope, for r/w
-    global config_loading
-    config_loading = True
-
-    local_gw = this_host()
-
-    logger.info("Reading the configuration object to update local LIO "
-                "configuration")
-
-    logger.info("Processing Gateway configuration")
-
-    # first check to see if we have any entries to handle - if not, there is
-    # no work to do..
-    if "gateways" not in config.config:
-        logger.info("Configuration is empty - nothing to define to LIO")
-        config_loading = False
-        return
-    if local_gw not in config.config['gateways']:
-        logger.info("Configuration does not have an entry for this host({}) - "
-                    "nothing to define to LIO".format(local_gw))
-        config_loading = False
-        return
-
-    # at this point we have a gateway entry that applies to the running host
-
-    gw_ip_list = config.config['gateways']['ip_list'] if 'ip_list' in config.config['gateways'] else None
-    gw_iqn = config.config['gateways']['iqn'] if 'iqn' in config.config['gateways'] else None
-    gw_nodes = [key for key in config.config['gateways'] if isinstance(config.config['gateways'][key], dict)]
+    gw_ip_list = config.config['gateways'].get('ip_list', None)
+    gw_iqn = config.config['gateways'].get('iqn', None)
 
     # Gateway Definition : Handle the creation of the Target/TPG(s) and Portals
     # Although we create the tpgs, we flick the enable_portal flag off so the
@@ -236,18 +246,28 @@ def apply_config():
     # first check if there are tpgs already in LIO (True) - this would indicate
     # a restart or reload call has been made. If the tpg count is 0, this is a
     # boot time request
-    portals_active = get_tpgs() > 0
 
     gateway = GWTarget(logger,
                        gw_iqn,
                        gw_ip_list,
-                       enable_portal=portals_active)
+                       enable_portal=portals_active())
 
     gateway.manage('target')
     if gateway.error:
         halt("Error creating the iSCSI target (target, TPGs, Portals)")
 
-    logger.info("Processing LUN configuration")
+    return gateway
+
+
+def define_luns(gateway):
+    """
+    define the disks in the config to LIO
+    :param gateway: (object) gateway object - used for mapping
+    :return: None
+    """
+
+    local_gw = this_host()
+
     # sort the disks dict keys, so the disks are registered in a specific
     # sequence
     disks = config.config['disks']
@@ -269,20 +289,29 @@ def apply_config():
 
                         pool, image_name = disk_key.split('.')
 
-                        with rbd.Image(ioctx, image_name) as rbd_image:
-                            image_bytes = rbd_image.size()
-                            image_size_h = human_size(image_bytes)
+                        try:
+                            with rbd.Image(ioctx, image_name) as rbd_image:
+                                image_bytes = rbd_image.size()
+                                image_size_h = human_size(image_bytes)
 
-                            lun = LUN(logger, pool, image_name,
-                                      image_size_h, local_gw)
-                            if lun.error:
-                                halt("Error defining rbd image {}".format(
-                                    disk_key))
+                                lun = LUN(logger, pool, image_name,
+                                          image_size_h, local_gw)
+                                if lun.error:
+                                    halt("Error defining rbd image "
+                                         "{}".format(disk_key))
 
-                            lun.allocate()
-                            if lun.error:
-                                halt("Error unable to register {} with LIO - "
-                                     "{}".format(disk_key, lun.error_msg))
+                                lun.allocate()
+                                if lun.error:
+                                    halt("Error unable to register {} with "
+                                         "LIO - {}".format(disk_key,
+                                                           lun.error_msg))
+
+                        except rbd.ImageNotFound:
+                            halt("Disk '{}' defined to the config, but image "
+                                 "'{}' can not be found in "
+                                 "'{}' pool".format(disk_key,
+                                                    image_name,
+                                                    pool))
 
         # Gateway Mapping : Map the LUN's registered to all tpg's within the
         # LIO target
@@ -293,7 +322,11 @@ def apply_config():
     else:
         logger.info("No LUNs to export")
 
-    logger.info("Processing client configuration")
+
+def define_clients():
+    """
+    define the clients (nodeACLs) to the gateway definition
+    """
 
     # Client configurations (NodeACL's)
     for client_iqn in config.config['clients']:
@@ -304,13 +337,57 @@ def apply_config():
 
         chap_str = client_chap.chap_str
         if client_chap.error:
-            logger.debug("Password decode issue : {}".format(client_chap.error_msg))
-            halt("Unable to decode password for {}".format(client_iqn))
+            logger.debug("Password decode issue : "
+                         "{}".format(client_chap.error_msg))
+            halt("Unable to decode password for "
+                 "{}".format(client_iqn))
 
-        client = GWClient(logger, client_iqn, image_list, client_chap.chap_str)
+        client = GWClient(logger,
+                          client_iqn,
+                          image_list,
+                          chap_str)
+
         client.manage('present')  # ensure the client exists
 
-    if not portals_active:
+
+def apply_config():
+    """
+    procesing logic that orchestrates the creation of the iSCSI gateway
+    to LIO.
+    """
+
+    # access config_loading from the outer scope, for r/w
+    global config_loading
+    config_loading = True
+
+    local_gw = this_host()
+
+    logger.info("Reading the configuration object to update local LIO "
+                "configuration")
+
+    # first check to see if we have any entries to handle - if not, there is
+    # no work to do..
+    if "gateways" not in config.config:
+        logger.info("Configuration is empty - nothing to define to LIO")
+        config_loading = False
+        return
+    if local_gw not in config.config['gateways']:
+        logger.info("Configuration does not have an entry for this host({}) - "
+                    "nothing to define to LIO".format(local_gw))
+        config_loading = False
+        return
+
+    # at this point we have a gateway entry that applies to the running host
+    logger.info("Processing Gateway configuration")
+    gateway = define_gateway()
+
+    logger.info("Processing LUN configuration")
+    define_luns(gateway)
+
+    logger.info("Processing client configuration")
+    define_clients()
+
+    if not portals_active():
         # The tpgs, luns and clients are all defined, but the active tpg
         # doesn't have an IP bound to it yet (due to the enable_portals=False
         # setting above)
@@ -341,6 +418,10 @@ def main():
 
 
 if __name__ == '__main__':
+
+    # Setup an exception handler, so any uncaught exception can trigger a
+    # clean up process
+    sys.excepthook = exception_handler
 
     # Setup signal handlers for stop and reload actions from systemd
     signal.signal(signal.SIGTERM, signal_stop)

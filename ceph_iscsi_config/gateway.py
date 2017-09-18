@@ -175,13 +175,13 @@ class GWTarget(object):
         try:
             tpg = TPG(self.target)
 
-            self.logger.debug("(Gateway.create_target) Added tpg for portal "
+            self.logger.debug("(Gateway.create_tpg) Added tpg for portal "
                               "ip {}".format(ip))
             if ip == self.active_portal_ip:
                 if self.enable_portal:
                     NetworkPortal(tpg, ip)
                 tpg.enable = True
-                self.logger.debug("(Gateway.create_target) Added tpg for "
+                self.logger.debug("(Gateway.create_tpg) Added tpg for "
                                   "portal ip {} is enabled".format(ip))
             else:
                 NetworkPortal(tpg, ip)
@@ -190,7 +190,7 @@ class GWTarget(object):
                 # by disabling tpg_enabled_sendtargets, discovery to just one
                 # node will return all portals (default is 1)
                 tpg.set_attribute('tpg_enabled_sendtargets', '0')
-                self.logger.debug("(Gateway.create_target) Added tpg for "
+                self.logger.debug("(Gateway.create_tpg) Added tpg for "
                                   "portal ip {} as disabled".format(ip))
 
             self.tpg_list.append(tpg)
@@ -202,8 +202,10 @@ class GWTarget(object):
         else:
 
             self.changes_made = True
-            self.logger.info("(Gateway.create_target) created an iscsi target"
-                             " with iqn of '{}'".format(self.iqn))
+            self.logger.info("(Gateway.create_tpg) created TPG '{}' "
+                             "for target iqn '{}'".format(tpg.tag,
+                                                          self.iqn))
+
 
     def create_target(self):
         """
