@@ -69,10 +69,22 @@ class Disks(UIGroup):
         # NB the text above is shown on a help create request in the CLI
 
         if '.' in pool:
-            self.logger.debug("user provided combined pool.image format rqst")
-            if not size:
+            # shorthand version of the command
+            self.logger.debug("user provided pool.image format request")
+            if image:
                 size = image
+            else:
+                self.logger.error("Shorthand command is create <pool>.<image>"
+                                  " <size>")
+                return
             pool, image = pool.split('.')
+
+        else:
+            # long format request
+            if not pool or not image or not size:
+                self.logger.error("Invalid create: pool, image and size "
+                                  "parameters are needed")
+                return
 
 
         self.logger.debug("CMD: /disks/ create pool={} "
