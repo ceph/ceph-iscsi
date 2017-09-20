@@ -145,9 +145,6 @@ class Disks(UIGroup):
             self.logger.debug("- LUN(s) ready on all gateways")
             self.logger.info("ok")
 
-            ceph_pools = self.parent.ceph.local_ceph.pools
-            ceph_pools.refresh()
-
             self.logger.debug("Updating UI for the new disk(s)")
             for n in range(1, (int(count)+1), 1):
 
@@ -171,6 +168,10 @@ class Disks(UIGroup):
                 else:
                     raise GatewayAPIError("Unable to retrieve disk details "
                                           "for '{}' from the API".format(disk_key))
+
+            ceph_pools = self.parent.ceph.local_ceph.pools
+            ceph_pools.refresh()
+
         else:
             self.logger.error("Failed : {}".format(api.response.json()['message']))
             rc = 8
