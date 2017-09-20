@@ -373,7 +373,7 @@ class LUN(object):
             # requested image is already defined to ceph
 
             if rbd_image.valid:
-
+                self.size_bytes = rbd_image._get_size_bytes()
                 # rbd image is OK to use, so ensure it's in the config
                 # object
                 if self.config_key not in self.config.config['disks']:
