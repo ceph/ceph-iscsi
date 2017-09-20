@@ -253,13 +253,13 @@ class Client(UINode):
 
         return ", ".join(msg), status
 
-    def ui_command_auth(self, nochap=False, chap=None):
+    def ui_command_auth(self, chap=None):
         """
         Client authentication can be set to use CHAP by supplying the
         a string of the form <username>/<password>
 
         e.g.
-        auth nochap | chap=username/password
+        auth chap=username/password | nochap
 
         username ... The username is freeform, but would typically be the
                      host's shortname or iqn
@@ -274,10 +274,24 @@ class Client(UINode):
 
         self.logger.debug("CMD: ../hosts/<client_iqn> auth *")
 
-        if nochap:
-            chap = ''
+        if not chap:
+            self.logger.error("To set or reset authentication, specify either "
+                              "chap=<user>/<password> or nochap")
+            return
 
-        self.logger.debug("Client '{}' AUTH update".format(self.client_iqn))
+        if chap == 'nochap':
+            chap = ''
+        else:
+            # string could have been supplied as chap=user/password or
+            # simply user/password - either way all we see is user/password
+            if '/' not in chap:
+                self.logger.error(
+                    "CHAP format is invalid - must be <username>/<password>"
+                    ". Use 'help auth' to show more info")
+                return
+
+        self.logger.debug(
+            "CHAP to be set to '{}' for '{}'".format(chap, self.client_iqn))
 
         api_vars = {"chap": chap}
 
