@@ -207,9 +207,9 @@ class CephCluster(UIGroup):
         # assume a luminous or above ceph cluster
         self.health_status = status['health'].get('status',
                                                   status['health'].get('overall_status'))
-        self.health_list = [check.get('summary') for check in
-                            status['health'].get('summary')
-                            if "monitoring scripts" not in check.get('summary')]
+        self.health_list = [check.get('summary').get('message') for key, check in
+                            status['health'].get('checks', {}).items()
+                            if check.get('summary', {}).get('message')]
 
     @property
     def num_pools(self):
