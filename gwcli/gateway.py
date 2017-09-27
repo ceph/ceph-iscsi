@@ -7,8 +7,8 @@ from gwcli.node import UIGroup, UINode, UIRoot
 from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks
 from gwcli.client import Clients, CHAP
-from gwcli.utils import (this_host, GatewayAPIError, GatewayError,
-                         APIRequest, console_message, valid_iqn)
+from gwcli.utils import (this_host, response_message, GatewayAPIError,
+                         GatewayError, APIRequest, console_message, valid_iqn)
 
 import ceph_iscsi_config.settings as settings
 
@@ -94,7 +94,12 @@ class ISCSIRoot(UIRoot):
         api.get()
 
         if api.response.status_code == 200:
-            return api.response.json()
+            try:
+                return api.response.json()
+            except:
+                self.error = True
+                self.error_msg = "Malformed REST API response"
+                return {}
         else:
             self.error = True
             self.error_msg = "REST API failure, code : " \
@@ -238,7 +243,8 @@ class ISCSITarget(UIGroup):
             self.logger.error("Failed to create the target on the local node")
 
             raise GatewayAPIError("iSCSI target creation failed - "
-                                  "{}".format(api.response.json()['message']))
+                                  "{}".format(response_message(api.response,
+                                                               self.logger)))
 
     def ui_command_clearconfig(self, confirm=None):
         """
@@ -273,7 +279,12 @@ class ISCSITarget(UIGroup):
             self.logger.error("Unable to get fresh copy of the configuration")
             raise GatewayAPIError
 
-        current_config = api.response.json()
+        try:
+            current_config = api.response.json()
+        except:
+            self.logger.error("Malformed REST API response")
+            raise GatewayAPIError
+
         num_clients = len(current_config['clients'].keys())
         num_disks = len(current_config['disks'].keys())
 
@@ -306,7 +317,7 @@ class ISCSITarget(UIGroup):
             api = APIRequest(gw_api)
             api.delete()
             if api.response.status_code != 200:
-                msg = api.response.json()['message']
+                msg = response_message(api.response, self.logger)
                 self.logger.error("Delete of {} failed : {}".format(gw_name,
                                                                     msg))
                 raise GatewayAPIError
@@ -522,14 +533,12 @@ class GatewayGroup(UIGroup):
         api = APIRequest(gw_rqst, data=gw_vars)
         api.put()
 
+        msg = response_message(api.response, self.logger)
         if api.response.status_code != 200:
-
-            msg = api.response.json()['message']
-
             self.logger.error("Failed : {}".format(msg))
             return
 
-        self.logger.debug("{}".format(api.response.json()['message']))
+        self.logger.debug("{}".format(msg))
         self.logger.debug("Adding gw to UI")
 
         # Target created OK, get the details back from the gateway and

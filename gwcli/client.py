@@ -2,7 +2,7 @@
 
 from gwcli.node import UIGroup, UINode
 
-from gwcli.utils import human_size, APIRequest
+from gwcli.utils import human_size, response_message, APIRequest
 
 from ceph_iscsi_config.client import CHAP
 import ceph_iscsi_config.settings as settings
@@ -78,7 +78,8 @@ class Clients(UIGroup):
             self.logger.info('ok')
 
         else:
-            self.logger.error("Failed: {}".format(api.response.json()['message']))
+            self.logger.error("Failed: {}".format(response_message(api.response,
+                                                                   self.logger)))
             return
 
 
@@ -127,8 +128,7 @@ class Clients(UIGroup):
             self.logger.info('ok')
         else:
             # client delete request failed
-            error_message = api.response.json()['message']
-            self.logger.error(error_message)
+            self.logger.error(response_message(api.response, self.logger))
 
     def update_lun_map(self, action, rbd_path, client_iqn):
         """
@@ -310,7 +310,8 @@ class Client(UINode):
 
         else:
             self.logger.error("Failed to update the client's auth"
-                              " :{}".format(api.response.json()['message']))
+                              " :{}".format(response_message(api.response,
+                                                             self.logger)))
             return
 
     @staticmethod
@@ -444,7 +445,11 @@ class Client(UINode):
                 api.get()
 
                 if api.response.status_code == 200:
-                    lun_dict = api.response.json()['message']
+                    try:
+                        lun_dict = api.response.json()['message']
+                    except:
+                        self.logger.error("Malformed REST API response")
+                        return
 
                     # now update the UI
                     lun_id = lun_dict[disk]['lun_id']
@@ -472,7 +477,8 @@ class Client(UINode):
                               "\n{}".format(action,
                                             disk,
                                             self.client_iqn,
-                                            api.response.json()['message']))
+                                            response_message(api.response,
+                                                             self.logger)))
             return
 
     def add_lun(self, disk, lun_id):

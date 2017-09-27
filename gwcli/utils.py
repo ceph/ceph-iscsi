@@ -61,9 +61,12 @@ def get_config():
     api.get()
 
     if api.response.status_code == 200:
-        return api.response.json()
-    else:
-        return {}
+        try:
+            return api.response.json()
+        except:
+            pass
+
+    return {}
 
 
 def valid_iqn(iqn):
@@ -124,7 +127,11 @@ def valid_gateway(gw_name, gw_ip, config):
                 "rbd-target-api log, is the API server "
                 "running?".format(gw_name))
 
-    target_ips = api.response.json()['data']
+    try:
+        target_ips = api.response.json()['data']
+    except:
+        return "Malformed REST API response"
+
     if gw_ip not in target_ips:
         return ("IP address of {} is not available on {}. Valid "
                 "IPs are :{}".format(gw_ip,
@@ -141,7 +148,11 @@ def valid_gateway(gw_name, gw_ip, config):
 
     # compare the hash of the new gateways conf file with the local one
     local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
-    remote_hash = str(api.response.json()['data'])
+    try:
+        remote_hash = str(api.response.json()['data'])
+    except:
+        remote_hash = None
+
     if local_hash != remote_hash:
         return ("/etc/ceph/iscsi-gateway.cfg on {} does "
                 "not match the local version. Correct and "
@@ -151,7 +162,11 @@ def valid_gateway(gw_name, gw_ip, config):
     api = APIRequest(gw_api + '/sysinfo/checkversions')
     api.get()
     if api.response.status_code != 200:
-        errors = api.response.json()['data']
+        try:
+            errors = api.response.json()['data']
+        except:
+            return "Malformed REST API response"
+
         return ("{} failed package validation checks - "
                 "{}".format(gw_name,
                             ','.join(errors)))
@@ -592,3 +607,22 @@ def os_cmd(command):
         return cmd_output
     else:
         return ''
+
+def response_message(response, logger=None):
+    """
+    Attempts to retrieve the "message" value from a JSON-encoded response
+    message. If the JSON fails to parse, the response will be returned
+    as-is.
+    :param response: (requests.Response) response
+    :param logger: optional logger
+    :return: (str) response message
+    """
+    try:
+        return response.json()['message']
+    except:
+        if logger:
+            logger.debug("Failed API request: {} {}\n{}".format(response.request.method,
+                                                                response.request.url,
+                                                                response.text))
+        return "{} {}".format(response.status_code, response.reason)
+
