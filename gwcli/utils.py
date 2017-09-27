@@ -2,6 +2,7 @@
 
 import socket
 import requests
+from requests import Response
 import sys
 import rados
 import rbd
@@ -123,9 +124,9 @@ def valid_gateway(gw_name, gw_ip, config):
     api.get()
 
     if api.response.status_code != 200:
-        return ("ipv4_addresses query to {} failed - check"
-                "rbd-target-api log, is the API server "
-                "running?".format(gw_name))
+        return ("ipv4_addresses query to {} failed - check "
+                "rbd-target-api log. Is the API server "
+                "running and in the right mode (http/https)?".format(gw_name))
 
     try:
         target_ips = api.response.json()['data']
@@ -537,7 +538,15 @@ class APIRequest(object):
             try:
                 self.data = request_method(*self.args, **self.kwargs)
             except requests.ConnectionError:
-                raise GatewayAPIError("Unable to connect to api endpoint @ {}".format(self.args[0]))
+                msg = ("Unable to connect to api endpoint @ "
+                       "{}".format(self.args[0]))
+                self.data = Response()
+                self.data.status_code = 500
+                self.data._content = '{{"message": "{}" }}'.format(msg)
+                return self._get_response
+            except:
+                raise GatewayAPIError("Unknown error connecting to "
+                                      "{}".format(self.args[0]))
             else:
                 # since the attribute is a callable, we must return with
                 # a callable
