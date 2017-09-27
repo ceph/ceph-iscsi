@@ -2,7 +2,7 @@
 
 from gwcli.node import UIGroup, UINode
 
-from gwcli.utils import human_size, response_message, APIRequest
+from gwcli.utils import human_size, response_message, valid_iqn, APIRequest
 
 from ceph_iscsi_config.client import CHAP
 import ceph_iscsi_config.settings as settings
@@ -62,6 +62,12 @@ class Clients(UIGroup):
         self.logger.debug("CMD: ../hosts/ create {}".format(client_iqn))
         cli_seed = {"luns": {}, "auth": {}}
 
+        # is the IQN usable?
+        if not valid_iqn(client_iqn):
+            self.logger.error("IQN name '{}' is not valid for "
+                              "iSCSI".format(client_iqn))
+            return
+
         # Issue the API call to create the client
         client_api = ('{}://127.0.0.1:{}/api/'
                       'client/{}'.format(self.http_mode,
@@ -101,6 +107,12 @@ class Clients(UIGroup):
         self.logger.debug("CMD: ../hosts/ delete {}".format(client_iqn))
 
         self.logger.debug("Client DELETE for {}".format(client_iqn))
+
+        # is the IQN usable?
+        if not valid_iqn(client_iqn):
+            self.logger.error("IQN name '{}' is not valid for "
+                              "iSCSI".format(client_iqn))
+            return
 
         client_api = ('{}://{}:{}/api/'
                       'client/{}'.format(self.http_mode,
