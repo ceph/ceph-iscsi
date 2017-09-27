@@ -10,7 +10,7 @@ from gwcli.node import UIGroup, UINode
 from gwcli.client import Clients
 
 from gwcli.utils import (human_size, readcontents, console_message,
-                         GatewayAPIError, GatewayError,
+                         response_message, GatewayAPIError, GatewayError,
                          this_host, APIRequest)
 
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes
@@ -174,7 +174,11 @@ class Disks(UIGroup):
                 api.get()
 
                 if api.response.status_code == 200:
-                    image_config = api.response.json()
+                    try:
+                        image_config = api.response.json()
+                    except:
+                        raise GatewayAPIError("Malformed REST API response")
+
                     Disk(parent, disk_key, image_config)
                     self.logger.debug("{} added to the UI".format(disk_key))
                 else:
@@ -185,7 +189,8 @@ class Disks(UIGroup):
             ceph_pools.refresh()
 
         else:
-            self.logger.error("Failed : {}".format(api.response.json()['message']))
+            self.logger.error("Failed : {}".format(response_message(api.response,
+                                                                    self.logger)))
             rc = 8
 
         return rc
@@ -308,7 +313,8 @@ class Disks(UIGroup):
         else:
             self.logger.debug("delete request failed - "
                               "{}".format(api.response.status_code))
-            self.logger.error("{}".format(api.response.json()['message']))
+            self.logger.error("{}".format(response_message(api.response,
+                                                           self.logger)))
             return
 
         ceph_pools = self.parent.ceph.local_ceph.pools
@@ -517,7 +523,8 @@ class Disk(UINode):
 
         else:
             self.logger.error("Failed to resize : "
-                              "{}".format(api.response.json()['message']))
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
 
 
     def _update_pool(self):

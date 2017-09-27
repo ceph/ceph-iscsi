@@ -3,7 +3,7 @@
 import re
 
 from gwcli.node import UIGroup, UINode
-from gwcli.utils import APIRequest
+from gwcli.utils import response_message, APIRequest
 import ceph_iscsi_config.settings as settings
 
 
@@ -94,7 +94,8 @@ class HostGroups(UIGroup):
         api.put()
         if api.response.status_code != 200:
             self.logger.error("Failed : "
-                              "{}".format(api.response.json()["message"]))
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
             return
 
         self.logger.debug('Adding group to the UI')
@@ -238,7 +239,8 @@ class HostGroup(UIGroup):
                           "{}".format(api.response.status_code))
         if api.response.status_code != 200:
             self.logger.error("Failed :"
-                              "{}".format(api.response.json()['message']))
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
             return
 
         # group updated, so update the UI
@@ -314,7 +316,8 @@ class HostGroup(UIGroup):
         self.logger.debug("- api call responded {}".format(api.response.status_code))
         if api.response.status_code != 200:
             self.logger.error("Failed: "
-                              "{}".format(api.response.json()['message']))
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
             return
 
         # group updated, so update the host-groups UI elements
