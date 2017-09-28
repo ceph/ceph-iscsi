@@ -626,9 +626,14 @@ class Gateway(UINode):
         :return:
         """
 
-        lookup = {200: {"status": "UP", "iscsi": "UP", "api": "UP"},
-                  503: {"status": "PARTIAL", "iscsi": "DOWN", "api": "UP"},
-                  999: {"status": "UNKNOWN", "iscsi": "UNKNOWN", "api": "DOWN"}
+        lookup = {200: {"status": "UP",
+                        "iscsi": "UP", "api": "UP"},
+                  500: {"status": "UNKNOWN",
+                        "iscsi": "UNKNOWN", "api": "UNKNOWN"},
+                  503: {"status": "PARTIAL",
+                        "iscsi": "DOWN", "api": "UP"},
+                  999: {"status": "UNKNOWN",
+                        "iscsi": "UNKNOWN", "api": "UNKNOWN"},
                   }
 
         gw_api = '{}://{}:{}/api/_ping'.format(self.http_mode,
