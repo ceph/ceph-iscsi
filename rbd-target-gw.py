@@ -378,6 +378,8 @@ def apply_config():
         return
 
     # at this point we have a gateway entry that applies to the running host
+    portals_already_active = portals_active()
+
     logger.info("Processing Gateway configuration")
     gateway = define_gateway()
 
@@ -387,7 +389,7 @@ def apply_config():
     logger.info("Processing client configuration")
     define_clients()
 
-    if not portals_active():
+    if not portals_already_active:
         # The tpgs, luns and clients are all defined, but the active tpg
         # doesn't have an IP bound to it yet (due to the enable_portals=False
         # setting above)
