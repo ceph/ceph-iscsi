@@ -273,11 +273,19 @@ class Client(UINode):
         e.g.
         auth chap=username/password | nochap
 
-        username ... The username is freeform, but would typically be the
-                     host's shortname or iqn
+        username ... the username is 8-64 character string. Each character
+                     may either be an alphanumeric or use one of the following
+                     special characters .,:,-,@.
+                     Consider using the hosts 'shortname' or the initiators IQN
+                     value as the username
+
         password ... the password must be between 12-16 chars in length
                      containing alphanumeric characters, plus the following
                      special characters @,_,-
+
+        WARNING: Using unsupported special characters may result in truncation,
+                 resulting in failed logins.
+
 
         Specifying 'nochap' will remove chap authentication for the client
         across all gateways.
@@ -298,8 +306,9 @@ class Client(UINode):
             # simply user/password - either way all we see is user/password
             if '/' not in chap:
                 self.logger.error(
-                    "CHAP format is invalid - must be <username>/<password>"
-                    ". Use 'help auth' to show more info")
+                    "CHAP format is invalid - must be a <username>/<password> "
+                    "format. Use 'help auth' to show the correct syntax and "
+                    "supported characters")
                 return
 
         self.logger.debug(
