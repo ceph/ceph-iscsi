@@ -351,7 +351,7 @@ def valid_credentials(credentials_str, auth_type='chap'):
         # username is any length and includes . and : chars
         # password is 12-16 chars long containing any alphanumeric
         # or !,_,& symbol
-        usr_regex = re.compile("^[\w\\.\:]+")
+        usr_regex = re.compile("^[\w\\.\:\@\_\-]{8,64}$")
         pw_regex = re.compile("^[\w\@\-\_]{12,16}$")
         if not usr_regex.search(user_name) or not pw_regex.search(password):
             return False
@@ -451,8 +451,8 @@ def valid_client(**kwargs):
         # credentials string must be valid
         if chap:
             if not valid_credentials(chap):
-                return ("Invalid chap credentials provided (must be "
-                        "user/password format)")
+                return ("Invalid format for CHAP credentials. Refer to 'help' "
+                        "or documentation for the correct format")
 
         return 'ok'
 
