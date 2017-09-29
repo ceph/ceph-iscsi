@@ -373,7 +373,6 @@ class LUN(object):
             # requested image is already defined to ceph
 
             if rbd_image.valid:
-                self.size_bytes = rbd_image._get_size_bytes()
                 # rbd image is OK to use, so ensure it's in the config
                 # object
                 if self.config_key not in self.config.config['disks']:
@@ -544,10 +543,6 @@ class LUN(object):
         :return boolean indicating whether the size matches
         """
 
-        # Ignore a target size that is less than the current rbd size
-        if self.size_bytes < rbd_object.size_bytes:
-            return True
-
         tmr = 0
         size_ok = False
         rbd_size_ok = False
@@ -556,7 +551,7 @@ class LUN(object):
         # We have to wait for the rbd size to match, since the rbd could have
         # been resized on another gateway host
         while tmr < settings.config.time_out:
-            if rbd_object.size_bytes == self.size_bytes:
+            if self.size_bytes <= rbd_object.current_size:
                 rbd_size_ok = True
                 break
             sleep(settings.config.loop_delay)
@@ -571,7 +566,7 @@ class LUN(object):
                                  "to {}".format(self.config_key,
                                                 self.size_bytes))
 
-                stg_object._control("dev_size={}".format(self.size_bytes))
+                stg_object.set_attribute("dev_size", self.size_bytes)
 
                 size_ok = stg_object.size == self.size_bytes
 
