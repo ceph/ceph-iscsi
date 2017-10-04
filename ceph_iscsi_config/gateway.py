@@ -374,9 +374,10 @@ class GWTarget(object):
                         mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
                         self.changes_made = True
                     except RTSLibError as err:
+                        self.logger.error("LUN mapping failed: {}".format(err))
                         self.error = True
                         self.error_msg = err
-                        break
+                        return
 
                     self.bind_alua_group_to_lun(config, mapped_lun)
 
