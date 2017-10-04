@@ -694,6 +694,10 @@ def _disk(image_id):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
+            if request.form['mode'] == 'create' and len(config.config['disks']) >= 256:
+                logger.error("LUN alloc problem - too many LUNs")
+                return jsonify(message="LUN allocation failure: too many LUNs"), 500
+
             lun.allocate()
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
@@ -715,7 +719,7 @@ def _disk(image_id):
                 gateway.manage('map')
                 if gateway.error:
                     logger.error("LUN mapping failed : "
-                                 "".format(gateway.error_msg))
+                                 "{}".format(gateway.error_msg))
                     return jsonify(message="LUN map failed"), 500
 
                 return jsonify(message="LUN created"), 200
