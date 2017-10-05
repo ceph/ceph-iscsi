@@ -582,9 +582,9 @@ def disk(image_id):
     logger.debug("All gateways: {}".format(gateways))
 
     # Any disk operation needs at least 2 gateways to be present
-    if len(gateways) < 2:
-        msg = "at least 2 gateways must exist before disk operations " \
-              "are permitted"
+    if len(gateways) < settings.config.minimum_gateways:
+        msg = "at least {} gateways must exist before disk operations " \
+              "are permitted".format(settings.config.minimum_gateways)
         logger.warning("disk create request failed: {}".format(msg))
         return jsonify(message=msg), 400
 
