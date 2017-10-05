@@ -318,7 +318,7 @@ def gateway(gateway_name=None):
         if len(current_disks.keys()) > 0:
             # there are disks in the environment, so we need to add them to the
             # new tpg created when the new gateway was added
-            seed_gateways = gateways.remove(ip_address)
+            seed_gateways = [ip for ip in gateways if ip != ip_address]
 
             resp_text, resp_code = seed_tpg(seed_gateways,
                                             gateway_name,
@@ -582,9 +582,9 @@ def disk(image_id):
     logger.debug("All gateways: {}".format(gateways))
 
     # Any disk operation needs at least 2 gateways to be present
-    if len(gateways) < 2:
-        msg = "at least 2 gateways must exist before disk operations " \
-              "are permitted"
+    if len(gateways) < settings.config.minimum_gateways:
+        msg = "at least {} gateways must exist before disk operations " \
+              "are permitted".format(settings.config.minimum_gateways)
         logger.warning("disk create request failed: {}".format(msg))
         return jsonify(message=msg), 400
 
