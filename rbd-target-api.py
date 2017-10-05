@@ -318,7 +318,7 @@ def gateway(gateway_name=None):
         if len(current_disks.keys()) > 0:
             # there are disks in the environment, so we need to add them to the
             # new tpg created when the new gateway was added
-            seed_gateways = gateways.remove(ip_address)
+            seed_gateways = [ip for ip in gateways if ip != ip_address]
 
             resp_text, resp_code = seed_tpg(seed_gateways,
                                             gateway_name,
