@@ -153,10 +153,19 @@ class ISCSIRoot(UIRoot):
         print(fmtd_config)
 
     def ui_command_export(self, mode='ansible'):
+        valid_modes = ['ansible', 'copy']
 
         self.logger.debug("CMD: export mode={}".format(mode))
 
+        if mode not in valid_modes:
+            self.logger.error("Invalid export mode requested - supported "
+                              "modes are: {}".format(','.join(valid_modes)))
+            return
+
         current_config = self._get_config()
+        if not current_config.get('gateways'):
+            self.logger.error("Export requested, but the config is empty")
+            return
 
         if mode == "ansible":
             self.export_ansible(current_config)
