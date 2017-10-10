@@ -103,8 +103,6 @@ def get_api_info():
     **UNRESTRICTED**
     """
 
-    internal_text = "Internal Use ONLY"
-
     links = []
     sorted_rules = sorted(app.url_map.iter_rules(),
                           key=lambda x: x.rule, reverse=False)
