@@ -45,15 +45,18 @@ def ceph_rm_blacklist(blacklisted_ip):
     logger.info("Removing blacklisted entry for this host : "
                 "{}".format(blacklisted_ip))
 
-    result = subprocess.check_output("ceph osd blacklist rm {}".
-                                     format(blacklisted_ip),
+    result = subprocess.check_output("ceph --conf {cephconf} osd blacklist rm {blacklisted_ip}".
+                                     format(blacklisted_ip=blacklisted_ip,
+                                            cephconf=settings.config.cephconf),
                                      stderr=subprocess.STDOUT, shell=True)
     if "un-blacklisting" in result:
         logger.info("Successfully removed blacklist entry")
         return True
     else:
         logger.critical("blacklist removal failed. Run"
-                        " 'ceph osd blacklist rm {}'".format(blacklisted_ip))
+                        " 'ceph --conf {cephconf} osd blacklist rm {blacklisted_ip}'".
+                        format(blacklisted_ip=blacklisted_ip,
+                               cephconf=settings.config.cephconf))
         return False
 
 
@@ -163,13 +166,14 @@ def osd_blacklist_cleanup():
 
         # NB. Need to use the stderr override to catch the output from
         # the command
-        blacklist = subprocess.check_output("ceph osd blacklist ls",
+        blacklist = subprocess.check_output("ceph --conf {cephconf} osd blacklist ls".
+                                            format(cephconf=settings.config.cephconf),
                                             shell=True,
                                             stderr=subprocess.STDOUT)
 
     except subprocess.CalledProcessError:
-        logger.critical("Failed to run 'ceph osd blacklist ls'. "
-                        "Please resolve manually...")
+        logger.critical("Failed to run 'ceph --conf {cephconf} osd blacklist ls'. "
+                        "Please resolve manually...".format(cephconf=settings.config.cephconf))
         cleanup_state = False
     else:
 
