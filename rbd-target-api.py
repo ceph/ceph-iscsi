@@ -823,7 +823,9 @@ def clientauth(client_iqn):
     Coordinate client authentication changes across each gateway node
     The following parameters are needed to manage client auth
     :param client_iqn: (str) client IQN name
-    :param chap: (str) chap string of the form user/password or ''
+    :param chap: (str) chap string of the form username/password or ''
+            username is 8-64 chars long containing any alphanumeric in [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+            password is 12-16 chars long containing any alphanumeric in [0-9a-zA-Z] and '@' '-' '_'
     **RESTRICTED**
     """
 

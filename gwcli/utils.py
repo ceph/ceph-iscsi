@@ -349,8 +349,8 @@ def valid_credentials(credentials_str, auth_type='chap'):
         return False
 
     if auth_type == 'chap':
-        # username is any length and includes . and : chars
-        # password is 12-16 chars long containing any alphanumeric
+        # username is 8-64 chars long containing any alphanumeric in [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+        # password is 12-16 chars long containing any alphanumeric in [0-9a-zA-Z] and '@' '-' '_'
         # or !,_,& symbol
         usr_regex = re.compile("^[\w\\.\:\@\_\-]{8,64}$")
         pw_regex = re.compile("^[\w\@\-\_]{12,16}$")
