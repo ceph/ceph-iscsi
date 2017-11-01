@@ -62,16 +62,47 @@ class Disks(UIGroup):
         """
         Create a LUN and assign to the gateway(s).
 
-        The create process needs the pool name, rbd image name
-        and the size parameter. 'size' should be a numeric suffixed
-        by either M, G or T (representing the allocation unit)
+        The create command supports two request formats;
+
+        Long format  : create pool=<name> image=<name> size=<size>
+        Short format : create pool.image <size>
+
+        e.g.
+        create pool=rbd image=testimage size=100g
+        create rbd.testimage 100g
+
+        The syntax of each parameter is as follows;
+        pool  : Pool and image name may contain a-z, A-Z, 0-9 or '-' chars
+        image
+        size  : integer, suffixed by the allocation unit - either m/M, g/G or
+                t/T representing the MB/GB/TB [1]
+        count : integer (default is 1)[2]. If the request provides a count=<n>
+                parameter the image name will be used as a prefix, and the count
+                used as a suffix to create multiple LUNs from the same request.
+                e.g.
+                create rbd.test 1g count=5
+                -> create 5 LUNs called test1..test5 each of 1GB in size
+                   from the rbd pool
+
+        Notes.
+        1) size does not support decimal representations
+        2) Using a count to create multiple LUNs will lock the CLI until all
+           LUNs have been created
         """
         # NB the text above is shown on a help create request in the CLI
 
         if '.' in pool:
             # shorthand version of the command
             self.logger.debug("user provided pool.image format request")
+
             if image:
+                if size:
+                    try:
+                        count = int(size)
+                    except ValueError:
+                        self.logger.error("Invalid count provided "
+                                          "({} ?)".format(size))
+                        return
                 size = image
             else:
                 self.logger.error("Shorthand command is create <pool>.<image>"
@@ -86,6 +117,15 @@ class Disks(UIGroup):
                                   "parameters are needed")
                 return
 
+        if not valid_size(size):
+            self.logger.error("Invalid size requested. Must be an integer, "
+                              "suffixed by M, G or T. See help for more info")
+            return
+
+        if count:
+            if not str(count).isdigit():
+                self.logger.error("invalid count format, must be an integer")
+                return
 
         self.logger.debug("CMD: /disks/ create pool={} "
                           "image={} size={} count={}".format(pool,

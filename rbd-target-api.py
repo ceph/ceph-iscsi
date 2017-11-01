@@ -555,7 +555,7 @@ def disk(image_id):
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5001/api/all_disk/rbd.new2_
     """
 
-    disk_regex = re.compile("^\w+(\.)(\w+)")
+    disk_regex = re.compile("[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
     if not disk_regex.search(image_id):
         logger.debug("disk request rejected due to invalid image name")
         return jsonify(message="image id format is invalid - must be "
