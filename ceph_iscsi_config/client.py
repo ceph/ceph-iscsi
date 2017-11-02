@@ -435,16 +435,19 @@ class GWClient(object):
             self.logger.debug("(manage) config updates to be applied from "
                               "this host: {}".format(self.commit_enabled))
 
+            client_exists = self.exists()
             self.define_client()
             if self.error:
                 # unable to define the client!
                 return
 
-            # if a group name has been set on the client, we need to bypass
-            # lun setup
-            if not self.metadata["group_name"]:
-
-                # no group_name, so the client is managed individually
+            if client_exists and self.metadata["group_name"]:
+                # bypass setup_luns for existing clients that have an
+                # associated host group
+                pass
+            else:
+                # either the client didn't exist (new or boot time), or the
+                # group_name is not defined so run setup_luns for this client
                 bad_images = self.validate_images()
                 if not bad_images:
 
