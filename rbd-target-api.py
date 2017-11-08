@@ -543,7 +543,7 @@ def get_disks():
 def disk(image_id):
     """
     Coordinate the create/delete of rbd images across the gateway nodes
-    The "all_" method calls the corresponding disk api entrypoints across each
+    This method calls the corresponding disk api entrypoints across each
     gateway. Processing is done serially: creation is done locally first,
     then other gateways - whereas, rbd deletion is performed first against
     remote gateways and then the local machine is used to perform the actual
@@ -552,7 +552,7 @@ def disk(image_id):
     :param image_id: (str) rbd image name of the format pool.image
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5001/api/all_disk/rbd.new2_
+    curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5001/api/disk/rbd.new2_
     """
 
     disk_regex = re.compile("[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
