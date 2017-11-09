@@ -101,6 +101,8 @@ def get_api_info():
     """
     Display all the available API endpoints
     **UNRESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api
     """
 
     links = []
@@ -147,6 +149,8 @@ def get_sys_info(query_type=None):
     Provide system information based on the query_type
     Valid query types are: ipv4_addresses, checkconf and checkversions
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/sysinfo/ipv4_addresses
     """
 
     if query_type == 'ipv4_addresses':
@@ -180,6 +184,8 @@ def target(target_iqn=None):
     for ALL gateways
     :param target_iqn: IQN of the target each gateway will use
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
     """
     if request.method == 'PUT':
 
@@ -216,7 +222,10 @@ def get_config():
     Return the complete config object to the caller (must be authenticated)
     WARNING: Contents will include any defined CHAP credentials
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/config
     """
+
     if request.method == 'GET':
         return jsonify(config.config), 200
 
@@ -227,7 +236,10 @@ def gateways():
     """
     Return the gateway subsection of the config object to the caller
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/gateways
     """
+
     if request.method == 'GET':
         return jsonify(config.config['gateways']), 200
 
@@ -245,6 +257,8 @@ def gateway(gateway_name=None):
     :param skipchecks: (bool) whether to skip OS/software versions checks
            default: FALSE
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d ip_address=192.168.122.69 -X PUT http://192.168.122.69:5000/api/gateway/iscsi-gw0
     """
 
     # the definition of a gateway into an existing configuration can apply the
@@ -550,9 +564,16 @@ def disk(image_id):
     rbd delete.
 
     :param image_id: (str) rbd image name of the format pool.image
+    :param mode: (str) 'create' or 'resize' the rbd image
+    :param size: (str) the size of the rbd image
+    :param pool: (str) the pool name the rbd image will be in
+    :param count: (str) the number of images will be created
+    :param owner: (str) the owner of the rbd image
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5001/api/disk/rbd.new2_
+    curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
+    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
+    curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
 
     disk_regex = re.compile("[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
@@ -777,6 +798,8 @@ def get_clients():
     This information will include auth information, hence the
     restricted_auth wrapper
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/clients
     """
 
     client_list = config.config['clients'].keys()
@@ -827,6 +850,9 @@ def clientauth(client_iqn):
             username is 8-64 chars long containing any alphanumeric in [0-9a-zA-Z] and '.' ':' '@' '_' '-'
             password is 12-16 chars long containing any alphanumeric in [0-9a-zA-Z] and '@' '-' '_'
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d chap='' -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
+    curl --insecure --user admin:admin -d chap=dmin1234/admin12345678 -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
     """
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
@@ -891,6 +917,8 @@ def clientlun(client_iqn):
     :param client_iqn: (str) IQN of the client
     :param disk: (str) rbd image name of the format pool.image
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d disk=rbd.new2_1 -X PUT https://192.168.122.69:5000/api/clientlun/iqn.2017-08.org.ceph:iscsi-gw0
     """
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
@@ -983,8 +1011,8 @@ def client(client_iqn):
     :param client_iqn: (str) IQN of the client to create or delete
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X PUT https://192.168.122.69:5001/api/all_client/iqn.1994-05.com.redhat:myhost4
-    curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5001/api/all_client/iqn.1994-05.com.redhat:myhost4
+    curl --insecure --user admin:admin -X PUT https://192.168.122.69:5000/api/client/iqn.1994-05.com.redhat:myhost4
+    curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/client/iqn.1994-05.com.redhat:myhost4
     """
 
     method = {"PUT": 'create',
@@ -1101,7 +1129,10 @@ def hostgroups():
     """
     Return the hostgroup names defined to the configuration
     **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/hostgroups
     """
+
     if request.method == 'GET':
         return jsonify({"groups": config.config['groups'].keys()}), 200
 
@@ -1117,6 +1148,11 @@ def hostgroup(group_name):
     :param: disks (list) list of disks that each member should have masked
     :param: action (str) 'add'/'remove' group's client members/disks, default is 'add'
     :return:
+    Examples:
+    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/hostgroup/group_name
+    curl --insecure --user admin:admin -d members=iqn.1994-05.com.redhat:myhost4 -d disks=rbd.disk1 -X PUT http://192.168.122.69:5000/api/hostgroup/group_name
+    curl --insecure --user admin:admin -d action=remove -d disks=rbd.disk1 -X PUT http://192.168.122.69:5000/api/hostgroup/group_name
+    curl --insecure --user admin:admin -X DELETE http://192.168.122.69:5000/api/hostgroup/group_name
     """
     http_mode = 'https' if settings.config.api_secure else 'http'
     valid_hostgroup_actions = ['add', 'remove']
