@@ -1115,6 +1115,7 @@ def hostgroup(group_name):
     :param group_name: (str) group name
     :param: members (list) list of client iqn's that are members of this group
     :param: disks (list) list of disks that each member should have masked
+    :param: action (str) 'add'/'remove' group's client members/disks, default is 'add'
     :return:
     """
     http_mode = 'https' if settings.config.api_secure else 'http'
@@ -1147,12 +1148,12 @@ def hostgroup(group_name):
             current_members = []
             current_disks = []
 
-        changed_members = request.form.get('member', '')
+        changed_members = request.form.get('members', '')
         if changed_members == '':
             changed_members = []
         else:
             changed_members = changed_members.split(',')
-        changed_disks = request.form.get('disk', '')
+        changed_disks = request.form.get('disks', '')
         if changed_disks == '':
             changed_disks = []
         else:
