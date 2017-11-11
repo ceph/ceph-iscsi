@@ -312,8 +312,15 @@ class ISCSITarget(UIGroup):
         # last to ensure we don't fall foul of the api auth check
         gw_list = [gw_name for gw_name in gateway_group
                    if isinstance(gateway_group[gw_name], dict)]
-        gw_list.remove(this_host())
-        gw_list.append(this_host())
+
+        this_gw = this_host()
+        if this_gw not in gw_list:
+            self.logger.warning("Executor({}) must be in gateway list: "
+                              "{}".format(this_gw, gw_list))
+            return
+
+        gw_list.remove(this_gw)
+        gw_list.append(this_gw)
 
         for gw_name in gw_list:
 
