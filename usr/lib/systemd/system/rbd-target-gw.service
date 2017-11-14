@@ -21,6 +21,7 @@ PrivateTmp=true
 Restart=on-failure
 StartLimitInterval=30min
 StartLimitBurst=3
+TimeoutStopSec=infinity
 
 [Install]
 WantedBy=multi-user.target
