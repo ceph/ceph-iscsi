@@ -195,14 +195,17 @@ class Client(UINode):
                  
                  '''
 
-    display_attributes = ["client_iqn", "logged_in", "auth",
-                          "group_name", "luns"]
+    display_attributes = ["client_iqn", "ip_address", "alias", "logged_in",
+                          "auth", "group_name", "luns"]
 
     def __init__(self, parent, client_iqn, client_settings):
         UINode.__init__(self, client_iqn, parent)
         self.client_iqn = client_iqn
         self.parent.client_map[client_iqn] = self
         self.group_name = ''
+
+        self.ip_address = ''
+        self.alias = ''
 
         for k, v in client_settings.iteritems():
             self.__setattr__(k, v)
@@ -224,14 +227,6 @@ class Client(UINode):
             lun_id = self.luns[rbd_path]['lun_id']
             self.parent.update_lun_map('add', rbd_path, self.client_iqn)
             MappedLun(self, rbd_path, lun_id)
-
-    def _get_logged_in_state(self):
-
-        r = root.RTSRoot()
-        for sess in r.sessions:
-            if sess['parent_nodeacl'].node_wwn == self.client_iqn:
-                return sess['state']
-        return ''
 
     def __str__(self):
         return self.get_info()
@@ -533,7 +528,17 @@ class Client(UINode):
         r = root.RTSRoot()
         for sess in r.sessions:
             if sess['parent_nodeacl'].node_wwn == self.client_iqn:
-                return sess['state']
+                self.alias = sess.get('alias')
+                state = sess.get('state').upper()
+                ips = set()
+                if state == 'LOGGED_IN':
+                    for conn in sess.get('connections'):
+                        ips.add(conn.get('address'))
+                    self.ip_address = ','.join(list(ips))
+                else:
+                    self.ip_address = ''
+
+                return state
         return ''
 
 
