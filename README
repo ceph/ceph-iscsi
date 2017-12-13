@@ -64,6 +64,16 @@ Simply install the provided rpm with
 
 ### Manually
 
+The following packages are required by ceph-iscsi-cli and must be
+installed before starting the rbd-target-api service:
+
+python-rtslib
+ceph-iscsi-config
+python-requests
+python-configshell
+python-flask
+pyOpenSSL
+
 To install the python package that provides the application logic, run the provided setup.py script
 i.e. ```> python setup.py install```
 
