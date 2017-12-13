@@ -19,7 +19,7 @@ To install the python package that provides the application logic, run the provi
 i.e. ```> python setup.py install```   
 
 For the management daemon (rbd-target-gw), simply copy the following files into their equivalent places on each gateway  
-- <archive_root>/lib/systemd/system/rbd-target-gw.service  --> /lib/systemd/system  
+- <archive_root>/usr/lib/systemd/system/rbd-target-gw.service  --> /lib/systemd/system
 - <archive_root>/usr/bin/rbd-target-gw --> /usr/bin  
 
 Once the daemon is in place, reload the configuration with  
