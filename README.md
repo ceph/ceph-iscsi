@@ -26,6 +26,7 @@ Once the daemon is in place, reload the configuration with
 ```  
 systemctl daemon-reload
 systemctl enable rbd-target-gw 
+systemctl start rbd-target-gw
 ```
 
 ## Features
