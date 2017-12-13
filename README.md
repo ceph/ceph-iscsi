@@ -15,6 +15,16 @@ Simply install the provided rpm with
 
 ### Manually
 
+The following packages are required by ceph-iscsi-config and must be
+installed before starting the rbd-target-gw service:
+
+python-rados
+python-rbd
+python-netaddr
+python-netifaces
+python-rtslib
+python-crypto
+
 To install the python package that provides the application logic, run the provided setup.py script  
 i.e. ```> python setup.py install```   
 
