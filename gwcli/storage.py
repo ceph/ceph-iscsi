@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
 import os
-
+import time
+import Queue
+import threading
 import rados
 import rbd
 
@@ -20,12 +22,12 @@ import ceph_iscsi_config.settings as settings
 # FIXME - this ignores the warning issued when verify=False is used
 from requests.packages import urllib3
 
-__author__ = 'Paul Cuzner'
-
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Disks(UIGroup):
+
+    scan_interval = 0.02
 
     help_intro = '''
                  The disks section provides a summary of the rbd images that
@@ -45,13 +47,92 @@ class Disks(UIGroup):
         self.disk_info = {}
         self.disk_lookup = {}
 
+        self.scan_threads = self.get_ui_root().scan_threads
+        self.scan_queue = None
+        self.scan_mutex = None
+
+    def _get_disk_size(self, cluster_ioctx, disk_sizes):
+        """
+        Use the provided cluster context to take an rbd image name from the
+        queue and extract size and feature code. The resulting data is then
+        stored in a shared dict accessible by all scan threads
+        :param cluster_ioctx: cluster io context object
+        :param disk_sizes: dict of rbd images, holding size and feature code
+        :return: None
+        """
+
+        while True:
+
+            time.sleep(Disks.scan_interval)
+
+            try:
+                rbd_name = self.scan_queue.get(block=False)
+            except Queue.Empty:
+                break
+            else:
+
+                pool, image = rbd_name.split('.')
+                with cluster_ioctx.open_ioctx(pool) as ioctx:
+                    with rbd.Image(ioctx, image) as rbd_image:
+                        size = rbd_image.size()
+                        features = rbd_image.features()
+
+                        self.scan_mutex.acquire()
+                        disk_sizes[rbd_name] = {"size": size,
+                                                "features": features
+                                                }
+                        self.scan_mutex.release()
+
     def refresh(self, disk_info):
+        """
+        refresh the disk information by triggering a rescan of the rbd images
+        defined in the config object. Scanning uses a common queue object, and
+        multiple rbd scan threads to reduce the rescan time for larger
+        environments.
+        :param disk_info: dict corresponding to the disk subtree of the config
+               object
+        :return: None
+        """
+
         self.logger.debug("Refreshing disk information from the config object")
         self.disk_info = disk_info
+
+        self.logger.debug("- Scanning will use {} scan "
+                          "threads".format(self.scan_threads))
+
+        self.scan_queue = Queue.Queue()
+        self.scan_mutex = threading.Lock()
+        disk_sizes = dict()
+
+        # Load the queue
+        for disk_name in disk_info.keys():
+            self.scan_queue.put(disk_name)
+
+        start_time = int(time.time())
+        scan_threads = []
+        # Open a connection to the cluster
+        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+            # Initiate the scan threads
+            for _t in range(0, self.scan_threads, 1):
+                _thread = threading.Thread(target=self._get_disk_size,
+                                           args=(cluster, disk_sizes))
+                _thread.start()
+                scan_threads.append(_thread)
+
+            for _t in scan_threads:
+                _t.join()
+
+        end_time = int(time.time())
+        self.logger.debug("- rbd image scan complete: {}s".format(end_time - start_time))
+
         # Load the disk configuration
         for image_id in disk_info:
             image_config = disk_info[image_id]
-            Disk(self, image_id, image_config)
+            Disk(self,
+                 image_id=image_id,
+                 image_config=image_config,
+                 size=disk_sizes[image_id].get('size', 0),
+                 features=disk_sizes[image_id].get('features', 0))
 
     def reset(self):
         children = set(self.children)  # set of child objects
@@ -406,7 +487,7 @@ class Disk(UINode):
     display_attributes = ["image", "ceph_cluster", "pool", "wwn", "size_h",
                           "feature_list", "owner"]
 
-    def __init__(self, parent, image_id, image_config):
+    def __init__(self, parent, image_id, image_config, size=None, features=None):
         """
         Create a disk entry under the Disks subtree
         :param parent: parent object (instance of the Disks class)
@@ -438,9 +519,23 @@ class Disk(UINode):
             disk_map[image_id][k] = v
             self.__setattr__(k, v)
 
-        # Size/features are not stored in the config, since it can be changed
-        # outside of this tool-chain, so we get them dynamically
-        self.get_meta_data_tcmu()
+        if not size:
+            # Size/features are not stored in the config, since it can be changed
+            # outside of this tool-chain, so we get them dynamically
+            self.get_meta_data_tcmu()
+        else:
+            # size and features have been passed in from the Disks.refresh
+            # method
+            self.size = size
+            self.features = features
+
+        self.size_h = human_size(self.size)
+        self.feature_list = self._get_features()
+
+        # update the parent's disk info map
+        disk_map = self.parent.disk_info
+        disk_map[self.image_id]['size'] = self.size
+        disk_map[self.image_id]['size_h'] = self.size_h
 
     def summary(self):
         msg = [self.image, "({})".format(self.size_h)]
@@ -478,48 +573,40 @@ class Disk(UINode):
             with cluster.open_ioctx(self.pool) as ioctx:
                 with rbd.Image(ioctx, self.image) as rbd_image:
                     self.size = rbd_image.size()
-                    self.size_h = human_size(self.size)
                     self.features = rbd_image.features()
-                    self.feature_list = self._get_features()
 
-        # update the parent's disk info map
-        disk_map = self.parent.disk_info
-
-        disk_map[self.image_id]['size'] = self.size
-        disk_map[self.image_id]['size_h'] = self.size_h
-
-    def get_meta_data_krbd(self):
-        """
-        KRBD based method to get size and rbd features information
-        :return:
-        """
-        # image_path is a symlink to the actual /dev/rbdX file
-        image_path = "/dev/rbd/{}/{}".format(self.pool, self.rbd_image)
-        dev_id = os.path.realpath(image_path)[8:]
-        rbd_path = "/sys/devices/rbd/{}".format(dev_id)
-
-        try:
-            self.features = readcontents(os.path.join(rbd_path, 'features'))
-            self.size = int(readcontents(os.path.join(rbd_path, 'size')))
-        except IOError:
-            # if we get an ioError here, it means the config object passed
-            # back from the API is out of step with the physical configuration
-            # this can happen after a purge_gateways ansible playbook run if
-            # the gateways do not have there rbd-target-gw daemons reloaded
-            error_msg = "The API has returned disks that are not on this " \
-                        "server...reload rbd-target-api?"
-
-            self.logger.critical(error_msg)
-            raise GatewayError(error_msg)
-        else:
-
-            self.size_h = human_size(self.size)
-
-            # update the parent's disk info map
-            disk_map = self.parent.disk_info
-
-            disk_map[self.image_id]['size'] = self.size
-            disk_map[self.image_id]['size_h'] = self.size_h
+    # def get_meta_data_krbd(self):
+    #     """
+    #     KRBD based method to get size and rbd features information
+    #     :return:
+    #     """
+    #     # image_path is a symlink to the actual /dev/rbdX file
+    #     image_path = "/dev/rbd/{}/{}".format(self.pool, self.rbd_image)
+    #     dev_id = os.path.realpath(image_path)[8:]
+    #     rbd_path = "/sys/devices/rbd/{}".format(dev_id)
+    #
+    #     try:
+    #         self.features = readcontents(os.path.join(rbd_path, 'features'))
+    #         self.size = int(readcontents(os.path.join(rbd_path, 'size')))
+    #     except IOError:
+    #         # if we get an ioError here, it means the config object passed
+    #         # back from the API is out of step with the physical configuration
+    #         # this can happen after a purge_gateways ansible playbook run if
+    #         # the gateways do not have there rbd-target-gw daemons reloaded
+    #         error_msg = "The API has returned disks that are not on this " \
+    #                     "server...reload rbd-target-api?"
+    #
+    #         self.logger.critical(error_msg)
+    #         raise GatewayError(error_msg)
+    #     else:
+    #
+    #         self.size_h = human_size(self.size)
+    #
+    #         # update the parent's disk info map
+    #         disk_map = self.parent.disk_info
+    #
+    #         disk_map[self.image_id]['size'] = self.size
+    #         disk_map[self.image_id]['size_h'] = self.size_h
 
     def resize(self, size=None):
         """
