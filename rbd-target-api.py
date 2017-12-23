@@ -207,6 +207,7 @@ def target(target_iqn=None):
                                    "for {} - {}".format(target_iqn,
                                                         target.error_msg)), 500
 
+        config.refresh()
         return jsonify(message="Target defined successfully"), 200
 
     else:
