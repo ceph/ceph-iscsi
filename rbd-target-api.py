@@ -1470,7 +1470,7 @@ def pre_reqs_errors():
     ]
 
     k_vers = '3.10.0'
-    k_rel = '695.el7'
+    k_rel = '823.el7'
 
     errors_found = []
 
