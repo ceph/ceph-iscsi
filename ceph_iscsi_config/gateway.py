@@ -175,6 +175,9 @@ class GWTarget(object):
         try:
             tpg = TPG(self.target)
 
+            # Use initiator name based ACL by default.
+            tpg.set_attribute('authentication', '0');
+
             self.logger.debug("(Gateway.create_tpg) Added tpg for portal "
                               "ip {}".format(ip))
             if ip == self.active_portal_ip:
