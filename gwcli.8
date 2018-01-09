@@ -151,7 +151,7 @@ The 'hosts' section defines the iSCSI client definitions (NodeACLs) that provide
 .PP
 .TP
 \fB/iscsi-target/<iqn>/hosts/ create <client_iqn>
-The create command will define the client IQN to all gateways within the configuration. At creation time, the client is not using any CHAP based authentication.
+The create command will define the client IQN to all gateways within the configuration. At creation time, the client IQN is added to a ACL that allows normal iSCSI session logins for all clients with the IQN. To enable CHAP authentication use the \fBauth\fR command described below.
 .TP
 \fB/iscsi-target/<iqn>/hosts/ delete <client_iqn>
 The delete command will attempt to remove client IQN from all gateways within the configuration. The client must be logged out, for the delete command to be successful.
@@ -159,7 +159,7 @@ The delete command will attempt to remove client IQN from all gateways within th
 .nf
 \fB/iscsi-target/<iqn>/hosts/<client_iqn>/ auth chap=<user>/<pswd> | nochap\fR
 .fi
-CHAP authentication can be defined for the client with the \fBchap=\fR parameter. The username and password defined here must then be used within the client'd login credentials for this iscsi target. To remove chap authentication use the \fBnochap\fR keyword.
+CHAP authentication can be defined for the client with the \fBchap=\fR parameter. The username and password defined here must then be used within the client'd login credentials for this iscsi target. To remove chap authentication use the \fBnochap\fR keyword. If there are multiple clients, CHAP must be enabled for all clients or disabled for all clients. gwcli does not support mixing CHAP clients with IQN ACL clients.
 .TP
 .nf
 \fB/iscsi-target/<iqn>/hosts/<client_iqn>/ disk add | remove <disk_name>\fR
