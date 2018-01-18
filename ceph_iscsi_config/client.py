@@ -189,6 +189,19 @@ class GWClient(object):
                              "successfully".format(self.iqn))
             self.change_count += 1
 
+    def try_disable_auth(self, tpg):
+        """
+        Disable authentication (enable ACL mode) if this is the last CHAP user.
+
+        LIO doesn't allow us to mix and match ACLs and auth under a tpg. We
+        only allow ACL mode if there are not CHAP users.
+        """
+
+        for client in tpg.node_acls:
+            if client.chap_userid or client.chap_password:
+                return
+
+        tpg.set_attribute('authentication', '0')
 
     def configure_auth(self, auth_type, credentials):
         """
@@ -196,9 +209,10 @@ class GWClient(object):
         :return:
         """
 
-
+        chap_enabled=False
         if '/' in credentials:
             client_username, client_password = credentials.split('/', 1)
+            chap_enabled=True
         elif not credentials:
             client_username = ''
             client_password = ''
@@ -235,6 +249,11 @@ class GWClient(object):
                             self.error = True
                             self.error_msg = new_chap.error_msg
                             return
+
+                        if chap_enabled:
+                            self.tpg.set_attribute('authentication', '1')
+                        else:
+                            self.try_disable_auth(self.tpg)
 
                         self.logger.debug("Updating config object meta data")
                         self.metadata['auth']['chap'] = new_chap.chap_str
@@ -327,6 +346,7 @@ class GWClient(object):
 
         try:
             self.acl.delete()
+            self.try_disable_auth(self.tpg)
             self.change_count += 1
             self.logger.info("(Client.delete) deleted NodeACL for "
                              "{}".format(self.iqn))
