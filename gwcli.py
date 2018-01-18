@@ -62,6 +62,9 @@ def get_options():
     parser.add_argument('-d', '--debug', action='store_true',
                         default=False,
                         help='run with additional debug')
+    parser.add_argument('-t', '--threads', type=int,
+                        default=8,
+                        help='threads used for rbd scanning (default is 8)')
     parser.add_argument('-v', '--version', action='version',
                         version='%(prog)s - {}'.format(__version__))
     parser.add_argument('cli_command', type=str, nargs=argparse.REMAINDER)
@@ -90,7 +93,8 @@ def main():
 
     shell = GatewayCLI('~/.gwcli')
 
-    root_node = ISCSIRoot(shell)
+    root_node = ISCSIRoot(shell,
+                          scan_threads=options.threads)
 
     root_node.interactive = False if options.cli_command else True
     settings.config.interactive = False if options.cli_command else True

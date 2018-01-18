@@ -27,12 +27,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class ISCSIRoot(UIRoot):
 
-    def __init__(self, shell, endpoint=None):
+    def __init__(self, shell, scan_threads=1, endpoint=None):
         UIRoot.__init__(self, shell)
 
         self.error = False
         self.error_msg = ''
         self.interactive = True           # default interactive mode
+        self.scan_threads = scan_threads
 
         if settings.config.api_secure:
             self.http_mode = 'https'
