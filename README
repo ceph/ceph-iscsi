@@ -57,4 +57,35 @@ curl --insecure --user admin:admin -d "ip_address=192.168.122.104" \
      -X PUT https://192.168.122.69:5001/api/gateway/rh7-gw2
 
 
+## Installation
+### Via RPM
+Simply install the provided rpm with
+```rpm -ivh ceph-iscsi-cli-<ver>.el7.noarch.rpm```
 
+### Manually
+
+The following packages are required by ceph-iscsi-cli and must be
+installed before starting the rbd-target-api service:
+
+python-rtslib
+ceph-iscsi-config
+python-requests
+python-configshell
+python-flask
+pyOpenSSL
+
+To install the python package that provides the application logic, run the provided setup.py script
+i.e. ```> python setup.py install```
+
+For the management daemon (rbd-target-api), simply copy the following files into their equivalent places on each gateway
+- <archive_root>/usr/lib/systemd/system/rbd-target-api.service  --> /lib/systemd/system
+- <archive_root>/usr/bin/rbd-target-api--> /usr/bin
+
+## Configuration
+
+Once the package is in installed, the Ceph ceph-iscsi-cli instructions found
+here:
+
+http://docs.ceph.com/docs/master/rbd/iscsi-target-cli/
+
+can be used to create a iscsi-gateway.cfg and create a target.
