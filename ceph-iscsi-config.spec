@@ -1,6 +1,6 @@
 Name:           ceph-iscsi-config
-Version:        2.3
-Release:        2%{?dist}
+Version:        2.4
+Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
 License:        GPLv3
@@ -57,6 +57,32 @@ install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Mon Jan 22 2018 Jason Dillaman <dillaman@redhat.com> - 2.4-1
+- new release
+- Enable initiator name based ACL support
+- doc: list required python packages
+- doc: adding missing usr
+- doc: start rbd-target-gw
+- client: fix issue at boot where luns would not be mapped to clients
+- Add cluster name support
+- Abort lun mapping when an error occurs
+- Update LIO lun size after resize request
+- Activate portals when the gateway is freshly started
+- lun: fix import requests that use 0G for rbd image size
+- Restored accidentally deleted config initialization lines
+- rbd-target-gw: add exception handler to cleanly shutdown on errors
+- gateway: log messages corrected
+- Updated cfgstring to use comma as delimiter between optionals
+- Explicitly shut down RADOS when Python object destroyed
+- Improved systemd limits and system protection
+- Exclusive-lock should be the only required RBD image feature
+- spec updated to reflect updates to the host-group logic
+- group: fixes to process flow
+- group: doctext update
+- group: host group management fixes
+- utils: minor changes to the ListComparison class
+- client: changes to support host group management
+
 * Mon Sep 04 2017 Paul Cuzner <pcuzner@redhat.com> - 2.3-2
 - host group management updates
 
