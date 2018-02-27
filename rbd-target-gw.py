@@ -1,6 +1,6 @@
 #!/usr/bin/python -u
-# NB the python environment is using unbuffered mode (-u), so any "print" statements will appear in the
-# syslog 'immediately'
+# NB the python environment is using unbuffered mode (-u), so any "print"
+# statements will appear in the syslog 'immediately'
 
 import signal
 import logging
@@ -9,12 +9,14 @@ import netifaces
 import subprocess
 import time
 import sys
-import os
+
 import rados
 import rbd
+from flask import Flask, Response
 
+from rtslib_fb.root import RTSRoot
 
-from rtslib_fb import root
+from ceph_iscsi_config.metrics import GatewayStats
 
 import ceph_iscsi_config.settings as settings
 
@@ -25,6 +27,8 @@ from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.lio import LIO, Gateway
 from ceph_iscsi_config.utils import this_host, human_size
 
+# Create a flask instance
+app = Flask(__name__)
 
 def exception_handler(exception_type, exception, traceback,
                       debug_hook=sys.excepthook):
@@ -221,7 +225,7 @@ def get_tpgs():
     :return: count of the defined tpgs
     """
 
-    return len([tpg.tag for tpg in root.RTSRoot().tpgs])
+    return len([tpg.tag for tpg in RTSRoot().tpgs])
 
 
 def portals_active():
@@ -407,6 +411,30 @@ def apply_config():
     logger.info("iSCSI configuration load complete")
 
 
+@app.route("/", methods=["GET"])
+def prom_root():
+    """ handle the '/' endpoint - just redirect point the user at /metrics"""
+    return '''<!DOCTYPE html>
+    <html>
+    	<head><title>Ceph/iSCSI Prometheus Exporter</title></head>
+    	<body>
+    		<h1>Ceph/iSCSI Prometheus Exporter</h1>
+    		<p><a href='/metrics'>Metrics</a></p>
+    	</body>
+    </html>'''
+
+
+@app.route("/metrics", methods=["GET"])
+def prom_metrics():
+    """ Collect the stats and send back to the caller"""
+
+    stats = GatewayStats()
+    stats.collect()
+
+    return Response(stats.formatted(),
+                    content_type="text/plain")
+
+
 def main():
 
     # only look for osd blacklist entries when the service starts
@@ -418,9 +446,27 @@ def main():
     if not config_loading:
         apply_config()
 
-    # Just keep the main process alive to receive SIGHUP/SIGTERM
-    while True:
-        time.sleep(1)
+    if settings.config.prometheus_exporter:
+
+        logger.info("Integrated Prometheus exporter is enabled")
+        # starting a flask instance will occupy the main thread
+
+        # Attach the werkzeug log to the handlers defined in the outer scope
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.DEBUG)
+        log.addHandler(file_handler)
+        log.addHandler(syslog_handler)
+
+        app.run(host='::',
+                port=settings.config.prometheus_port,
+                debug=False,
+                threaded=True)
+
+    else:
+        logger.info("Integrated Prometheus exporter is disabled")
+        # Just keep the 'lights on' to receive SIGHUP/SIGTERM
+        while True:
+            time.sleep(1)
 
 
 if __name__ == '__main__':
