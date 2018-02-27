@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        2.4
+Version:        2.5
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -16,6 +16,7 @@ Requires:  python-netifaces >= 0.10.4
 Requires:  python-rtslib >= 2.1
 Requires:  rpm-python >= 4.11
 Requires:  python-crypto >= 2.6
+Requires:  python-flask >= 0.10.1
 
 BuildRequires:  python-devel
 BuildRequires:  python-setuptools
@@ -30,7 +31,9 @@ The configuration management modules may be are consumed by custom Ansible
 playbooks, and API server available from a separate rpm.
 
 The rbd-target-gw service is responsible for startup and shutdown actions,
-replacing the 'target' service used in standalone LIO implementations.
+replacing the 'target' service used in standalone LIO implementations. In addition,
+rbd-target-gw also provides a prometheus exporter for gateway LIO performance
+statistics, supporting monitoring and visualisation tools like Grafana.
 
 %prep
 %setup -q
@@ -57,6 +60,11 @@ install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Mon Feb 26 2018 Paul Cuzner <pcuzner@redhat.com> - 2.5-1
+- add prometheus endpoint to rbd-target-gw
+- additional options added to 'settings' to enable/disable prometheus exporter
+  and define the port the exporter is bound to
+
 * Mon Jan 22 2018 Jason Dillaman <dillaman@redhat.com> - 2.4-1
 - new release
 - Enable initiator name based ACL support
