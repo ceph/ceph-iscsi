@@ -30,7 +30,9 @@ class Settings(object):
                 "minimum_gateways": 2,
                 "ceph_config_dir": '/etc/ceph',
                 "priv_key": 'iscsi-gateway.key',
-                "pub_key": 'iscsi-gateway-pub.key'
+                "pub_key": 'iscsi-gateway-pub.key',
+                "prometheus_exporter": "true",
+                "prometheus_port": 9284
                 }
 
     target_defaults = {"osd_op_timeout": 30,
