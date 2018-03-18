@@ -936,8 +936,8 @@ def clientlun(client_iqn):
     logger.debug("this host is {}".format(local_gw))
     gateways = [key for key in config.config['gateways']
                 if isinstance(config.config['gateways'][key], dict)]
-    logger.debug("other gateways - {}".format(gateways))
     gateways.remove(local_gw)
+    logger.debug("other gateways - {}".format(gateways))
 
     disk = request.form.get('disk')
 
