@@ -1458,8 +1458,10 @@ def pre_reqs_errors():
     :return: list of configuration errors detected
     """
 
-    valid_dists = ["redhat"]
-    valid_versions = ['7.4']
+    dist_translations = {
+        "centos": "redhat"}
+    valid_dists = {
+        "redhat": 7.4}
 
     required_rpms = [
         {"name": "python-rtslib",
@@ -1477,8 +1479,12 @@ def pre_reqs_errors():
 
     dist, rel, dist_id = platform.linux_distribution(full_distribution_name=0)
 
-    if dist.lower() in valid_dists:
-        if rel not in valid_versions:
+    dist = dist.lower()
+    dist = dist_translations.get(dist, dist)
+    if dist in valid_dists:
+        # CentOS formats a release similar 7.4.1708
+        rel = float(".".join(rel.split('.')[:2]))
+        if rel < valid_dists[dist]:
             errors_found.append("OS version is unsupported")
 
         # check rpm versions are OK
