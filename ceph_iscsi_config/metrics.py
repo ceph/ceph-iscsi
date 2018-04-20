@@ -4,6 +4,7 @@ import threading
 import time
 import os
 
+import rtslib_fb.tcm as tcm
 from rtslib_fb.root import RTSRoot
 from rtslib_fb.utils import fread
 
@@ -75,6 +76,12 @@ class GatewayStats(object):
         return s.rstrip()
 
     def collect(self):
+
+        # the tcm module uses a global called bs_cache and performs lookups
+        # against this to verify a storage object exists. However, if a change
+        # is made the local copy of bs_cache in the rbd-target-gw scope is not
+        # changed, so we reset it here to ensure it always starts empty
+        tcm.bs_cache = {}
 
         stime = time.time()
         self._get_tpg()
