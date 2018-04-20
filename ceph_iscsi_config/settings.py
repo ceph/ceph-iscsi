@@ -32,7 +32,7 @@ class Settings(object):
                 "priv_key": 'iscsi-gateway.key',
                 "pub_key": 'iscsi-gateway-pub.key',
                 "prometheus_exporter": "true",
-                "prometheus_port": 9284
+                "prometheus_port": 9287
                 }
 
     target_defaults = {"osd_op_timeout": 30,
@@ -109,6 +109,3 @@ class Settings(object):
                     v = int(settings[k])
 
             self.__setattr__(k, v)
-
-
-
