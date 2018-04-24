@@ -318,6 +318,17 @@ def encryption_available():
 
     return all([os.path.exists(key) for key in keys])
 
+def gen_control_string(controls):
+    """
+    Generate a kernel control string from a given dictionary
+    of control arguments.
+    :return: control string (str)
+    """
+    control=''
+    for key,value in controls.iteritems():
+        if value is not None:
+            control += "{}={},".format(key, value)
+    return None if control == '' else control[:-1]
 
 class ListComparison(object):
 
