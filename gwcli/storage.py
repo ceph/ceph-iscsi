@@ -139,17 +139,17 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_create(self, pool=None, image=None, size=None, count=1):
+    def ui_command_create(self, pool=None, image=None, size=None, count=1, ring_buffer_size=None):
         """
         Create a LUN and assign to the gateway(s).
 
         The create command supports two request formats;
 
-        Long format  : create pool=<name> image=<name> size=<size>
+        Long format  : create pool=<name> image=<name> size=<size> ring_buffer_size=<buffer_size>
         Short format : create pool.image <size>
 
         e.g.
-        create pool=rbd image=testimage size=100g
+        create pool=rbd image=testimage size=100g ring_buffer_size=16
         create rbd.testimage 100g
 
         The syntax of each parameter is as follows;
@@ -164,6 +164,7 @@ class Disks(UIGroup):
                 create rbd.test 1g count=5
                 -> create 5 LUNs called test1..test5 each of 1GB in size
                    from the rbd pool
+        ring_buffer_size : integer (defaults to 8). Size of kernel (data) ring buffer.
 
         Notes.
         1) size does not support decimal representations
@@ -207,14 +208,20 @@ class Disks(UIGroup):
             if not str(count).isdigit():
                 self.logger.error("invalid count format, must be an integer")
                 return
+        if ring_buffer_size:
+            if not str(ring_buffer_size).isdigit():
+                self.logger.error("invalid ring_buffer_size format, must be an integer")
+                return
 
         self.logger.debug("CMD: /disks/ create pool={} "
-                          "image={} size={} count={}".format(pool,
-                                                             image,
-                                                             size,
-                                                             count))
+                          "image={} size={} count={} ring_buffer_size={}".format(pool,
+                                                                                 image,
+                                                                                 size,
+                                                                                 count,
+                                                                                 ring_buffer_size))
 
-        self.create_disk(pool=pool, image=image, size=size, count=count)
+        self.create_disk(pool=pool, image=image, size=size,
+                         count=count, ring_buffer_size=ring_buffer_size)
 
     def _valid_pool(self, pool=None):
         """
@@ -242,7 +249,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    parent=None):
+                    ring_buffer_size=None, parent=None):
 
         rc = 0
 
@@ -265,7 +272,7 @@ class Disks(UIGroup):
                                                               disk_key)
 
         api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
-                    'count': count, 'mode': 'create'}
+                    'count': count, 'ring_buffer_size': ring_buffer_size, 'mode': 'create'}
 
         self.logger.debug("Issuing disk create request")
 
