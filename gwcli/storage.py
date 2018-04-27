@@ -51,13 +51,13 @@ class Disks(UIGroup):
         self.scan_queue = None
         self.scan_mutex = None
 
-    def _get_disk_size(self, cluster_ioctx, disk_sizes):
+    def _get_disk_meta(self, cluster_ioctx, disk_meta):
         """
         Use the provided cluster context to take an rbd image name from the
         queue and extract size and feature code. The resulting data is then
         stored in a shared dict accessible by all scan threads
         :param cluster_ioctx: cluster io context object
-        :param disk_sizes: dict of rbd images, holding size and feature code
+        :param disk_meta: dict of rbd images, holding metadata
         :return: None
         """
 
@@ -70,17 +70,19 @@ class Disks(UIGroup):
             except Queue.Empty:
                 break
             else:
-
                 pool, image = rbd_name.split('.')
                 with cluster_ioctx.open_ioctx(pool) as ioctx:
                     with rbd.Image(ioctx, image) as rbd_image:
                         size = rbd_image.size()
                         features = rbd_image.features()
+                        snapshots = list(rbd_image.list_snaps())
 
                         self.scan_mutex.acquire()
-                        disk_sizes[rbd_name] = {"size": size,
-                                                "features": features
-                                                }
+                        disk_meta[rbd_name] = {
+                            "size": size,
+                            "features": features,
+                            "snapshots": snapshots
+                        }
                         self.scan_mutex.release()
 
     def refresh(self, disk_info):
@@ -102,7 +104,7 @@ class Disks(UIGroup):
 
         self.scan_queue = Queue.Queue()
         self.scan_mutex = threading.Lock()
-        disk_sizes = dict()
+        disk_meta = dict()
 
         # Load the queue
         for disk_name in disk_info.keys():
@@ -114,8 +116,8 @@ class Disks(UIGroup):
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
             # Initiate the scan threads
             for _t in range(0, self.scan_threads, 1):
-                _thread = threading.Thread(target=self._get_disk_size,
-                                           args=(cluster, disk_sizes))
+                _thread = threading.Thread(target=self._get_disk_meta,
+                                           args=(cluster, disk_meta))
                 _thread.start()
                 scan_threads.append(_thread)
 
@@ -131,8 +133,9 @@ class Disks(UIGroup):
             Disk(self,
                  image_id=image_id,
                  image_config=image_config,
-                 size=disk_sizes[image_id].get('size', 0),
-                 features=disk_sizes[image_id].get('features', 0))
+                 size=disk_meta[image_id].get('size', 0),
+                 features=disk_meta[image_id].get('features', 0),
+                 snapshots=disk_meta[image_id].get('snapshots', []))
 
     def reset(self):
         children = set(self.children)  # set of child objects
@@ -485,9 +488,10 @@ class Disks(UIGroup):
 class Disk(UINode):
 
     display_attributes = ["image", "ceph_cluster", "pool", "wwn", "size_h",
-                          "feature_list", "owner"]
+                          "feature_list", "snapshots", "owner"]
 
-    def __init__(self, parent, image_id, image_config, size=None, features=None):
+    def __init__(self, parent, image_id, image_config, size=None,
+                 features=None, snapshots=None):
         """
         Create a disk entry under the Disks subtree
         :param parent: parent object (instance of the Disks class)
@@ -505,6 +509,9 @@ class Disk(UINode):
         self.size_h = ''
         self.features = 0
         self.feature_list = []
+        self.snapshots = ["{name} ({size})".format(name=s['name'],
+                                                   size=human_size(s['size']))
+                          for s in snapshots]
         self.ceph_cluster = self.parent.parent.ceph.local_ceph.name
 
         disk_map = self.parent.disk_info
