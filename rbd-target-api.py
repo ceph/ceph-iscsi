@@ -16,6 +16,7 @@ import platform
 from functools import wraps
 from rpm import labelCompare
 import rados
+import rbd
 
 import werkzeug
 from flask import Flask, jsonify, make_response, request
@@ -24,11 +25,11 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.group import Group
-from ceph_iscsi_config.lun import LUN
+from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
-                                     gen_file_hash, valid_rpm)
+                                     gen_file_hash, valid_rpm, human_size)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
                          valid_disk, valid_client, GatewayAPIError)
@@ -696,7 +697,6 @@ def _disk(image_id):
     """
 
     if request.method == 'GET':
-
         if image_id in config.config['disks']:
             return jsonify(config.config["disks"][image_id]), 200
 
@@ -708,10 +708,15 @@ def _disk(image_id):
         # A put is for either a create or a resize
         # put('http://127.0.0.1:5000/api/disk/rbd.ansible3',data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
 
-        rqst_fields = set(request.form.keys())
-        if rqst_fields.issuperset(("pool", "size", "owner", "mode")):
+        pool_name, image_name = image_id.split('.', 1)
+        mode = request.form['mode']
+        if mode in ['create', 'resize']:
+            rqst_fields = set(request.form.keys())
+            if not rqst_fields.issuperset(("pool", "size", "owner", "mode")):
+                # this is an invalid request
+                return jsonify(message="Invalid Request - need to provide "
+                                       "pool, size and owner"), 400
 
-            image_name = str(image_id.split('.', 1)[1])
             lun = LUN(logger,
                       str(request.form['pool']),
                       image_name,
@@ -722,7 +727,7 @@ def _disk(image_id):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            if request.form['mode'] == 'create' and len(config.config['disks']) >= 256:
+            if mode == 'create' and len(config.config['disks']) >= 256:
                 logger.error("LUN alloc problem - too many LUNs")
                 return jsonify(message="LUN allocation failure: too many LUNs"), 500
 
@@ -731,7 +736,7 @@ def _disk(image_id):
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
                 return jsonify(message="LUN allocation failure"), 500
 
-            if request.form['mode'] == 'create':
+            if mode == 'create':
                 # new disk is allocated, so refresh the local config object
                 config.refresh()
 
@@ -752,15 +757,91 @@ def _disk(image_id):
 
                 return jsonify(message="LUN created"), 200
 
-            elif request.form['mode'] == 'resize':
-
+            elif mode == 'resize':
                 return jsonify(message="LUN resized"), 200
 
-        else:
+        elif mode in ['activate', 'deactivate']:
+            config.refresh()
+            disk = config.config['disks'].get(image_id, None)
+            if not disk:
+                return jsonify(message="rbd image {} not "
+                                       "found".format(image_id)), 404
 
-            # this is an invalid request
-            return jsonify(message="Invalid Request - need to provide"
-                                   "pool, size and owner"), 400
+            # calculate required values for LUN object
+            rbd_image = RBDDev(image_name, '0G', pool_name)
+            size = rbd_image.current_size
+            if not size:
+                logger.error("LUN size unknown - {}".format(image_id))
+                return jsonify(message="LUN {} failure".format(mode)), 500
+
+            size_h = human_size(size)
+
+            lun = LUN(logger, pool_name, image_name, size_h, disk['owner'])
+            if mode == 'deactivate':
+                lun.remove_dev_from_lio()
+                if lun.error:
+                    logger.error("LUN deactivate problem - "
+                                 "{}".format(lun.error_msg))
+                    return jsonify(message="LUN deactivate failure"), 500
+
+                return jsonify(message="LUN deactivated"), 200
+
+            elif mode == 'activate':
+                wwn = disk.get('wwn', None)
+                if not wwn:
+                    logger.error("LUN {} missing wwn".format(image_id))
+                    return jsonify(message="LUN activate failure"), 500
+
+                # re-add backend storage object
+                so = lun.lio_stg_object()
+                if not so:
+                    lun.add_dev_to_lio(wwn)
+                    if lun.error:
+                        logger.error("LUN activate problem - "
+                                     "{}".format(lun.error_msg))
+                        return jsonify(message="LUN activate failure"), 500
+
+                # re-add LUN to target
+                iqn = config.config['gateways']['iqn']
+                ip_list = config.config['gateways']['ip_list']
+
+                # Add the mapping for the lun to ensure the block device is
+                # present on all TPG's
+                gateway = GWTarget(logger, iqn, ip_list)
+
+                gateway.manage('map')
+                if gateway.error:
+                    logger.error("LUN mapping failed : "
+                                 "{}".format(gateway.error_msg))
+                    return jsonify(message="LUN map failed"), 500
+
+                # re-map LUN to hosts
+                for client_iqn in config.config['clients']:
+                    client_metadata = config.config['clients'][client_iqn]
+                    client_chap = CHAP(client_metadata['auth']['chap'])
+
+                    image_list = client_metadata['luns'].keys()
+                    if not image_id in image_list:
+                        continue
+
+                    chap_str = client_chap.chap_str
+                    if client_chap.error:
+                        logger.debug("Password decode issue : "
+                                     "{}".format(client_chap.error_msg))
+                        halt("Unable to decode password for "
+                             "{}".format(client_iqn))
+
+                    client = GWClient(logger,
+                                      client_iqn,
+                                      image_list,
+                                      chap_str)
+                    client.manage('present')
+
+                return jsonify(message="LUN activated"), 200
+
+        else:
+            return jsonify(message="Invalid request mode - "
+                           "{}".format(mode)), 400
 
     else:
         # DELETE request
