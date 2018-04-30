@@ -13,7 +13,7 @@ from gwcli.client import Clients
 
 from gwcli.utils import (human_size, readcontents, console_message,
                          response_message, GatewayAPIError, GatewayError,
-                         this_host, APIRequest)
+                         this_host, APIRequest, valid_snapshot_name)
 
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes
 
@@ -509,9 +509,6 @@ class Disk(UINode):
         self.size_h = ''
         self.features = 0
         self.feature_list = []
-        self.snapshots = ["{name} ({size})".format(name=s['name'],
-                                                   size=human_size(s['size']))
-                          for s in snapshots]
         self.ceph_cluster = self.parent.parent.ceph.local_ceph.name
 
         disk_map = self.parent.disk_info
@@ -529,15 +526,15 @@ class Disk(UINode):
         if not size:
             # Size/features are not stored in the config, since it can be changed
             # outside of this tool-chain, so we get them dynamically
-            self.get_meta_data_tcmu()
+            self._get_meta_data_tcmu()
         else:
             # size and features have been passed in from the Disks.refresh
             # method
             self.size = size
+            self.size_h = human_size(self.size)
             self.features = features
-
-        self.size_h = human_size(self.size)
-        self.feature_list = self._get_features()
+            self.feature_list = self._get_features()
+            self._parse_snapshots(snapshots)
 
         # update the parent's disk info map
         disk_map = self.parent.disk_info
@@ -548,6 +545,12 @@ class Disk(UINode):
         msg = [self.image, "({})".format(self.size_h)]
 
         return " ".join(msg), True
+
+    def _parse_snapshots(self, snapshots):
+        self.snapshots = ["{name} ({size})".format(name=s['name'],
+                                                   size=human_size(s['size']))
+                          for s in snapshots]
+        self.snapshot_names = [s['name'] for s in snapshots]
 
     def _get_features(self):
         """
@@ -571,16 +574,20 @@ class Disk(UINode):
 
         return disk_features
 
-    def get_meta_data_tcmu(self):
+    def _get_meta_data_tcmu(self):
         """
         query the rbd to get the features and size of the rbd
         :return:
         """
+        self.logger.debug("Refreshing image metadata")
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 with rbd.Image(ioctx, self.image) as rbd_image:
                     self.size = rbd_image.size()
+                    self.size_h = human_size(self.size)
                     self.features = rbd_image.features()
+                    self.feature_list = self._get_features()
+                    self._parse_snapshots(list(rbd_image.list_snaps()))
 
     # def get_meta_data_krbd(self):
     #     """
@@ -660,6 +667,56 @@ class Disk(UINode):
                               "{}".format(response_message(api.response,
                                                            self.logger)))
 
+    def snapshot(self, action, name):
+        self.logger.debug("CMD: /disks/{} snapshot action={} "
+                          "name={}".format(self.image_id, action, name))
+
+        valid_actions = ['create', 'delete', 'rollback']
+        if action not in valid_actions:
+            self.logger.error("you can only create, delete, or rollback - "
+                              "{} is invalid ".format(action))
+            return
+
+        if action == 'create':
+            if name in self.snapshot_names:
+                self.logger.error("Snapshot {} already exists".format(name))
+                return
+            if not valid_snapshot_name(name):
+                self.logger.error("Snapshot {} contains invalid characters".format(name))
+                return
+        else:
+            if name not in self.snapshot_names:
+                self.logger.error("Snapshot {} does not exist".format(name))
+                return
+
+        if action == 'rollback':
+            self.logger.warning("Please be patient, rollback might take time")
+
+        self.logger.debug("Issuing snapshot {} request".format(action))
+        disk_api = ('{}://127.0.0.1:{}/api/'
+                    'disksnap/{}/{}'.format(self.http_mode,
+                                            settings.config.api_port,
+                                            self.image_id,
+                                            name))
+
+        if action == 'delete':
+            api = APIRequest(disk_api)
+            api.delete()
+        else:
+            api_vars = {'mode': action}
+
+            api = APIRequest(disk_api, data=api_vars)
+            api.put()
+
+        if api.response.status_code == 200:
+            if action == 'create' or action == 'delete':
+                self._get_meta_data_tcmu()
+            self.logger.info('ok')
+        else:
+            self.logger.error("Failed to {} snapshot: "
+                              "{}".format(action,
+                                          response_message(api.response,
+                                                           self.logger)))
 
     def _update_pool(self):
         """
@@ -686,3 +743,18 @@ class Disk(UINode):
         """
 
         self.resize(size)
+
+    def ui_command_snapshot(self, action, name):
+        """
+        The snapshot command allows you create, delete, and rollback
+        snapshots on an existing rbd image.
+
+        e.g.
+        snapshot create snap1
+        snapshot delete snap1
+        snapshot rollback snap1
+
+        action: create, delete, or rollback
+        name: snapshot name
+        """
+        self.snapshot(action, name)

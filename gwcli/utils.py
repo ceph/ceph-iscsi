@@ -501,6 +501,12 @@ def valid_client(**kwargs):
 
     return 'Unknown error in valid_client function'
 
+def valid_snapshot_name(name):
+    regex = re.compile("^[^/@]+$")
+    if not regex.search(name):
+        return False
+    return True
+
 
 class GatewayError(Exception):
     pass
