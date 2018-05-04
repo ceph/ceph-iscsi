@@ -779,6 +779,17 @@ def _disk(image_id):
 
             lun = LUN(logger, pool_name, image_name, size_h, disk['owner'])
             if mode == 'deactivate':
+                so = lun.lio_stg_object()
+                if not so:
+                    logger.error("LUN {} already deactivated".format(image_id))
+                    return jsonify(message="LUN deactivate failure"), 500
+
+                for attached_lun in so.attached_luns:
+                    for node_acl in attached_lun.parent_tpg.node_acls:
+                        if node_acl.session and node_acl.session.get('state', '').upper() == 'LOGGED_IN':
+                            logger.error("LUN {} in-use".format(image_id))
+                            return jsonify(message="LUN deactivate failure - in-use"), 500
+
                 lun.remove_dev_from_lio()
                 if lun.error:
                     logger.error("LUN deactivate problem - "
