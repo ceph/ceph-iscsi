@@ -16,6 +16,7 @@ import platform
 from functools import wraps
 from rpm import labelCompare
 import rados
+import rbd
 
 import werkzeug
 from flask import Flask, jsonify, make_response, request
@@ -24,14 +25,15 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.group import Group
-from ceph_iscsi_config.lun import LUN
+from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
-                                     gen_file_hash, valid_rpm)
+                                     gen_file_hash, valid_rpm, human_size)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
-                         valid_disk, valid_client, GatewayAPIError)
+                         valid_disk, valid_client, valid_snapshot_name,
+                         GatewayAPIError)
 
 from gwcli.client import Client
 
@@ -696,7 +698,6 @@ def _disk(image_id):
     """
 
     if request.method == 'GET':
-
         if image_id in config.config['disks']:
             return jsonify(config.config["disks"][image_id]), 200
 
@@ -708,10 +709,15 @@ def _disk(image_id):
         # A put is for either a create or a resize
         # put('http://127.0.0.1:5000/api/disk/rbd.ansible3',data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
 
-        rqst_fields = set(request.form.keys())
-        if rqst_fields.issuperset(("pool", "size", "owner", "mode")):
+        pool_name, image_name = image_id.split('.', 1)
+        mode = request.form['mode']
+        if mode in ['create', 'resize']:
+            rqst_fields = set(request.form.keys())
+            if not rqst_fields.issuperset(("pool", "size", "owner", "mode")):
+                # this is an invalid request
+                return jsonify(message="Invalid Request - need to provide "
+                                       "pool, size and owner"), 400
 
-            image_name = str(image_id.split('.', 1)[1])
             lun = LUN(logger,
                       str(request.form['pool']),
                       image_name,
@@ -722,7 +728,7 @@ def _disk(image_id):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            if request.form['mode'] == 'create' and len(config.config['disks']) >= 256:
+            if mode == 'create' and len(config.config['disks']) >= 256:
                 logger.error("LUN alloc problem - too many LUNs")
                 return jsonify(message="LUN allocation failure: too many LUNs"), 500
 
@@ -731,7 +737,7 @@ def _disk(image_id):
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
                 return jsonify(message="LUN allocation failure"), 500
 
-            if request.form['mode'] == 'create':
+            if mode == 'create':
                 # new disk is allocated, so refresh the local config object
                 config.refresh()
 
@@ -752,15 +758,129 @@ def _disk(image_id):
 
                 return jsonify(message="LUN created"), 200
 
-            elif request.form['mode'] == 'resize':
-
+            elif mode == 'resize':
                 return jsonify(message="LUN resized"), 200
 
-        else:
+        elif mode in ['activate', 'deactivate']:
+            config.refresh()
+            disk = config.config['disks'].get(image_id, None)
+            if not disk:
+                return jsonify(message="rbd image {} not "
+                                       "found".format(image_id)), 404
 
-            # this is an invalid request
-            return jsonify(message="Invalid Request - need to provide"
-                                   "pool, size and owner"), 400
+            # calculate required values for LUN object
+            rbd_image = RBDDev(image_name, '0G', pool_name)
+            size = rbd_image.current_size
+            if not size:
+                logger.error("LUN size unknown - {}".format(image_id))
+                return jsonify(message="LUN {} failure".format(mode)), 500
+
+            size_h = human_size(size)
+
+            lun = LUN(logger, pool_name, image_name, size_h, disk['owner'])
+            if mode == 'deactivate':
+                so = lun.lio_stg_object()
+                if not so:
+                    logger.error("LUN {} already deactivated".format(image_id))
+                    return jsonify(message="LUN deactivate failure"), 500
+
+                for attached_lun in so.attached_luns:
+                    for node_acl in attached_lun.parent_tpg.node_acls:
+                        if node_acl.session and node_acl.session.get('state', '').upper() == 'LOGGED_IN':
+                            logger.error("LUN {} in-use".format(image_id))
+                            return jsonify(message="LUN deactivate failure - in-use"), 500
+
+                lun.remove_dev_from_lio()
+                if lun.error:
+                    logger.error("LUN deactivate problem - "
+                                 "{}".format(lun.error_msg))
+                    return jsonify(message="LUN deactivate failure"), 500
+
+                return jsonify(message="LUN deactivated"), 200
+
+            elif mode == 'activate':
+                wwn = disk.get('wwn', None)
+                if not wwn:
+                    logger.error("LUN {} missing wwn".format(image_id))
+                    return jsonify(message="LUN activate failure"), 500
+
+                # re-add backend storage object
+                so = lun.lio_stg_object()
+                if not so:
+                    lun.add_dev_to_lio(wwn)
+                    if lun.error:
+                        logger.error("LUN activate problem - "
+                                     "{}".format(lun.error_msg))
+                        return jsonify(message="LUN activate failure"), 500
+
+                # re-add LUN to target
+                iqn = config.config['gateways']['iqn']
+                ip_list = config.config['gateways']['ip_list']
+
+                # Add the mapping for the lun to ensure the block device is
+                # present on all TPG's
+                gateway = GWTarget(logger, iqn, ip_list)
+
+                gateway.manage('map')
+                if gateway.error:
+                    logger.error("LUN mapping failed : "
+                                 "{}".format(gateway.error_msg))
+                    return jsonify(message="LUN map failed"), 500
+
+                # re-map LUN to hosts
+                client_errors = False
+                for client_iqn in config.config['clients']:
+                    client_metadata = config.config['clients'][client_iqn]
+                    if client_metadata.get('group_name', ''):
+                        continue
+
+                    image_list = client_metadata['luns'].keys()
+                    if not image_id in image_list:
+                        continue
+
+                    client_chap = CHAP(client_metadata['auth']['chap'])
+                    chap_str = client_chap.chap_str
+                    if client_chap.error:
+                        logger.debug("Password decode issue : "
+                                     "{}".format(client_chap.error_msg))
+                        halt("Unable to decode password for "
+                             "{}".format(client_iqn))
+
+                    client = GWClient(logger,
+                                      client_iqn,
+                                      image_list,
+                                      chap_str)
+                    client.manage('present')
+                    if client.error:
+                        logger.error("LUN mapping failed "
+                                     "{} - {}".format(client_iqn,
+                                                      client.error_str))
+                        client_errors = True
+
+                # re-map LUN to host groups
+                for group_name in config.config['groups']:
+                    host_group = config.config['groups'][group_name]
+                    members = host_group.get('members')
+                    disks = host_group.get('disks').keys()
+                    if image_id not in disks:
+                        continue
+
+                    group = Group(logger, group_name, members, disks)
+                    group.apply()
+                    if group.error:
+                        logger.error("LUN mapping failed "
+                                     "{} - {}".format(group_iqn,
+                                                      group.error_str))
+                        client_errors = True
+
+                if client_errors:
+                    return jsonify(message="LUN map failed"), 500
+
+                return jsonify(message="LUN activated"), 200
+
+        else:
+            return jsonify(message="Invalid request mode - "
+                           "{}".format(mode)), 400
 
     else:
         # DELETE request
@@ -797,6 +917,155 @@ def _disk(image_id):
         config.refresh()
 
         return jsonify(message="LUN removed"), 200
+
+
+@app.route('/api/disksnap/<image_id>/<name>', methods=['PUT', 'DELETE'])
+@requires_restricted_auth
+def disksnap(image_id, name):
+    """
+    Coordinate the management of rbd image snapshots across the gateway
+    nodes. This method calls the corresponding disk api entrypoints across
+    each gateway. Processing is done serially: rollback is done locally
+    first, then other gateways. Other actions are only performed locally.
+
+    :param image_id: (str) rbd image name of the format pool.image
+    :param name: (str) rbd snapshot name
+    :param mode: (str) 'create' or 'rollback' the rbd snapshot
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d mode=create -X PUT https://192.168.122.69:5000/api/disksnap/rbd.image/new1
+    curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disksnap/rbd.image/new1
+    """
+
+    disk_regex = re.compile("[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
+    if not disk_regex.search(image_id):
+        logger.debug("snapshot request rejected due to invalid image name")
+        return jsonify(message="image id format is invalid - must be "
+                               "pool.image_name"), 400
+
+    if not valid_snapshot_name(name):
+        logger.debug("snapshot request rejected due to invalid snapshot name")
+        return jsonify(message="snapshot name is invalid"), 400
+
+    if image_id not in config.config['disks']:
+        return jsonify(message="rbd image {} not "
+                                "found".format(image_id)), 404
+
+    pool_name, image_name = image_id.split('.')
+    if request.method == 'PUT':
+        mode = request.form.get('mode')
+        if mode == 'create':
+            resp_text, resp_code = _disksnap_create(pool_name, image_name, name)
+        elif mode == 'rollback':
+            resp_text, resp_code = _disksnap_rollback(image_id, pool_name,
+                                                      image_name, name)
+        else:
+            logger.debug("snapshot request rejected due to invalid mode")
+            resp_text = "mode is invalid"
+            resp_code = 400
+    else:
+        resp_text, resp_code = _disksnap_delete(pool_name, image_name, name)
+
+    if resp_code == 200:
+        return jsonify(message="disk snapshot {}".format(resp_text)), resp_code
+    else:
+        return jsonify(message=resp_text), resp_code
+
+def _disksnap_create(pool_name, image_name, name):
+    logger.debug("snapshot create request")
+    try:
+        with rados.Rados(conffile=settings.config.cephconf) as cluster, \
+                cluster.open_ioctx(pool_name) as ioctx, \
+                rbd.Image(ioctx, image_name) as image:
+            image.create_snap(name)
+
+        resp_text = "snapshot created"
+        resp_code = 200
+    except rbd.ImageExists:
+        resp_text = "snapshot {} already exists".format(name)
+        resp_code = 400
+    except Exception as err:
+        resp_text = "failed to create snapshot: {}".format(err)
+        resp_code = 400
+    return resp_text, resp_code
+
+def _disksnap_delete(pool_name, image_name, name):
+    logger.debug("snapshot delete request")
+    try:
+        with rados.Rados(conffile=settings.config.cephconf) as cluster, \
+                cluster.open_ioctx(pool_name) as ioctx, \
+                rbd.Image(ioctx, image_name) as image:
+            try:
+                image.remove_snap(name)
+                resp_text = "snapshot deleted"
+                resp_code = 200
+
+            except rbd.ImageNotFound:
+                resp_text = "snapshot {} does not exist".format(name)
+                resp_code = 404
+
+    except Exception as err:
+        resp_text = "failed to delete snapshot: {}".format(err)
+        resp_code = 400
+    return resp_text, resp_code
+
+def _disksnap_rollback(image_id, pool_name, image_name, name):
+    logger.debug("snapshot rollback request")
+
+    disk = config.config['disks'].get(image_id, None)
+    if not disk:
+        return "rbd image {} not found".format(image_id), 404
+
+    local_gw = this_host()
+    logger.debug("this host is {}".format(local_gw))
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("other gateways - {}".format(gateways))
+    gateways.remove(local_gw)
+    gateways.append(local_gw)
+
+    api_vars = {
+        'mode': 'deactivate'}
+
+    logger.debug("deactivating disk")
+    resp_text, resp_code = call_api(gateways, '_disk',
+                                    image_id,
+                                    http_method='put',
+                                    api_vars=api_vars)
+    if resp_code != 200:
+        return "failed to deactivate disk: {}".format(resp_text), resp_code
+
+    try:
+        with rados.Rados(conffile=settings.config.cephconf) as cluster, \
+                cluster.open_ioctx(pool_name) as ioctx, \
+                rbd.Image(ioctx, image_name) as image:
+
+            try:
+                logger.debug("rolling back to snapshot")
+                image.rollback_to_snap(name)
+                resp_text = "rolled back to snapshot"
+                resp_code = 200
+
+            except rbd.ImageNotFound:
+                resp_text = "snapshot {} does not exist".format(name)
+                resp_code = 404
+
+    except Exception as err:
+        resp_text = "failed to rollback snapshot: {}".format(err)
+        resp_code = 400
+
+    finally:
+        logger.debug("activating disk")
+        api_vars['mode'] = 'activate'
+        activate_resp_text, activate_resp_code = call_api(gateways, '_disk',
+                                                          image_id,
+                                                          http_method='put',
+                                                          api_vars=api_vars)
+        if resp_code == 200 and activate_resp_code != 200:
+            resp_text = activate_resp_text
+            resp_code = activate_resp_code
+
+    return resp_text, resp_code
 
 
 @app.route('/api/clients', methods=['GET'])
