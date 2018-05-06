@@ -1,5 +1,5 @@
 Name:           ceph-iscsi-config
-Version:        2.5
+Version:        2.6
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
@@ -60,6 +60,18 @@ install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 %{_unitdir}/rbd-target-gw.service
 
 %changelog
+* Sat May 5 2018 Jason Dillaman <dillaman@redhat.com> 2.6-1
+- Cleanup handling for max_data_area_mb override
+- spec: requires minimum rtslib version 2.1.fb67 (11 hours ago) <Venky Shankar>
+- lun: pass control arg during LUN creation (16 hours ago) <Venky Shankar>
+- common: handle non-existent config object (16 hours ago) <Venky Shankar>
+- Cleanup stale locker during restart (6 days ago) <Mike Christie>
+- User AO and Standby states (6 days ago) <Mike Christie>
+- service: set TimeoutStopSec to infinity (6 months ago) <Xiubo Li>
+- Update the port to match the one registered upstream with Prometheus.io (2 weeks ago) <Paul Cuzner>
+- The tcm module maintains a cache (dict) called bs_cache. This fix resets the cache at every collection to ensure only new data is used when enumerating the storage objects in LIO. Failing to do this results in RTSLibNotInCFS exceptions. (2 weeks ago) <Paul Cuzner>
+- fix gateway_keyring setting (4 months ago) <Mike Christie>
+
 * Mon Feb 26 2018 Paul Cuzner <pcuzner@redhat.com> - 2.5-1
 - add prometheus endpoint to rbd-target-gw
 - additional options added to 'settings' to enable/disable prometheus exporter
