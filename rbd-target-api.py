@@ -580,9 +580,11 @@ def disk(image_id):
     :param pool: (str) the pool name the rbd image will be in
     :param count: (str) the number of images will be created
     :param owner: (str) the owner of the rbd image
+    :param ring_buffer_size: (str) size of the kernel ring buffer for this LUN
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
+    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd -dring_buffer_size=32 -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
@@ -629,6 +631,7 @@ def disk(image_id):
         size = request.form.get('size')
         mode = request.form.get('mode')
         count = request.form.get('count', '1')
+        ring_buffer_size = request.form.get('ring_buffer_size', None)
 
         pool, image_name = image_id.split('.')
 
@@ -647,7 +650,7 @@ def disk(image_id):
                                                                      sfx)
 
             api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
-                        'mode': mode}
+                        'mode': mode, 'ring_buffer_size': ring_buffer_size}
 
             resp_text, resp_code = call_api(gateways, '_disk',
                                             image_name,
@@ -722,7 +725,8 @@ def _disk(image_id):
                       str(request.form['pool']),
                       image_name,
                       str(request.form['size']),
-                      str(request.form['owner']))
+                      str(request.form['owner']),
+                      request.form.get('ring_buffer_size', None))
             if lun.error:
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
