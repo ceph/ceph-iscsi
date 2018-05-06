@@ -267,6 +267,30 @@ def define_gateway():
     return gateway
 
 
+def rbd_lock_cleanup(local_ips, rbd_image):
+    """
+    cleanup locks left if this node crashed and was not able to release them
+    :param local_ips: list of local ip addresses.
+    :rbd_image: rbd image to clean up locking for
+    :return: None
+    """
+
+    lock_info = rbd_image.list_lockers()
+    if not lock_info:
+        return
+
+    lockers = lock_info.get("lockers")
+    for holder in lockers:
+        for ip in local_ips:
+            if ip in holder[2]:
+                logger.info("Cleaning up stale local lock for {} {}".format(
+                            holder[0], holder[1]))
+                try:
+                    rbd_image.break_lock(holder[0], holder[1])
+                except:
+                    halt("Error cleaning up rbd image {}".format(rbd_image))
+
+
 def define_luns(gateway):
     """
     define the disks in the config to LIO
@@ -275,6 +299,11 @@ def define_luns(gateway):
     """
 
     local_gw = this_host()
+
+    ipv4_list = []
+    for iface in netifaces.interfaces():
+        dev_info = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
+        ipv4_list += [dev['addr'] for dev in dev_info]
 
     # sort the disks dict keys, so the disks are registered in a specific
     # sequence
@@ -301,6 +330,8 @@ def define_luns(gateway):
                             with rbd.Image(ioctx, image_name) as rbd_image:
                                 image_bytes = rbd_image.size()
                                 image_size_h = human_size(image_bytes)
+
+                                rbd_lock_cleanup(ipv4_list, rbd_image)
 
                                 lun = LUN(logger, pool, image_name,
                                           image_size_h, local_gw)
