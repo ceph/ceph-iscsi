@@ -631,7 +631,7 @@ def disk(image_id):
         size = request.form.get('size')
         mode = request.form.get('mode')
         count = request.form.get('count', '1')
-        ring_buffer_size = request.form.get('ring_buffer_size', None)
+        max_data_area_mb = request.form.get('max_data_area_mb', None)
 
         pool, image_name = image_id.split('.')
 
@@ -650,7 +650,7 @@ def disk(image_id):
                                                                      sfx)
 
             api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
-                        'mode': mode, 'ring_buffer_size': ring_buffer_size}
+                        'mode': mode, 'max_data_area_mb': max_data_area_mb}
 
             resp_text, resp_code = call_api(gateways, '_disk',
                                             image_name,
@@ -725,8 +725,11 @@ def _disk(image_id):
                       str(request.form['pool']),
                       image_name,
                       str(request.form['size']),
-                      str(request.form['owner']),
-                      request.form.get('ring_buffer_size', None))
+                      str(request.form['owner']))
+            logger.error("TEST: {}".format(request.form.keys()))
+            logger.error("TEST: {}".format(request.form.get('max_data_area_mb', None)))
+            lun.max_data_area_mb = request.form.get('max_data_area_mb', None)
+            logger.error("TEST: {}".format(lun.max_data_area_mb))
             if lun.error:
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
