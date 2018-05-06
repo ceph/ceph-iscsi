@@ -339,7 +339,6 @@ def define_luns(gateway):
                                     halt("Error defining rbd image "
                                          "{}".format(disk_key))
 
-                                lun.ring_buffer_size = disks[disk_key].get('max_data_area_mb', None)
                                 lun.allocate()
                                 if lun.error:
                                     halt("Error unable to register {} with "

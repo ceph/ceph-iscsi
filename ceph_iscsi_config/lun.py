@@ -205,10 +205,7 @@ class LUN(object):
         self.size = size
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}.{}'.format(self.pool, self.image)
-        # kernel control arguments (defaults)
-        self.controls = {
-            'max_data_area_mb': settings.config.max_data_area_mb
-        }
+        self.controls = {}
 
         # the allocating host could be fqdn or shortname - but the config
         # only uses shortname so it needs to be converted to shortname format
@@ -226,18 +223,23 @@ class LUN(object):
             return
 
         self._validate_request()
+        if self.config_key in self.config.config['disks']:
+            self.controls = self.config.config['disks'][self.config_key].get('controls', {})
 
-    def _get_ring_buffer_size(self):
-        return self.controls['max_data_area_mb']
-    def _set_ring_buffer_size(self, value):
-        if value is not None:
-            self.controls['max_data_area_mb'] = int(value)
+    def _get_max_data_area_mb(self):
+        max_data_area_mb = self.controls.get('max_data_area_mb', None)
+        if max_data_area_mb is None:
+            return settings.config.max_data_area_mb
+        return max_data_area_mb
 
-    ring_buffer_size = property(_get_ring_buffer_size, _set_ring_buffer_size,
-                                doc="get/set kernel ring buffer size (bytes)")
+    def _set_max_data_area_mb(self, value):
+        if value is None or str(value) == str(settings.config.max_data_area_mb):
+            self.controls.pop('max_data_area_mb', None)
+        else:
+            self.controls['max_data_area_mb'] = value
 
-    def _is_default_setting(self, control, value):
-        return getattr(settings.config, control, None) == value
+    max_data_area_mb = property(_get_max_data_area_mb, _set_max_data_area_mb,
+                                doc="get/set kernel data area (MiB)")
 
     def _validate_request(self):
 
@@ -446,7 +448,7 @@ class LUN(object):
                 if wwn == '':
                     # disk hasn't been defined to LIO yet, it' not been defined
                     # to the config yet and this is the allocating host
-                    lun = self.add_dev_to_lio(attrs=self.controls)
+                    lun = self.add_dev_to_lio()
                     if self.error:
                         return
 
@@ -460,11 +462,8 @@ class LUN(object):
                                  "image": self.image,
                                  "owner": self.owner,
                                  "pool": self.pool,
-                                 "pool_id": rbd_image.pool_id}
-                    # add non-default control params to LUN config
-                    for k,v in self.controls.iteritems():
-                        if not self._is_default_setting(k, v):
-                            disk_attr[k] = v
+                                 "pool_id": rbd_image.pool_id,
+                                 "controls": self.controls}
 
                     self.config.update_item('disks',
                                             self.config_key,
@@ -487,19 +486,14 @@ class LUN(object):
 
                 else:
                     # config object already had wwn for this rbd image
-                    self.add_dev_to_lio(wwn, self.controls)
+                    self.add_dev_to_lio(wwn)
                     if self.error:
                         return
 
                     # delete/update on-disk attributes
-                    disk_attr = self.config.config['disks'][self.config_key].copy()
-                    for k,v in self.controls.iteritems():
-                        if self._is_default_setting(k, v): # delete
-                            disk_attr.pop(k, None)
-                        else: # update
-                            disk_attr[k] = v
-                    if cmp(disk_attr, self.config.config['disks'][self.config_key]) != 0:
-                        self.config.del_item('disks', self.config_key)
+                    disk_attr = self.config.config['disks'][self.config_key]
+                    if self.controls != disk_attr.get('controls', {}):
+                        disk_attr['controls'] = self.controls
                         self.config.update_item('disks', self.config_key, disk_attr)
 
                     self.logger.debug("(LUN.allocate) registered '{}' to LIO "
@@ -535,7 +529,7 @@ class LUN(object):
 
                 # At this point we have a wwn from the config for this rbd
                 # image, so just add to LIO
-                self.add_dev_to_lio(wwn, self.controls)
+                self.add_dev_to_lio(wwn)
                 if self.error:
                     return
 
@@ -621,24 +615,21 @@ class LUN(object):
 
         return stg_object if found_it else None
 
-    def add_dev_to_lio(self, in_wwn=None, attrs={}):
+    def add_dev_to_lio(self, in_wwn=None):
         """
         Add an rbd device to the LIO configuration
         :param in_wwn: optional wwn identifying the rbd image to clients
         (must match across gateways)
-        :param attrs: optional dictionary of image parameter (disk & control)
         :return: LIO LUN object
         """
-
         self.logger.info("(LUN.add_dev_to_lio) Adding image "
                          "'{}' to LIO".format(self.config_key))
 
-        controls = {}
         # extract control parameter overrides (if any) or use default
-        for k,v in self.controls.iteritems():
-            controls[k] = getattr(attrs, k, None)
-            if controls[k] is None:
-                controls[k] = v
+        controls = self.controls.copy()
+        for k in ['max_data_area_mb']:
+            if controls.get(k, None) is None:
+                controls[k] = getattr(settings.config, k, None)
 
         control_string = gen_control_string(controls)
         if control_string:
