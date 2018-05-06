@@ -80,6 +80,7 @@ class Config(object):
             self.error_msg = self.ceph.error_msg
             return
 
+        self.init_config()
         self.config = self.get_config()
         self.changed = False
 
@@ -95,8 +96,8 @@ class Config(object):
         try:
             size, mtime = ioctx.stat(self.config_name)
         except rados.ObjectNotFound:
-            self.logger.debug("_read_config_object object not found")
-            cfg_str = ''
+            self.logger.error("_read_config_object object not found")
+            raise
         else:
             self.logger.debug("_read_config_object reading the config object")
             size += 1
@@ -117,21 +118,21 @@ class Config(object):
 
         return cfg_str
 
+    def _open_ioctx(self, pool):
+        try:
+            self.logger.debug("(_open_ioctx) Opening connection to {} pool".format(pool))
+            ioctx = self.ceph.cluster.open_ioctx(pool)
+        except rados.ObjectNotFound:
+            self.logger.error("(_open_ioctx) {} does not exist".format(pool))
+            raise
+        self.logger.debug("(_open_ioctx) connection opened")
+        return ioctx
+
     def _get_ceph_config(self):
 
         cfg_dict = {}
 
-        try:
-            self.logger.debug("(_get_rbd_config) Opening connection to {} pool".format(self.pool))
-            ioctx = self.ceph.cluster.open_ioctx(self.pool)       # open connection to pool
-        except rados.ObjectNotFound:
-            self.error = True
-            self.error_msg = "'{}' pool does not exist!".format(self.pool)
-            self.logger.error("(Config._get_rbd_config) {}".format(self.error_msg))
-            return {}
-        else:
-            self.logger.debug("(_get_rbd_config) connection opened")
-
+        ioctx = self._open_ioctx(self.pool)
         cfg_data = self._read_config_object(ioctx)
         ioctx.close()
 
@@ -152,12 +153,24 @@ class Config(object):
 
         return cfg_dict
 
+    def init_config(self):
+        ioctx = self._open_ioctx(self.pool)
+        try:
+            with rados.WriteOpCtx(ioctx) as op:
+                # try to exclusively create the config object
+                op.new(rados.LIBRADOS_CREATE_EXCLUSIVE)
+                ioctx.operate_write_op(op, self.config_name)
+                self.logger.debug("(init_config) created empty config object")
+        except rados.ObjectExists:
+            self.logger.debug("(init_config) using pre existing config object")
+        ioctx.close()
+
     def get_config(self):
         return self._get_ceph_config()
 
     def lock(self):
 
-        ioctx = self.ceph.cluster.open_ioctx(self.pool)
+        ioctx = self._open_ioctx(self.pool)
 
         secs = 0
         self.logger.debug("config.lock attempting to acquire lock on {}".format(self.config_name))
@@ -180,7 +193,7 @@ class Config(object):
         ioctx.close()
 
     def unlock(self):
-        ioctx = self.ceph.cluster.open_ioctx(self.pool)
+        ioctx = self._open_ioctx(self.pool)
 
         self.logger.debug("config.unlock releasing lock on {}".format(self.config_name))
         try:
@@ -196,7 +209,7 @@ class Config(object):
 
     def _seed_rbd_config(self):
 
-        ioctx = self.ceph.cluster.open_ioctx(self.pool)
+        ioctx = self._open_ioctx(self.pool)
 
         self.lock()
         if self.error:
@@ -290,7 +303,7 @@ class Config(object):
 
     def _commit_rbd(self, post_action):
 
-        ioctx = self.ceph.cluster.open_ioctx(self.pool)
+        ioctx = self._open_ioctx(self.pool)
 
         if not self.config_locked:
             self.lock()

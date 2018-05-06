@@ -15,7 +15,7 @@ import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config
 # from ceph_iscsi_config.alua import ALUATargetPortGroup
-from ceph_iscsi_config.utils import convert_2_bytes, get_pool_id
+from ceph_iscsi_config.utils import convert_2_bytes, gen_control_string, get_pool_id
 
 
 __author__ = 'pcuzner@redhat.com'
@@ -205,6 +205,10 @@ class LUN(object):
         self.size = size
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}.{}'.format(self.pool, self.image)
+        # kernel control arguments (defaults)
+        self.controls = {
+            'max_data_area_mb': settings.config.max_data_area_mb
+        }
 
         # the allocating host could be fqdn or shortname - but the config
         # only uses shortname so it needs to be converted to shortname format
@@ -222,6 +226,18 @@ class LUN(object):
             return
 
         self._validate_request()
+
+    def _get_ring_buffer_size(self):
+        return self.controls['max_data_area_mb']
+    def _set_ring_buffer_size(self, value):
+        if value is not None:
+            self.controls['max_data_area_mb'] = int(value)
+
+    ring_buffer_size = property(_get_ring_buffer_size, _set_ring_buffer_size,
+                                doc="get/set kernel ring buffer size (bytes)")
+
+    def _is_default_setting(self, control, value):
+        return getattr(settings.config, control, None) == value
 
     def _validate_request(self):
 
@@ -430,7 +446,7 @@ class LUN(object):
                 if wwn == '':
                     # disk hasn't been defined to LIO yet, it' not been defined
                     # to the config yet and this is the allocating host
-                    lun = self.add_dev_to_lio()
+                    lun = self.add_dev_to_lio(attrs=self.controls)
                     if self.error:
                         return
 
@@ -445,6 +461,10 @@ class LUN(object):
                                  "owner": self.owner,
                                  "pool": self.pool,
                                  "pool_id": rbd_image.pool_id}
+                    # add non-default control params to LUN config
+                    for k,v in self.controls.iteritems():
+                        if not self._is_default_setting(k, v):
+                            disk_attr[k] = v
 
                     self.config.update_item('disks',
                                             self.config_key,
@@ -467,9 +487,21 @@ class LUN(object):
 
                 else:
                     # config object already had wwn for this rbd image
-                    self.add_dev_to_lio(wwn)
+                    self.add_dev_to_lio(wwn, self.controls)
                     if self.error:
                         return
+
+                    # delete/update on-disk attributes
+                    disk_attr = self.config.config['disks'][self.config_key].copy()
+                    for k,v in self.controls.iteritems():
+                        if self._is_default_setting(k, v): # delete
+                            disk_attr.pop(k, None)
+                        else: # update
+                            disk_attr[k] = v
+                    if cmp(disk_attr, self.config.config['disks'][self.config_key]) != 0:
+                        self.config.del_item('disks', self.config_key)
+                        self.config.update_item('disks', self.config_key, disk_attr)
+
                     self.logger.debug("(LUN.allocate) registered '{}' to LIO "
                                       "with wwn '{}' from the config "
                                       "object".format(self.image,
@@ -503,7 +535,7 @@ class LUN(object):
 
                 # At this point we have a wwn from the config for this rbd
                 # image, so just add to LIO
-                self.add_dev_to_lio(wwn)
+                self.add_dev_to_lio(wwn, self.controls)
                 if self.error:
                     return
 
@@ -589,17 +621,28 @@ class LUN(object):
 
         return stg_object if found_it else None
 
-    def add_dev_to_lio(self, in_wwn=None):
+    def add_dev_to_lio(self, in_wwn=None, attrs={}):
         """
         Add an rbd device to the LIO configuration
         :param in_wwn: optional wwn identifying the rbd image to clients
         (must match across gateways)
+        :param attrs: optional dictionary of image parameter (disk & control)
         :return: LIO LUN object
         """
 
         self.logger.info("(LUN.add_dev_to_lio) Adding image "
                          "'{}' to LIO".format(self.config_key))
 
+        controls = {}
+        # extract control parameter overrides (if any) or use default
+        for k,v in self.controls.iteritems():
+            controls[k] = getattr(attrs, k, None)
+            if controls[k] is None:
+                controls[k] = v
+
+        control_string = gen_control_string(controls)
+        if control_string:
+            self.logger.debug("control=\"{}\"".format(control_string))
 
         new_lun = None
         try:
@@ -612,7 +655,7 @@ class LUN(object):
             new_lun = UserBackedStorageObject(name=self.config_key,
                                               config=cfgstring,
                                               size=self.size_bytes,
-                                              wwn=in_wwn)
+                                              wwn=in_wwn, control=control_string)
         except RTSLibError as err:
             self.error = True
             self.error_msg = ("failed to add {} to LIO - "

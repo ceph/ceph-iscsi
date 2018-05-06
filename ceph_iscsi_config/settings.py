@@ -38,7 +38,8 @@ class Settings(object):
     target_defaults = {"osd_op_timeout": 30,
                        "nopin_response_timeout" : 5,
                        "nopin_timeout" : 5,
-                       "qfull_timeout" : 5
+                       "qfull_timeout" : 5,
+                       "max_data_area_mb" : 8
                        }
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):
