@@ -13,7 +13,7 @@ BuildRequires: python2-devel
 BuildRequires: python-setuptools
 BuildRequires: systemd
 
-Requires: python-rtslib >= 2.1
+Requires: python-rtslib >= 2.1.fb67
 Requires: ceph-iscsi-config >= 2.6
 Requires: python-requests >= 2.6
 Requires: python-configshell >= 1.1
