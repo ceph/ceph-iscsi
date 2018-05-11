@@ -13,7 +13,7 @@ from gwcli.client import Clients
 
 from gwcli.utils import (human_size, readcontents, console_message,
                          response_message, GatewayAPIError, GatewayError,
-                         this_host, APIRequest)
+                         this_host, APIRequest, valid_snapshot_name)
 
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes
 
@@ -51,13 +51,13 @@ class Disks(UIGroup):
         self.scan_queue = None
         self.scan_mutex = None
 
-    def _get_disk_size(self, cluster_ioctx, disk_sizes):
+    def _get_disk_meta(self, cluster_ioctx, disk_meta):
         """
         Use the provided cluster context to take an rbd image name from the
         queue and extract size and feature code. The resulting data is then
         stored in a shared dict accessible by all scan threads
         :param cluster_ioctx: cluster io context object
-        :param disk_sizes: dict of rbd images, holding size and feature code
+        :param disk_meta: dict of rbd images, holding metadata
         :return: None
         """
 
@@ -70,17 +70,19 @@ class Disks(UIGroup):
             except Queue.Empty:
                 break
             else:
-
                 pool, image = rbd_name.split('.')
                 with cluster_ioctx.open_ioctx(pool) as ioctx:
                     with rbd.Image(ioctx, image) as rbd_image:
                         size = rbd_image.size()
                         features = rbd_image.features()
+                        snapshots = list(rbd_image.list_snaps())
 
                         self.scan_mutex.acquire()
-                        disk_sizes[rbd_name] = {"size": size,
-                                                "features": features
-                                                }
+                        disk_meta[rbd_name] = {
+                            "size": size,
+                            "features": features,
+                            "snapshots": snapshots
+                        }
                         self.scan_mutex.release()
 
     def refresh(self, disk_info):
@@ -102,7 +104,7 @@ class Disks(UIGroup):
 
         self.scan_queue = Queue.Queue()
         self.scan_mutex = threading.Lock()
-        disk_sizes = dict()
+        disk_meta = dict()
 
         # Load the queue
         for disk_name in disk_info.keys():
@@ -114,8 +116,8 @@ class Disks(UIGroup):
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
             # Initiate the scan threads
             for _t in range(0, self.scan_threads, 1):
-                _thread = threading.Thread(target=self._get_disk_size,
-                                           args=(cluster, disk_sizes))
+                _thread = threading.Thread(target=self._get_disk_meta,
+                                           args=(cluster, disk_meta))
                 _thread.start()
                 scan_threads.append(_thread)
 
@@ -131,25 +133,26 @@ class Disks(UIGroup):
             Disk(self,
                  image_id=image_id,
                  image_config=image_config,
-                 size=disk_sizes[image_id].get('size', 0),
-                 features=disk_sizes[image_id].get('features', 0))
+                 size=disk_meta[image_id].get('size', 0),
+                 features=disk_meta[image_id].get('features', 0),
+                 snapshots=disk_meta[image_id].get('snapshots', []))
 
     def reset(self):
         children = set(self.children)  # set of child objects
         for child in children:
             self.remove_child(child)
 
-    def ui_command_create(self, pool=None, image=None, size=None, count=1):
+    def ui_command_create(self, pool=None, image=None, size=None, count=1, max_data_area_mb=None):
         """
         Create a LUN and assign to the gateway(s).
 
         The create command supports two request formats;
 
-        Long format  : create pool=<name> image=<name> size=<size>
+        Long format  : create pool=<name> image=<name> size=<size> [max_data_area_mb=<buffer_size>]
         Short format : create pool.image <size>
 
         e.g.
-        create pool=rbd image=testimage size=100g
+        create pool=rbd image=testimage size=100g ring_buffer_size=16
         create rbd.testimage 100g
 
         The syntax of each parameter is as follows;
@@ -164,6 +167,7 @@ class Disks(UIGroup):
                 create rbd.test 1g count=5
                 -> create 5 LUNs called test1..test5 each of 1GB in size
                    from the rbd pool
+        max_data_area_mb : integer, optional size of kernel data ring buffer (MiB).
 
         Notes.
         1) size does not support decimal representations
@@ -207,14 +211,18 @@ class Disks(UIGroup):
             if not str(count).isdigit():
                 self.logger.error("invalid count format, must be an integer")
                 return
+        if max_data_area_mb:
+            if not str(max_data_area_mb).isdigit():
+                self.logger.error("invalid max data area format, must be an integer in MiB")
+                return
 
         self.logger.debug("CMD: /disks/ create pool={} "
-                          "image={} size={} count={}".format(pool,
-                                                             image,
-                                                             size,
-                                                             count))
+                          "image={} size={} count={} "
+                          "max_data_area_mb={}".format(pool, image, size, count,
+                                                       max_data_area_mb))
 
-        self.create_disk(pool=pool, image=image, size=size, count=count)
+        self.create_disk(pool=pool, image=image, size=size,
+                         count=count, max_data_area_mb=max_data_area_mb)
 
     def _valid_pool(self, pool=None):
         """
@@ -242,7 +250,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    parent=None):
+                    max_data_area_mb=None, parent=None):
 
         rc = 0
 
@@ -265,7 +273,8 @@ class Disks(UIGroup):
                                                               disk_key)
 
         api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
-                    'count': count, 'mode': 'create'}
+                    'count': count, 'max_data_area_mb': max_data_area_mb,
+                    'mode': 'create'}
 
         self.logger.debug("Issuing disk create request")
 
@@ -485,9 +494,10 @@ class Disks(UIGroup):
 class Disk(UINode):
 
     display_attributes = ["image", "ceph_cluster", "pool", "wwn", "size_h",
-                          "feature_list", "owner"]
+                          "feature_list", "snapshots", "owner"]
 
-    def __init__(self, parent, image_id, image_config, size=None, features=None):
+    def __init__(self, parent, image_id, image_config, size=None,
+                 features=None, snapshots=None):
         """
         Create a disk entry under the Disks subtree
         :param parent: parent object (instance of the Disks class)
@@ -522,15 +532,15 @@ class Disk(UINode):
         if not size:
             # Size/features are not stored in the config, since it can be changed
             # outside of this tool-chain, so we get them dynamically
-            self.get_meta_data_tcmu()
+            self._get_meta_data_tcmu()
         else:
             # size and features have been passed in from the Disks.refresh
             # method
             self.size = size
+            self.size_h = human_size(self.size)
             self.features = features
-
-        self.size_h = human_size(self.size)
-        self.feature_list = self._get_features()
+            self.feature_list = self._get_features()
+            self._parse_snapshots(snapshots)
 
         # update the parent's disk info map
         disk_map = self.parent.disk_info
@@ -541,6 +551,12 @@ class Disk(UINode):
         msg = [self.image, "({})".format(self.size_h)]
 
         return " ".join(msg), True
+
+    def _parse_snapshots(self, snapshots):
+        self.snapshots = ["{name} ({size})".format(name=s['name'],
+                                                   size=human_size(s['size']))
+                          for s in snapshots]
+        self.snapshot_names = [s['name'] for s in snapshots]
 
     def _get_features(self):
         """
@@ -564,16 +580,20 @@ class Disk(UINode):
 
         return disk_features
 
-    def get_meta_data_tcmu(self):
+    def _get_meta_data_tcmu(self):
         """
         query the rbd to get the features and size of the rbd
         :return:
         """
+        self.logger.debug("Refreshing image metadata")
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 with rbd.Image(ioctx, self.image) as rbd_image:
                     self.size = rbd_image.size()
+                    self.size_h = human_size(self.size)
                     self.features = rbd_image.features()
+                    self.feature_list = self._get_features()
+                    self._parse_snapshots(list(rbd_image.list_snaps()))
 
     # def get_meta_data_krbd(self):
     #     """
@@ -653,6 +673,56 @@ class Disk(UINode):
                               "{}".format(response_message(api.response,
                                                            self.logger)))
 
+    def snapshot(self, action, name):
+        self.logger.debug("CMD: /disks/{} snapshot action={} "
+                          "name={}".format(self.image_id, action, name))
+
+        valid_actions = ['create', 'delete', 'rollback']
+        if action not in valid_actions:
+            self.logger.error("you can only create, delete, or rollback - "
+                              "{} is invalid ".format(action))
+            return
+
+        if action == 'create':
+            if name in self.snapshot_names:
+                self.logger.error("Snapshot {} already exists".format(name))
+                return
+            if not valid_snapshot_name(name):
+                self.logger.error("Snapshot {} contains invalid characters".format(name))
+                return
+        else:
+            if name not in self.snapshot_names:
+                self.logger.error("Snapshot {} does not exist".format(name))
+                return
+
+        if action == 'rollback':
+            self.logger.warning("Please be patient, rollback might take time")
+
+        self.logger.debug("Issuing snapshot {} request".format(action))
+        disk_api = ('{}://127.0.0.1:{}/api/'
+                    'disksnap/{}/{}'.format(self.http_mode,
+                                            settings.config.api_port,
+                                            self.image_id,
+                                            name))
+
+        if action == 'delete':
+            api = APIRequest(disk_api)
+            api.delete()
+        else:
+            api_vars = {'mode': action}
+
+            api = APIRequest(disk_api, data=api_vars)
+            api.put()
+
+        if api.response.status_code == 200:
+            if action == 'create' or action == 'delete':
+                self._get_meta_data_tcmu()
+            self.logger.info('ok')
+        else:
+            self.logger.error("Failed to {} snapshot: "
+                              "{}".format(action,
+                                          response_message(api.response,
+                                                           self.logger)))
 
     def _update_pool(self):
         """
@@ -679,3 +749,18 @@ class Disk(UINode):
         """
 
         self.resize(size)
+
+    def ui_command_snapshot(self, action, name):
+        """
+        The snapshot command allows you create, delete, and rollback
+        snapshots on an existing rbd image.
+
+        e.g.
+        snapshot create snap1
+        snapshot delete snap1
+        snapshot rollback snap1
+
+        action: create, delete, or rollback
+        name: snapshot name
+        """
+        self.snapshot(action, name)

@@ -231,7 +231,7 @@ class HostGroup(UIGroup):
                                  self.name))
 
         api_vars = {"action": action,
-                    "member": client_iqn}
+                    "members": client_iqn}
 
         api = APIRequest(group_api, data=api_vars)
         api.put()
@@ -309,7 +309,7 @@ class HostGroup(UIGroup):
                                  self.name))
 
         api_vars = {"action": action,
-                    "disk": disk_name}
+                    "disks": disk_name}
 
         api = APIRequest(group_api, data=api_vars)
         api.put()

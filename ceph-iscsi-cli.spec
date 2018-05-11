@@ -1,5 +1,5 @@
 Name:		ceph-iscsi-cli
-Version:	2.6
+Version:	2.7
 Release:	1%{?dist}
 Summary:	CLI configuration tool to manage multiple iSCSI gateways
 Group:		Applications/System
@@ -14,7 +14,7 @@ BuildRequires: python-setuptools
 BuildRequires: systemd
 
 Requires: python-rtslib >= 2.1.fb67
-Requires: ceph-iscsi-config >= 2.4
+Requires: ceph-iscsi-config >= 2.6
 Requires: python-requests >= 2.6
 Requires: python-configshell >= 1.1
 Requires: python-flask >= 0.10.1
@@ -67,6 +67,19 @@ install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependenc
 %{_mandir}/man8/gwcli.8.gz
 
 %changelog
+* Sat May 5 2018 Jason Dillaman <dillaman@redhat.com> 2.7-1
+- Cleanup handling for max_data_area_mb override (25 minutes ago) <Jason Dillaman>
+- gwcli: accept optional "ring_buffer_size" when creating LUNs (9 days ago) <Venky Shankar>
+- rbd-target-api: disable LUN deactivate call if session logged-in (35 hours ago) <Jason Dillaman>
+- gwcli: fixed hostgroup member/disk form parameter naming (5 days ago) <Jason Dillaman>
+- gwcli: added snapshot create/rollback/delete command (5 days ago) <Jason Dillaman>
+- gwcli: add snapshot listing to disk info command (5 days ago) <Jason Dillaman>
+- rbd-target-api: add disksnap endpoint for managing snapshots (5 days ago) <Jason Dillaman>
+- rbd-target-api: added activate/deactivate modes to the disk endpoint (5 days ago) <Jason Dillaman>
+- Relax OS distro check to support CentOS and RHEL >=7.4 (5 weeks ago) <Jason Dillaman>
+- position correction of function gateways.remove(local_host) (7 weeks ago) <Gangbiao>
+- Prevent ValueError for kernels with multiple dashes (7 weeks ago) <Alexander Bauer>
+
 * Mon Jan 22 2018 Jason Dillaman <dillaman@redhat.com> 2.6-1
 - new release
 - rbd-target-api: fix create gateway issue
