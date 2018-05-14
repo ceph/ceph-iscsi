@@ -224,7 +224,7 @@ class LUN(object):
 
         self._validate_request()
         if self.config_key in self.config.config['disks']:
-            self.controls = self.config.config['disks'][self.config_key].get('controls', {})
+            self.controls = self.config.config['disks'][self.config_key].get('controls', {}).copy()
 
     def _get_max_data_area_mb(self):
         max_data_area_mb = self.controls.get('max_data_area_mb', None)
