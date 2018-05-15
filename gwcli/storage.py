@@ -378,6 +378,30 @@ class Disks(UIGroup):
             self.logger.error("resize needs the disk image name and new size")
             return
 
+    def ui_command_reconfigure(self, image_id, attribute, value):
+        """
+        The reconfigure command allows you to tune various lun attributes.
+        An empty value for an attribute resets the lun attribute to its
+        default.
+
+        image_id  : disk name (pool.image format)
+        attribute : attribute to reconfigure. supported attributes:
+            - max_data_area_mb : integer, size of kernel data ring buffer (MiB).
+        value     : value of the attribute to reconfigure
+
+        e.g.
+        set max_data_area_mb
+          - reconfigure image=rbd.disk_1 attribute=max_data_area_mb value=128
+        reset max_data_area_mb to default
+          - reconfigure image=rbd.disk_1 attribute=max_data_area_mb value=
+        """
+        if image_id in self.disk_lookup:
+            disk = self.disk_lookup[image_id]
+            disk.reconfigure(attribute, value)
+        else:
+            self.logger.error("the disk '{}' does not exist in this "
+                              "configuration".format(image_id))
+
     def ui_command_info(self, image_id):
         """
         Provide disk configuration information (rbd and LIO details are
@@ -628,6 +652,35 @@ class Disk(UINode):
     #         disk_map[self.image_id]['size'] = self.size
     #         disk_map[self.image_id]['size_h'] = self.size_h
 
+    def reconfigure(self, attribute, value):
+        allowed_attributes = ['max_data_area_mb']
+        if not attribute in allowed_attributes:
+            self.logger.error("supported attributes: {}".format(",".join(allowed_attributes)))
+            return
+
+        local_gw = this_host()
+
+        # Issue the api request for reconfigure
+        disk_api = ('{}://127.0.0.1:{}/api/'
+                    'disk/{}'.format(self.http_mode,
+                                     settings.config.api_port,
+                                     self.image_id))
+
+        api_vars = {'pool': self.pool, 'owner': local_gw,
+                    attribute: value, 'mode': 'reconfigure'}
+
+        self.logger.debug("Issuing reconfigure request: attribute={}, "
+                          "value={}".format(attribute, value))
+        api = APIRequest(disk_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code == 200:
+            self.logger.info('ok')
+        else:
+            self.logger.error("Failed to reconfigure : "
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
+
     def resize(self, size=None):
         """
         Perform the resize operation, and sync the disk size across each of the
@@ -749,6 +802,24 @@ class Disk(UINode):
         """
 
         self.resize(size)
+
+    def ui_command_reconfigure(self, attribute, value):
+        """
+        The reconfigure command allows you to tune various lun attributes.
+        An empty value for an attribute resets the lun attribute to its
+        default.
+
+        attribute : attribute to reconfigure. supported attributes:
+            - max_data_area_mb : integer, size of kernel data ring buffer (MiB).
+        value     : value of the attribute to reconfigure
+
+        e.g.
+        set max_data_area_mb
+          - reconfigure attribute=max_data_area_mb value=128
+        reset max_data_area_mb to default
+          - reconfigure attribute=max_data_area_mb value=
+        """
+        self.reconfigure(attribute, value)
 
     def ui_command_snapshot(self, action, name):
         """

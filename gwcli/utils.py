@@ -218,9 +218,10 @@ def valid_disk(**kwargs):
     :return: (str) either 'ok' or an error description
     """
 
-    mode_vars = {"create": ['pool', 'image', 'size', 'count'],
-                 "resize": ['pool', 'image', 'size'],
-                 "delete": ['pool', 'image']}
+    mode_vars = {"create"      : ['pool', 'image', 'size', 'count'],
+                 "resize"      : ['pool', 'image', 'size'],
+                 "reconfigure" : ['pool', 'image', 'max_data_area_mb'],
+                 "delete"      : ['pool', 'image']}
 
     config = get_config()
     if not config:
@@ -275,8 +276,7 @@ def valid_disk(**kwargs):
             return ("disks can not be added until at least {} gateways "
                     "are defined".format(settings.config.minimum_gateways))
 
-
-    if mode in ["resize", "delete"]:
+    if mode in ["resize", "delete", "reconfigure"]:
         # disk must exist in the config
         if disk_key not in config['disks']:
             return ("rbd {}/{} is not defined to the "
@@ -292,6 +292,12 @@ def valid_disk(**kwargs):
             return ("resize value must be larger than the "
                     "current size ({}/{})".format(human_size(current_size),
                                                   current_size))
+
+    if mode == 'reconfigure':
+
+        max_data_area_mb = kwargs['max_data_area_mb']
+        if max_data_area_mb and not str(max_data_area_mb).isdigit():
+            return ("max_data_area_mb must be an integer in MiB")
 
     if mode == 'delete':
 
