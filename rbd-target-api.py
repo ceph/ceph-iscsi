@@ -29,7 +29,8 @@ from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
-                                     gen_file_hash, valid_rpm, human_size)
+                                     gen_file_hash, valid_rpm, human_size,
+                                     CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
                          valid_disk, valid_client, valid_snapshot_name,
@@ -271,7 +272,7 @@ def gateway(gateway_name=None):
 
 
     ip_address = request.form.get('ip_address')
-    nosync = request.form.get('nosync', False)
+    nosync = request.form.get('nosync', 'false')
     skipchecks = request.form.get('skipchecks', 'false')
 
     # first confirm that the request is actually valid, if not return a 400
@@ -303,7 +304,7 @@ def gateway(gateway_name=None):
 
     # if the config is empty, it doesn't matter what nosync is set to
     if total_objects == 0:
-        nosync = True
+        nosync = 'true'
 
     gateway_ip_list = config.config['gateways'].get('ip_list', [])
 
@@ -318,147 +319,15 @@ def gateway(gateway_name=None):
 
     api_vars = {"target_iqn": target_iqn,
                 "gateway_ip_list": ",".join(gateway_ip_list),
-                "mode": "target"}
+                "mode": "target",
+                "nosync": nosync,}
 
     resp_text, resp_code = call_api(gateways, '_gateway',
                                     gateway_name,
                                     http_method='put',
                                     api_vars=api_vars)
 
-    if resp_code == 200:
-        # GW definition has been added, so before we declare victory we need
-        # to sync tpg's to the existing gateways and sync the disk and client
-        # configuration to the new gateway
-
-        if len(current_disks.keys()) > 0:
-            # there are disks in the environment, so we need to add them to the
-            # new tpg created when the new gateway was added
-            seed_gateways = [ip for ip in gateways if ip != ip_address]
-
-            resp_text, resp_code = seed_tpg(seed_gateways,
-                                            gateway_name,
-                                            api_vars)
-
-            if resp_code != 200:
-                return jsonify(message="TPG sync failed on existing gateways"), \
-                       resp_code
-
-        # No check to see if the new gateway needs to be synchronised as part
-        # of this request
-        if nosync:
-            # no further action needed
-            return jsonify(message="Gateway creation {}".format(resp_text)), \
-                   resp_code
-        else:
-
-            resp_text, resp_code = seed_disks(current_disks,
-                                              ip_address)
-
-            if resp_code != 200:
-                return jsonify(message="Disk mapping {}".format(resp_text)), \
-                       resp_code
-            else:
-                # disks added, so seed the clients on the new gateway
-                resp_text, resp_code = seed_clients(current_clients,
-                                                    ip_address)
-
-    else:
-
-        return jsonify(message="Gateway creation {}".format(resp_text)), \
-               resp_code
-
-
-def seed_tpg(gateways, gateway_name, api_vars):
-
-    http_mode = 'https' if settings.config.api_secure else 'http'
-    state = 'succeeded'
-    rc = 200
-    api_vars['mode'] = 'map'
-
-    for gw in gateways:
-        logger.debug("Updating tpg on {}".format(gw))
-        gw_api = '{}://{}:{}/api/_gateway/{}'.format(http_mode,
-                                                     gw,
-                                                     settings.config.api_port,
-                                                     gateway_name)
-        api = APIRequest(gw_api, data=api_vars)
-        api.put()
-        if api.response.status_code != 200:
-            state = 'failed'
-            rc = 500
-            break
-
-    return "TPG mapping {}".format(state), rc
-
-
-def seed_disks(current_disks, gw_ip):
-
-    http_mode = 'https' if settings.config.api_secure else 'http'
-    state = 'succeeded'
-
-    for disk_key in current_disks:
-
-        this_disk = current_disks[disk_key]
-        disk_api = '{}://{}:{}/api/disk/{}'.format(http_mode,
-                                                   gw_ip,
-                                                   settings.config.api_port,
-                                                   disk_key)
-
-        api_vars = {"pool": this_disk['pool'],
-                    "size": "0G",
-                    "owner": this_disk['owner'],
-                    "mode": "sync"}
-
-        api = APIRequest(disk_api, data=api_vars)
-        api.put()
-
-        if api.response.status_code != 200:
-            state = 'failed'
-            break
-
-        logger.debug("added {} to gateway {}".format(disk_key,
-                                                     gw_ip))
-
-    return "disk seeding on {} {}".format(gw_ip, state), \
-           api.response.status_code
-
-
-def seed_clients(current_clients, gw_ip):
-
-    http_mode = 'https' if settings.config.api_secure else 'http'
-    state = 'succeeded'
-    local_gw = this_host()
-
-    for client_iqn in current_clients:
-
-        this_client = current_clients[client_iqn]
-        client_luns = this_client['luns']
-        lun_list = [(disk, client_luns[disk]['lun_id'])
-                    for disk in client_luns]
-        srtd_list = Client.get_srtd_names(lun_list)
-
-        api_vars = {'chap': this_client['auth']['chap'],
-                    'image_list': ','.join(srtd_list),
-                    'committing_host': local_gw}
-
-        client_api = '{}://{}:{}/api/client/{}'.format(http_mode,
-                                                       gw_ip,
-                                                       settings.config.api_port,
-                                                       client_iqn)
-
-        api = APIRequest(client_api,
-                         data=api_vars)
-        api.put()
-
-        if api.response.status_code != 200:
-            state = 'failed'
-            break
-
-        logger.debug("client '{}' defined to GW {}".format(client_iqn,
-                                                           gw_ip))
-
-    return "Client seeding to '{}' {}".format(gw_ip, state), \
-           api.response.status_code
+    return jsonify(message="Gateway creation {}".format(resp_text)), resp_code
 
 
 @app.route('/api/_gateway/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
@@ -490,6 +359,7 @@ def _gateway(gateway_name=None):
         gateway_ips = str(request.form['gateway_ip_list'])
         target_iqn = str(request.form['target_iqn'])
         target_mode = str(request.form.get('mode', 'target'))
+        nosync = str(request.form.get('nosync', 'false'))
 
         gateway_ip_list = gateway_ips.split(',')
 
@@ -515,6 +385,26 @@ def _gateway(gateway_name=None):
             logger.info("refreshing the configuration after the gateway "
                         "creation")
             config.refresh()
+
+            if nosync.lower() != 'true':
+                logger.info("Syncing LUN configuration")
+                try:
+                    LUN.define_luns(logger, config, gateway)
+                except CephiSCSIError as err:
+                    gateway.manage('clearconfig')
+                    return jsonify(message="Failed to sync LUNs on gateway. "
+                                           "Err {}.".format(err)), 500
+
+                logger.info("Syncing TPG to LUN mapping")
+                gateway.manage('map')
+
+                logger.info("Syncing client configuration")
+                try:
+                    GWClient.define_clients(logger, config)
+                except CephiSCSIError as err:
+                    gateway.manage('clearconfig')
+                    return jsonify(message="Failed to sync clients on gateway"
+                                            ". Err {}.".format(err)), 500
 
         return jsonify(message="Gateway defined/mapped"), 200
 
