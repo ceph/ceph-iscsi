@@ -14,7 +14,7 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config, ansible_control
-from ceph_iscsi_config.utils import encryption_available
+from ceph_iscsi_config.utils import encryption_available, CephiSCSIError
 
 
 class GWClient(object):
@@ -188,6 +188,35 @@ class GWClient(object):
             self.logger.info("(Client.define_client) {} added "
                              "successfully".format(self.iqn))
             self.change_count += 1
+
+    @staticmethod
+    def define_clients(logger, config):
+        """
+        define the clients (nodeACLs) to the gateway definition
+        :param logger: logger object to print to
+        :param config: configuration dict from the rados pool
+        :raises CephiSCSIError.
+        """
+
+        # Client configurations (NodeACL's)
+        for client_iqn in config.config['clients']:
+            client_metadata = config.config['clients'][client_iqn]
+            client_chap = CHAP(client_metadata['auth']['chap'])
+
+            image_list = client_metadata['luns'].keys()
+
+            chap_str = client_chap.chap_str
+            if client_chap.error:
+                raise CephiSCSIError("Unable to decode password for {}. "
+                                     "CHAP error: {}".format(client_iqn,
+                                     client_chap.error_msg))
+
+            client = GWClient(logger,
+                              client_iqn,
+                              image_list,
+                              chap_str)
+
+            client.manage('present')  # ensure the client exists
 
     def try_disable_auth(self, tpg):
         """

@@ -15,6 +15,11 @@ import ceph_iscsi_config.settings as settings
 
 __author__ = 'pcuzner@redhat.com'
 
+class CephiSCSIError(Exception):
+    '''
+    Generic Ceph iSCSI config error.
+    '''
+    pass
 
 def shellcommand(command_string):
 
