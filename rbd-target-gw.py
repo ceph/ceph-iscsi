@@ -488,7 +488,7 @@ def main():
         log.addHandler(file_handler)
         log.addHandler(syslog_handler)
 
-        app.run(host='::',
+        app.run(host=settings.config.prometheus_host,
                 port=settings.config.prometheus_port,
                 debug=False,
                 threaded=True)
