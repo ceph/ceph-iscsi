@@ -32,7 +32,8 @@ class Settings(object):
                 "priv_key": 'iscsi-gateway.key',
                 "pub_key": 'iscsi-gateway-pub.key',
                 "prometheus_exporter": "true",
-                "prometheus_port": 9287
+                "prometheus_port": 9287,
+                "prometheus_host": "::"
                 }
 
     target_defaults = {"osd_op_timeout": 30,
