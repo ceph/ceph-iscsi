@@ -341,6 +341,18 @@ class LUN(object):
 
             self.remove_lun()
 
+    def update_config(self, commit=False):
+        self.logger.debug("LUN.update_config starting")
+
+        # delete/update on-disk attributes
+        disk_attr = self.config.config['disks'][self.config_key]
+        if self.controls != disk_attr.get('controls', {}):
+            disk_attr['controls'] = self.controls
+            self.config.update_item('disks', self.config_key, disk_attr)
+        if commit and self.config.changed:
+            self.config.commit()
+            self.error = self.config.error
+            self.error_msg = self.config.error_msg
 
     def allocate(self):
         self.logger.debug("LUN.allocate starting, listing rbd devices")
@@ -490,12 +502,7 @@ class LUN(object):
                     if self.error:
                         return
 
-                    # delete/update on-disk attributes
-                    disk_attr = self.config.config['disks'][self.config_key]
-                    if self.controls != disk_attr.get('controls', {}):
-                        disk_attr['controls'] = self.controls
-                        self.config.update_item('disks', self.config_key, disk_attr)
-
+                    self.update_config()
                     self.logger.debug("(LUN.allocate) registered '{}' to LIO "
                                       "with wwn '{}' from the config "
                                       "object".format(self.image,
