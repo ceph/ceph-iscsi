@@ -22,10 +22,10 @@ import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.lun import LUN
-from ceph_iscsi_config.client import GWClient, CHAP
+from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.lio import LIO, Gateway
-from ceph_iscsi_config.utils import this_host, human_size
+from ceph_iscsi_config.utils import this_host, human_size, CephiSCSIError
 
 # Create a flask instance
 app = Flask(__name__)
@@ -267,128 +267,6 @@ def define_gateway():
     return gateway
 
 
-def rbd_lock_cleanup(local_ips, rbd_image):
-    """
-    cleanup locks left if this node crashed and was not able to release them
-    :param local_ips: list of local ip addresses.
-    :rbd_image: rbd image to clean up locking for
-    :return: None
-    """
-
-    lock_info = rbd_image.list_lockers()
-    if not lock_info:
-        return
-
-    lockers = lock_info.get("lockers")
-    for holder in lockers:
-        for ip in local_ips:
-            if ip in holder[2]:
-                logger.info("Cleaning up stale local lock for {} {}".format(
-                            holder[0], holder[1]))
-                try:
-                    rbd_image.break_lock(holder[0], holder[1])
-                except:
-                    halt("Error cleaning up rbd image {}".format(rbd_image))
-
-
-def define_luns(gateway):
-    """
-    define the disks in the config to LIO
-    :param gateway: (object) gateway object - used for mapping
-    :return: None
-    """
-
-    local_gw = this_host()
-
-    ipv4_list = []
-    for iface in netifaces.interfaces():
-        dev_info = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
-        ipv4_list += [dev['addr'] for dev in dev_info]
-
-    # sort the disks dict keys, so the disks are registered in a specific
-    # sequence
-    disks = config.config['disks']
-    srtd_disks = sorted(disks)
-    pools = {disks[disk_key]['pool'] for disk_key in srtd_disks}
-
-    if pools:
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
-
-            for pool in pools:
-
-                logger.debug("Processing rbd's in '{}' pool".format(pool))
-
-                with cluster.open_ioctx(pool) as ioctx:
-
-                    pool_disks = [disk_key for disk_key in srtd_disks
-                                  if disk_key.startswith(pool)]
-                    for disk_key in pool_disks:
-
-                        pool, image_name = disk_key.split('.')
-
-                        try:
-                            with rbd.Image(ioctx, image_name) as rbd_image:
-                                image_bytes = rbd_image.size()
-                                image_size_h = human_size(image_bytes)
-
-                                rbd_lock_cleanup(ipv4_list, rbd_image)
-
-                                lun = LUN(logger, pool, image_name,
-                                          image_size_h, local_gw)
-                                if lun.error:
-                                    halt("Error defining rbd image "
-                                         "{}".format(disk_key))
-
-                                lun.allocate()
-                                if lun.error:
-                                    halt("Error unable to register {} with "
-                                         "LIO - {}".format(disk_key,
-                                                           lun.error_msg))
-
-                        except rbd.ImageNotFound:
-                            halt("Disk '{}' defined to the config, but image "
-                                 "'{}' can not be found in "
-                                 "'{}' pool".format(disk_key,
-                                                    image_name,
-                                                    pool))
-
-        # Gateway Mapping : Map the LUN's registered to all tpg's within the
-        # LIO target
-        gateway.manage('map')
-        if gateway.error:
-            halt("Error mapping the LUNs to the tpg's within the iscsi Target")
-
-    else:
-        logger.info("No LUNs to export")
-
-
-def define_clients():
-    """
-    define the clients (nodeACLs) to the gateway definition
-    """
-
-    # Client configurations (NodeACL's)
-    for client_iqn in config.config['clients']:
-        client_metadata = config.config['clients'][client_iqn]
-        client_chap = CHAP(client_metadata['auth']['chap'])
-
-        image_list = client_metadata['luns'].keys()
-
-        chap_str = client_chap.chap_str
-        if client_chap.error:
-            logger.debug("Password decode issue : "
-                         "{}".format(client_chap.error_msg))
-            halt("Unable to decode password for "
-                 "{}".format(client_iqn))
-
-        client = GWClient(logger,
-                          client_iqn,
-                          image_list,
-                          chap_str)
-
-        client.manage('present')  # ensure the client exists
-
-
 def apply_config():
     """
     procesing logic that orchestrates the creation of the iSCSI gateway
@@ -423,10 +301,16 @@ def apply_config():
     gateway = define_gateway()
 
     logger.info("Processing LUN configuration")
-    define_luns(gateway)
+    try:
+        LUN.define_luns(logger, config, gateway)
+    except CephiSCSIError as err:
+            halt("Could not define LUNs: {}".format(err))
 
     logger.info("Processing client configuration")
-    define_clients()
+    try:
+        GWClient.define_clients(logger, config)
+    except CephiSCSIError as err:
+        halt("Could not define clients: {}".format(err))
 
     if not portals_already_active:
         # The tpgs, luns and clients are all defined, but the active tpg

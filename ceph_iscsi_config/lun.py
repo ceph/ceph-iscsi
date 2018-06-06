@@ -15,8 +15,9 @@ import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config
 # from ceph_iscsi_config.alua import ALUATargetPortGroup
-from ceph_iscsi_config.utils import convert_2_bytes, gen_control_string, get_pool_id
-
+from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
+                                     get_pool_id, human_size, ipv4_addresses,
+                                     this_host, CephiSCSIError)
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -152,6 +153,32 @@ class RBDDev(object):
                 rbd_inst = rbd.RBD()
                 rbd_names = rbd_inst.list(ioctx)
         return rbd_names
+
+    @staticmethod
+    def rbd_lock_cleanup(logger, local_ips, rbd_image):
+        """
+        cleanup locks left if this node crashed and was not able to release them
+        :param logger: logger object to print to
+        :param local_ips: list of local ip addresses.
+        :rbd_image: rbd image to clean up locking for
+        :raise CephiSCSIError.
+        """
+
+        lock_info = rbd_image.list_lockers()
+        if not lock_info:
+            return
+
+        lockers = lock_info.get("lockers")
+        for holder in lockers:
+            for ip in local_ips:
+                if ip in holder[2]:
+                    logger.info("Cleaning up stale local lock for {} {}".format(
+                                holder[0], holder[1]))
+                    try:
+                        rbd_image.break_lock(holder[0], holder[1])
+                    except Exception as err:
+                        raise CephiSCSIError("Could not break lock for {}. "
+                                             "Error {}".format(rbd_image, err))
 
     def _valid_rbd(self):
 
@@ -752,6 +779,79 @@ class LUN(object):
         # element which is the hostname
         return gw_items[0][0]
 
+    @staticmethod
+    def define_luns(logger, config, gateway):
+        """
+        define the disks in the config to LIO
+        :param logger: logger object to print to
+        :param config: configuration dict from the rados pool
+        :param gateway: (object) gateway object - used for mapping
+        :raises CephiSCSIError.
+        """
+
+        local_gw = this_host()
+
+        # sort the disks dict keys, so the disks are registered in a specific
+        # sequence
+        disks = config.config['disks']
+        srtd_disks = sorted(disks)
+        pools = {disks[disk_key]['pool'] for disk_key in srtd_disks}
+
+        if pools is None:
+            logger.info("No LUNs to export")
+            return True
+
+        ips = ipv4_addresses()
+
+        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+
+            for pool in pools:
+
+                logger.debug("Processing rbd's in '{}' pool".format(pool))
+
+                with cluster.open_ioctx(pool) as ioctx:
+
+                    pool_disks = [disk_key for disk_key in srtd_disks
+                                  if disk_key.startswith(pool)]
+                    for disk_key in pool_disks:
+
+                        pool, image_name = disk_key.split('.')
+
+                        try:
+                            with rbd.Image(ioctx, image_name) as rbd_image:
+                                image_bytes = rbd_image.size()
+                                image_size_h = human_size(image_bytes)
+
+                                RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
+
+                                lun = LUN(logger, pool, image_name,
+                                           image_size_h, local_gw)
+                                if lun.error:
+                                    raise CephiSCSIError("Error defining rbd "
+                                                         "image {}".format(
+                                                         disk_key))
+
+                                lun.allocate()
+                                if lun.error:
+                                    raise CephiSCSIError("Error unable to "
+                                                         "register  {} with "
+                                                         "LIO - {}".format(
+                                                         disk_key,
+                                                         lun.error_msg))
+
+                        except rbd.ImageNotFound:
+                            raise CephiSCSIError("Disk '{}' defined to the "
+                                                 "config, but image '{}' can "
+                                                 "not be found in '{}' "
+                                                 "pool".format(disk_key,
+                                                 image_name, pool))
+
+        # Gateway Mapping : Map the LUN's registered to all tpg's within the
+        # LIO target
+        gateway.manage('map')
+        if gateway.error:
+            raise CephiSCSIError("Error mapping the LUNs to the tpg's within "
+                                 "the iscsi Target")
 
 def rados_pool(conf=None, pool='rbd'):
     """
