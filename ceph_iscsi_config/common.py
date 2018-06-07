@@ -308,6 +308,15 @@ class Config(object):
         txn.item_content = element_value
         self.txn_list.append(txn)
 
+    def set_item(self, cfg_type, element_name, element_value):
+        self.logger.debug("(Config.update_item) config is {}".format(self.config))
+        self.changed = True
+        self.logger.debug("update_item: type={}, item={}, update={}".format(cfg_type, element_name, element_value))
+
+        txn = ConfigTransaction(cfg_type, element_name, 'add')
+        txn.item_content = element_value
+        self.txn_list.append(txn)
+
     def _commit_rbd(self, post_action):
 
         ioctx = self._open_ioctx()
