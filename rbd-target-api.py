@@ -3,6 +3,7 @@
 import sys
 import os
 import signal
+import json
 import logging
 import logging.handlers
 import ssl
@@ -177,6 +178,25 @@ def get_sys_info(query_type=None):
         # Request Unknown
         return jsonify(message="Unknown /sysinfo query"), 404
 
+def _parse_target_controls(controls_json):
+    controls = {}
+    raw_controls = json.loads(controls_json)
+    for k in settings.Settings.GATEWAY_SETTINGS:
+        if raw_controls.has_key(k):
+            value = raw_controls[k] if raw_controls[k] else None
+            if value:
+                if k in settings.Settings.LIO_YES_NO_SETTINGS:
+                    try:
+                        value = settings.Settings.convert_lio_yes_no(value)
+                    except ValueError:
+                        raise ValueError("expected yes or no for {}".format(k))
+                else:
+                    try:
+                        value = str(int(value))
+                    except ValueError:
+                        raise ValueError("expected integer for {}".format(k))
+            controls[k] = value
+    return controls
 
 @app.route('/api/target/<target_iqn>', methods=['PUT'])
 @requires_restricted_auth
@@ -186,38 +206,147 @@ def target(target_iqn=None):
     The target is added to the configuration object, seeding the configuration
     for ALL gateways
     :param target_iqn: IQN of the target each gateway will use
+    :param mode: (str) 'reconfigure'
+    :param controls: (JSON dict) valid control overrides
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
+    curl --insecure --user admin:admin -d mode=reconfigure -d controls='{cmdsn_depth=128}' -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
     """
-    if request.method == 'PUT':
 
-        gateway_ip_list = []
+    mode = request.form.get('mode', None)
+    if mode not in [None, 'reconfigure']:
+        logger.error("Unexpected mode provided")
+        return jsonify(message="Unexpected mode provided for {} - "
+                               "{}".format(target_iqn, mode)), 500
 
-        target = GWTarget(logger,
-                          str(target_iqn),
-                          gateway_ip_list)
+    controls = {}
+    if request.form.has_key('controls'):
+        try:
+            controls = _parse_target_controls(request.form['controls'])
+        except ValueError as err:
+            logger.error("Unexpected or invalid controls")
+            return jsonify(message="Unexpected or invalid controls - "
+                                   "{}".format(err)), 500
+        logger.debug("controls {}".format(controls))
 
-        if target.error:
-            logger.error("Unable to create an instance of the GWTarget class")
-            return jsonify(message="GWTarget problem - "
-                                   "{}".format(target.error_msg)), 500
+    gateway_ip_list = []
+    target = GWTarget(logger,
+                      str(target_iqn),
+                      gateway_ip_list)
 
-        target.manage('init')
-        if target.error:
-            logger.error("Failure during gateway 'init' processing")
-            return jsonify(message="iscsi target 'init' process failed "
-                                   "for {} - {}".format(target_iqn,
-                                                        target.error_msg)), 500
+    if target.error:
+        logger.error("Unable to create an instance of the GWTarget class")
+        return jsonify(message="GWTarget problem - "
+                               "{}".format(target.error_msg)), 500
 
+    for k, v in controls.iteritems():
+        setattr(target, k, v)
+
+    target.manage('init')
+    if target.error:
+        logger.error("Failure during gateway 'init' processing")
+        return jsonify(message="iscsi target 'init' process failed "
+                               "for {} - {}".format(target_iqn,
+                                                    target.error_msg)), 500
+
+    if mode is None:
         config.refresh()
         return jsonify(message="Target defined successfully"), 200
 
-    else:
-        # return unrecognised request
-        return jsonify(message="Invalid method ({}) to target "
-                               "API".format(request.method)), 405
+    target.manage('reconfigure')
+    if target.error:
+        logger.error("Failure during gateway 'reconfigure' processing")
+        return jsonify(message="iscsi target 'reconfigure' process failed "
+                               "for {} - {}".format(target_iqn,
+                                                    target.error_msg)), 500
+    config.refresh()
 
+    # This is a reconfigure operation, so first confirm the gateways
+    # are in place (we need defined gateways)
+    local_gw = this_host()
+    logger.debug("this host is {}".format(local_gw))
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("other gateways - {}".format(gateways))
+    gateways.remove(local_gw)
+    gateways.append(local_gw)
+
+    resp_text, resp_code = call_api(gateways, '_target', target_iqn,
+                                    http_method='put',
+                                    api_vars=request.form)
+    return jsonify(message="Target reconfigure {}".format(resp_text)), resp_code
+
+@app.route('/api/_target/<target_iqn>', methods=['PUT'])
+@requires_restricted_auth
+def _target(target_iqn=None):
+    mode = request.form.get('mode', None)
+    if mode not in ['reconfigure']:
+        logger.error("Unexpected mode provided")
+        return jsonify(message="Unexpected mode provided for {} - "
+                               "{}".format(target_iqn, mode)), 500
+
+    controls = {}
+    if request.form.has_key('controls'):
+        try:
+            controls = _parse_target_controls(request.form['controls'])
+        except ValueError as err:
+            logger.error("Unexpected or invalid controls")
+            return jsonify(message="Unexpected or invalid controls - "
+                                   "{}".format(err)), 500
+        logger.debug("controls {}".format(controls))
+
+    config.refresh()
+
+    target = GWTarget(logger, str(target_iqn), [])
+    if target.error:
+        logger.error("Unable to create an instance of the GWTarget class")
+        return jsonify(message="GWTarget problem - "
+                               "{}".format(target.error_msg)), 500
+
+    for k,v in controls.iteritems():
+        setattr(target, k, v)
+
+    if target.exists():
+        target.load_config()
+        if target.error:
+            logger.error("Unable to refresh tpg state")
+            return jsonify(message="Unable to refresh tpg state - "
+                                    "{}".format(target.error_msg)), 500
+
+    target.update_tpg_controls()
+    if target.error:
+        logger.error("Unable to update tpg control overrides")
+        return jsonify(message="Unable to update tpg control overrides - "
+                               "{}".format(target.error_msg)), 500
+
+    # re-apply client control overrides
+    client_errors = False
+    for client_iqn in config.config['clients']:
+        client_metadata = config.config['clients'][client_iqn]
+        image_list = client_metadata['luns'].keys()
+        client_chap = CHAP(client_metadata['auth']['chap'])
+        chap_str = client_chap.chap_str
+        if client_chap.error:
+            logger.debug("Password decode issue : "
+                         "{}".format(client_chap.error_msg))
+            halt("Unable to decode password for "
+                 "{}".format(client_iqn))
+
+        client = GWClient(logger,
+                          client_iqn,
+                          image_list,
+                          chap_str)
+        client.manage('reconfigure')
+        if client.error:
+            logger.error("Client control override failed "
+                         "{} - {}".format(client_iqn,
+                                          client.error_str))
+            client_errors = True
+    if client_errors:
+        return jsonify(message="Client control override failed"), 500
+
+    return jsonify(message="Target reconfigured successfully"), 200
 
 @app.route('/api/config', methods=['GET'])
 @requires_restricted_auth
@@ -246,7 +375,6 @@ def gateways():
 
     if request.method == 'GET':
         return jsonify(config.config['gateways']), 200
-
 
 @app.route('/api/gateway/<gateway_name>', methods=['PUT'])
 @requires_restricted_auth

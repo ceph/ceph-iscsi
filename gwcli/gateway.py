@@ -401,6 +401,62 @@ class Target(UINode):
     def summary(self):
         return "Gateways: {}".format(len(self.gateway_group.children)), None
 
+    def ui_command_reconfigure(self, attribute, value):
+        """
+        The reconfigure command allows you to tune various gatway attributes.
+        An empty value for an attribute resets the lun attribute to its
+        default.
+        attribute : attribute to reconfigure. supported attributes:
+          - cmdsn_depth : integer
+          - dataout_timeout : integer
+          - nopin_response_timeout : integer
+          - nopin_timeout : integer
+          - immediate_data : [Yes|No]
+          - initial_r2t : [Yes|No]
+          - first_burst_length : integer
+          - max_burst_length : integer
+          - max_outstanding_r2t : integer
+          - max_recv_data_segment_length : integer
+          - max_xmit_data_segment_length : integer
+        value     : value of the attribute to reconfigure
+        e.g.
+        set cmdsn_depth
+          - reconfigure attribute=cmdsn_depth value=128
+        reset cmdsn_depth
+          - reconfigure attribute=cmdsn_depth value=
+        """
+        if not attribute in settings.Settings.GATEWAY_SETTINGS:
+            self.logger.error("supported attributes: {}".format(",".join(
+                sorted(settings.Settings.GATEWAY_SETTINGS))))
+            return
+
+        # Issue the api request for the reconfigure
+        gateways_api = ('{}://127.0.0.1:{}/api/'
+                        'target/{}'.format(self.http_mode,
+                                           settings.config.api_port,
+                                           self.target_iqn))
+
+        controls = {attribute: value}
+        controls_json = json.dumps(controls)
+        api_vars = {'mode': 'reconfigure', 'controls': controls_json}
+
+        self.logger.debug("Issuing reconfigure request: controls={}".format(controls_json))
+        api = APIRequest(gateways_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code != 200:
+            self.logger.error("Failed to reconfigure : "
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
+            return
+
+        config = self.parent.parent._get_config()
+        if not config:
+            self.logger.error("Unable to refresh local config")
+        self.controls = config.get('controls', {})
+
+        self.logger.info('ok')
+
     def _refresh_control_values(self):
         self.control_values = {}
         for k in settings.Settings.GATEWAY_SETTINGS:
