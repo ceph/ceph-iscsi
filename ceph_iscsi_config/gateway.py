@@ -589,6 +589,11 @@ class GWTarget(object):
                     config.add_item("gateways", "iqn", initial_value=self.iqn)
                     config.commit()
 
+        elif mode == 'reconfigure':
+            if self.controls != config.config.get('controls', {}):
+                config.set_item('controls', '', self.controls.copy())
+                config.commit()
+
         elif mode == 'clearconfig':
             # Called by API from CLI clearconfig command
             if self.exists():
