@@ -526,7 +526,7 @@ def disk(image_id):
         pool, image_name = image_id.split('.')
 
         disk_usable = valid_disk(pool=pool, image=image_name, size=size,
-                                 mode=mode, count=count)
+                                 mode=mode, count=count, max_data_area_mb=max_data_area_mb)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
@@ -775,9 +775,14 @@ def _disk(image_id):
 
                 return jsonify(message="LUN activated"), 200
 
-        else:
-            return jsonify(message="Invalid request mode - "
-                           "{}".format(mode)), 400
+        elif mode == 'reconfigure':
+            max_data_area_mb = request.form.get('max_data_area_mb', None)
+            resp_text, resp_code = _reconfigure(image_id,
+                                                max_data_area_mb=max_data_area_mb)
+            if resp_code == 200:
+                return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
+            else:
+                return jsonify(message=resp_text), resp_code
 
     else:
         # DELETE request
@@ -815,6 +820,63 @@ def _disk(image_id):
 
         return jsonify(message="LUN removed"), 200
 
+def _reconfigure(image_id, **kwargs):
+    logger.debug("lun reconfigure request")
+
+    config.refresh()
+    disk = config.config['disks'].get(image_id, None)
+    if not disk:
+        return "rbd image {} not found".format(image_id), 404
+
+    local_gw = this_host()
+    logger.debug("this host is {}".format(local_gw))
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    gateways.remove(local_gw)
+    logger.debug("Other gateways: {}".format(gateways))
+    gateways.insert(0, '127.0.0.1')
+
+    # deactivate disk
+    api_vars = {'mode': 'deactivate'}
+
+    logger.debug("deactivating disk")
+    resp_text, resp_code = call_api(gateways, '_disk',
+                                    image_id, http_method='put',
+                                    api_vars=api_vars)
+    if resp_code != 200:
+        return "failed to deactivate disk: {}".format(resp_text), resp_code
+
+    pool_name, image_name = image_id.split('.', 1)
+    lun = LUN(logger, pool_name, image_name, '0G', disk['owner'])
+
+    for k,v in kwargs.items():
+        # exclude attributes which are unset and reset to defaults
+        # if empty
+        if v is not None:
+            lun.__setattr__(k, v if v != '' else None)
+            if lun.error:
+                resp_text = "Unable to create LUN instance: {}".format(lun.error_msg)
+                resp_code = 500
+                break
+
+    if not lun.error:
+        lun.update_config(True)
+        if lun.error:
+            resp_text = "LUN reconfigure failure: {}".format(lun.error_msg)
+            resp_code = 500
+
+    # activate disk
+    api_vars['mode'] = 'activate'
+
+    logger.debug("activating disk")
+    activate_resp_text, activate_resp_code = call_api(gateways, '_disk',
+                                                      image_id, http_method='put',
+                                                      api_vars=api_vars)
+    if resp_code == 200 and activate_resp_code != 200:
+        resp_text = activate_resp_text
+        resp_code = activate_resp_code
+
+    return resp_text, resp_code
 
 @app.route('/api/disksnap/<image_id>/<name>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
