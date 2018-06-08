@@ -13,7 +13,7 @@ from gwcli.client import Clients
 
 from gwcli.utils import (human_size, readcontents, console_message,
                          response_message, GatewayAPIError, GatewayError,
-                         this_host, APIRequest, valid_snapshot_name)
+                         this_host, APIRequest, valid_snapshot_name, get_config)
 
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes
 
@@ -518,7 +518,7 @@ class Disks(UIGroup):
 class Disk(UINode):
 
     display_attributes = ["image", "ceph_cluster", "pool", "wwn", "size_h",
-                          "feature_list", "snapshots", "owner"]
+                          "feature_list", "snapshots", "owner", "control_values"]
 
     def __init__(self, parent, image_id, image_config, size=None,
                  features=None, snapshots=None):
@@ -539,6 +539,8 @@ class Disk(UINode):
         self.size_h = ''
         self.features = 0
         self.feature_list = []
+        self.controls = {}
+        self.control_values = {}
         self.ceph_cluster = self.parent.parent.ceph.local_ceph.name
 
         disk_map = self.parent.disk_info
@@ -548,15 +550,12 @@ class Disk(UINode):
         if image_id not in self.parent.disk_lookup:
             self.parent.disk_lookup[image_id] = self
 
-        # set the remaining attributes based on the fields in the dict
-        for k, v in image_config.iteritems():
-            disk_map[image_id][k] = v
-            self.__setattr__(k, v)
+        self._apply_config(image_config)
 
         if not size:
             # Size/features are not stored in the config, since it can be changed
             # outside of this tool-chain, so we get them dynamically
-            self._get_meta_data_tcmu()
+            self._refresh_config()
         else:
             # size and features have been passed in from the Disks.refresh
             # method
@@ -570,6 +569,20 @@ class Disk(UINode):
         disk_map = self.parent.disk_info
         disk_map[self.image_id]['size'] = self.size
         disk_map[self.image_id]['size_h'] = self.size_h
+
+    def _apply_config(self, image_config):
+        # set the remaining attributes based on the fields in the dict
+        disk_map = self.parent.disk_info
+        for k, v in image_config.iteritems():
+            disk_map[self.image_id][k] = v
+            self.__setattr__(k, v)
+        for k in ['max_data_area_mb']:
+            val = self.controls.get(k)
+            default_val = getattr(settings.config, k, None)
+            if val is None or str(val) == str(default_val):
+                self.control_values[k] = default_val
+            else:
+                self.control_values[k] = "{} (override)".format(val)
 
     def summary(self):
         msg = [self.image, "({})".format(self.size_h)]
@@ -603,6 +616,16 @@ class Disk(UINode):
             ptr -= 1
 
         return disk_features
+
+    def _refresh_config(self):
+        self._get_meta_data_tcmu()
+        self._get_meta_data_config()
+
+    def _get_meta_data_config(self):
+        config = get_config()
+        if not config:
+            return
+        self._apply_config(config['disks'][self.image_id])
 
     def _get_meta_data_tcmu(self):
         """
@@ -676,6 +699,7 @@ class Disk(UINode):
 
         if api.response.status_code == 200:
             self.logger.info('ok')
+            self._refresh_config()
         else:
             self.logger.error("Failed to reconfigure : "
                               "{}".format(response_message(api.response,
@@ -769,7 +793,7 @@ class Disk(UINode):
 
         if api.response.status_code == 200:
             if action == 'create' or action == 'delete':
-                self._get_meta_data_tcmu()
+                self._refresh_config()
             self.logger.info('ok')
         else:
             self.logger.error("Failed to {} snapshot: "
