@@ -341,7 +341,7 @@ def _target(target_iqn=None):
         if client.error:
             logger.error("Client control override failed "
                          "{} - {}".format(client_iqn,
-                                          client.error_str))
+                                          client.error_msg))
             client_errors = True
     if client_errors:
         return jsonify(message="Client control override failed"), 500
@@ -879,7 +879,7 @@ def _disk(image_id):
                     if client.error:
                         logger.error("LUN mapping failed "
                                      "{} - {}".format(client_iqn,
-                                                      client.error_str))
+                                                      client.error_msg))
                         client_errors = True
 
                 # re-map LUN to host groups
@@ -895,7 +895,7 @@ def _disk(image_id):
                     if group.error:
                         logger.error("LUN mapping failed "
                                      "{} - {}".format(group_iqn,
-                                                      group.error_str))
+                                                      group.error_msg))
                         client_errors = True
 
                 if client_errors:
