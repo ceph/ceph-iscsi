@@ -11,6 +11,7 @@ from gwcli.utils import (this_host, response_message, GatewayAPIError,
                          GatewayError, APIRequest, console_message, valid_iqn)
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.utils import format_lio_yes_no
 
 import rtslib_fb.root as root
 
@@ -70,6 +71,11 @@ class ISCSIRoot(UIRoot):
                 self.target.gateway_group = self.config['gateways']
             else:
                 self.target.gateway_group = {}
+
+            if 'controls' in self.config:
+                self.target.controls = self.config['controls']
+            else:
+                self.target.controls = {}
 
             if 'clients' in self.config:
                 self.target.client_group = self.config['clients']
@@ -355,6 +361,8 @@ class ISCSITarget(UIGroup):
         self.reset()
         if 'iqn' in self.gateway_group:
             tgt = Target(self.gateway_group['iqn'], self)
+            tgt.controls = self.controls
+
             tgt.gateway_group.load(self.gateway_group)
             tgt.client_group.load(self.client_group)
 
@@ -362,23 +370,107 @@ class ISCSITarget(UIGroup):
         return "Targets: {}".format(len(self.children)), None
 
 
-class Target(UIGroup):
+class Target(UINode):
 
-    help_info = '''
-                The iscsi target is the name that the group of gateways are 
-                known as by the iscsi initiators (clients).
-                '''
+    display_attributes = ["target_iqn", "control_values"]
 
+    help_intro = '''
+                 The iscsi target is the name that the group of gateways are
+                 known as by the iscsi initiators (clients).
+                 '''
     def __init__(self, target_iqn, parent):
-
         UIGroup.__init__(self, target_iqn, parent)
         self.target_iqn = target_iqn
+
+        self.control_values = []
+        self.controls = {}
+
         self.gateway_group = GatewayGroup(self)
         self.client_group = Clients(self)
         self.host_groups = HostGroups(self)
 
+    def _get_controls(self):
+        return self._controls.copy()
+
+    def _set_controls(self, controls):
+        self._controls = controls.copy()
+        self._refresh_control_values()
+
+    controls = property(_get_controls, _set_controls)
+
     def summary(self):
         return "Gateways: {}".format(len(self.gateway_group.children)), None
+
+    def ui_command_reconfigure(self, attribute, value):
+        """
+        The reconfigure command allows you to tune various gatway attributes.
+        An empty value for an attribute resets the lun attribute to its
+        default.
+        attribute : attribute to reconfigure. supported attributes:
+          - cmdsn_depth : integer
+          - dataout_timeout : integer
+          - nopin_response_timeout : integer
+          - nopin_timeout : integer
+          - immediate_data : [Yes|No]
+          - initial_r2t : [Yes|No]
+          - first_burst_length : integer
+          - max_burst_length : integer
+          - max_outstanding_r2t : integer
+          - max_recv_data_segment_length : integer
+          - max_xmit_data_segment_length : integer
+        value     : value of the attribute to reconfigure
+        e.g.
+        set cmdsn_depth
+          - reconfigure attribute=cmdsn_depth value=128
+        reset cmdsn_depth
+          - reconfigure attribute=cmdsn_depth value=
+        """
+        if not attribute in settings.Settings.GATEWAY_SETTINGS:
+            self.logger.error("supported attributes: {}".format(",".join(
+                sorted(settings.Settings.GATEWAY_SETTINGS))))
+            return
+
+        # Issue the api request for the reconfigure
+        gateways_api = ('{}://127.0.0.1:{}/api/'
+                        'target/{}'.format(self.http_mode,
+                                           settings.config.api_port,
+                                           self.target_iqn))
+
+        controls = {attribute: value}
+        controls_json = json.dumps(controls)
+        api_vars = {'mode': 'reconfigure', 'controls': controls_json}
+
+        self.logger.debug("Issuing reconfigure request: controls={}".format(controls_json))
+        api = APIRequest(gateways_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code != 200:
+            self.logger.error("Failed to reconfigure : "
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
+            return
+
+        config = self.parent.parent._get_config()
+        if not config:
+            self.logger.error("Unable to refresh local config")
+        self.controls = config.get('controls', {})
+
+        self.logger.info('ok')
+
+    def _refresh_control_values(self):
+        self.control_values = {}
+        for k in settings.Settings.GATEWAY_SETTINGS:
+            val = self._controls.get(k)
+            default_val = getattr(settings.config, k, None)
+            if k in settings.Settings.LIO_YES_NO_SETTINGS:
+                if val is not None:
+                    val = format_lio_yes_no(val)
+                default_val = format_lio_yes_no(default_val)
+
+            if val is None or str(val) == str(default_val):
+                self.control_values[k] = default_val
+            else:
+                self.control_values[k] = "{} (override)".format(val)
 
 
 class GatewayGroup(UIGroup):
