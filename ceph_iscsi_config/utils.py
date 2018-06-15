@@ -127,6 +127,12 @@ def valid_cidr(subnet):
     return True
 
 
+def format_lio_yes_no(value):
+    if value:
+        return "Yes"
+    return "No"
+
+
 def ipv4_addresses():
     """
     return a list of IPv4 addresses on the system (excluding 127.0.0.1)

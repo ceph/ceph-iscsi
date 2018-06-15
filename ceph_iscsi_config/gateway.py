@@ -8,7 +8,10 @@ from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError
 from rtslib_fb.alua import ALUATargetPortGroup
 
-from ceph_iscsi_config.utils import ipv4_addresses, this_host
+import ceph_iscsi_config.settings as settings
+
+from ceph_iscsi_config.utils import (ipv4_addresses, this_host,
+                                     format_lio_yes_no)
 from ceph_iscsi_config.common import Config
 
 __author__ = 'pcuzner@redhat.com'
@@ -18,6 +21,20 @@ class GWTarget(object):
     """
     Class representing the state of the local LIO environment
     """
+
+    @staticmethod
+    def get_controls(config):
+        all_controls = {}
+        controls = config.get('controls', {})
+        for k in settings.Settings.GATEWAY_SETTINGS:
+            v = controls.get(k, None)
+            if v is not None:
+                v = settings.Settings.normalize(k, v)
+            if v is None:
+                v = getattr(settings.config, k)
+            all_controls[k] = v
+        return all_controls
+
 
     def __init__(self, logger, iqn, gateway_ip_list, enable_portal=True):
         """
@@ -72,6 +89,34 @@ class GWTarget(object):
         self.tpg = None
         self.tpg_list = []
 
+        self.config = Config(self.logger)
+        if self.config.error:
+            self.error = self.config.error
+            self.error_msg = self.config.error_msg
+
+        self.controls = self.config.config.get('controls', {}).copy()
+        self._add_properies()
+
+    def _get_control(self, key):
+        value = self.controls.get(key, None)
+        if value is not None:
+            value = settings.Settings.normalize(key, value)
+        if value is None:
+            return getattr(settings.config, key)
+        return value
+
+    def _set_control(self, key, value):
+        if value is None or \
+                settings.Settings.normalize(key, value) == getattr(settings.config, key):
+            self.controls.pop(key, None)
+        else:
+            self.controls[key] = value
+
+    def _add_properies(self):
+        for k in settings.Settings.GATEWAY_SETTINGS:
+            setattr(GWTarget, k, property(lambda self, k=k: self._get_control(k),
+                                          lambda self, v, k=k: self._set_control(k, v)))
+
     def exists(self):
         """
         Basic check to see whether this iqn already exists in kernel's
@@ -113,6 +158,29 @@ class GWTarget(object):
 
             for ip in requested_tpg_ips:
                 self.create_tpg(ip)
+        self.update_tpg_controls()
+
+
+    def update_tpg_controls(self):
+        # Build our set of control overrides
+        controls = {}
+        for k in settings.Settings.GATEWAY_SETTINGS:
+            controls[k] = getattr(self, k)
+
+        self.logger.debug("(GWGateway.update_tpg_controls) {}".format(controls))
+
+        try:
+            for tpg in self.tpg_list:
+                tpg.set_parameter('ImmediateData', format_lio_yes_no(controls['immediate_data']))
+                tpg.set_parameter('InitialR2T', format_lio_yes_no(controls['initial_r2t']))
+                tpg.set_parameter('MaxOutstandingR2T', str(controls['max_outstanding_r2t']))
+                tpg.set_parameter('FirstBurstLength', str(controls['first_burst_length']))
+                tpg.set_parameter('MaxBurstLength', str(controls['max_burst_length']))
+                tpg.set_parameter('MaxRecvDataSegmentLength', str(controls['max_recv_data_segment_length']))
+                tpg.set_parameter('MaxXmitDataSegmentLength', str(controls['max_xmit_data_segment_length']))
+        except RTSLibError as err:
+            self.error = True
+            self.error_msg = "Failed to update TPG control parameters - {}".format(err)
 
     def enable_active_tpg(self, config):
         """
@@ -235,6 +303,7 @@ class GWTarget(object):
                 if self.error:
                     self.logger.critical("Unable to create the TPG for {} "
                                          "- {}".format(ip, self.error_msg))
+            self.update_tpg_controls()
 
         except RTSLibError as err:
             self.error_msg = err
@@ -452,6 +521,10 @@ class GWTarget(object):
                                 "ip_list",
                                 initial_value=self.gateway_ip_list)
 
+            if self.controls != config.config.get('controls', {}):
+                config.set_item('controls', '', self.controls.copy())
+                self.config_updated = True
+
             if local_gw not in gateway_group:
                 inactive_portal_ip = list(self.gateway_ip_list)
                 inactive_portal_ip.remove(self.active_portal_ip)
@@ -515,6 +588,11 @@ class GWTarget(object):
 
                     config.add_item("gateways", "iqn", initial_value=self.iqn)
                     config.commit()
+
+        elif mode == 'reconfigure':
+            if self.controls != config.config.get('controls', {}):
+                config.set_item('controls', '', self.controls.copy())
+                config.commit()
 
         elif mode == 'clearconfig':
             # Called by API from CLI clearconfig command

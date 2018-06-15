@@ -16,6 +16,7 @@ import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.common import Config, ansible_control
 from ceph_iscsi_config.utils import encryption_available, CephiSCSIError
 
+import gateway
 
 class GWClient(object):
     """
@@ -140,6 +141,23 @@ class GWClient(object):
                                                    image))
                     return
 
+    def update_acl_controls(self):
+        # Try to detect network problems so we can kill connections
+        # and cleanup before the initiator has begun recovery and
+        # failed over.
+
+        # LIO default 3
+        self.acl.set_attribute('dataout_timeout', '{}'.format(
+                               self.controls['dataout_timeout']))
+        # LIO default 30
+        self.acl.set_attribute('nopin_response_timeout','{}'.format(
+                               self.controls['nopin_response_timeout']))
+        # LIO default 15
+        self.acl.set_attribute('nopin_timeout', '{}'.format(
+                               self.controls['nopin_timeout']))
+        # LIO default 64
+        self.acl.tcq_depth = self.controls['cmdsn_depth']
+
     def define_client(self):
         """
         Establish the links for this object to the corresponding ACL and TPG
@@ -154,6 +172,13 @@ class GWClient(object):
             if client.node_wwn == self.iqn:
                 self.acl = client
                 self.tpg = client.parent_tpg
+                try:
+                    self.update_acl_controls()
+                except RTSLibError as err:
+                    self.logger.error("(Client.define_client) FAILED to update "
+                                      "{}".format(self.iqn))
+                    self.error = True
+                    self.error_msg = err
                 self.logger.debug("(Client.define_client) - {} already "
                                   "defined".format(self.iqn))
                 return
@@ -167,16 +192,7 @@ class GWClient(object):
 
         try:
             self.acl = NodeACL(self.tpg, self.iqn)
-            # Try to detect network problems so we can kill connections
-            # and cleanup before the initiator has begun recovery and
-            # failed over.
-            self.acl.set_attribute('dataout_timeout', '20')        # default  3
-            # LIO default 30
-            self.acl.set_attribute('nopin_response_timeout','{}'.format(
-                                   settings.config.nopin_response_timeout))
-            # LIO default 15
-            self.acl.set_attribute('nopin_timeout', '{}'.format(
-                                   settings.config.nopin_timeout))
+            self.update_acl_controls()
         except RTSLibError as err:
             self.logger.error("(Client.define_client) FAILED to define "
                               "{}".format(self.iqn))
@@ -430,6 +446,10 @@ class GWClient(object):
         # object (dict)
         self.current_config = config_object.config
 
+        # Build our set of control overrides
+        self.controls = gateway.GWTarget.get_controls(self.current_config)
+        self.logger.debug("(GWClient.manage) controls: {}".format(self.controls))
+
         running_under_ansible = ansible_control()
         self.logger.debug("(GWClient.manage) running under ansible?"
                           " {}".format(running_under_ansible))
@@ -536,6 +556,9 @@ class GWClient(object):
 
                         # persist the config update
                         config_object.commit()
+
+        elif rqst_type == 'reconfigure':
+            self.define_client()
 
         else:
             ###################################################################

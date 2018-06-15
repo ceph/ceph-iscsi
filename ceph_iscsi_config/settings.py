@@ -14,6 +14,59 @@ def init():
     config = Settings()
 
 class Settings(object):
+    GATEWAY_SETTINGS = [
+        "dataout_timeout",
+        "nopin_response_timeout",
+        "nopin_timeout",
+        "cmdsn_depth",
+        "immediate_data",
+        "initial_r2t",
+        "max_outstanding_r2t",
+        "first_burst_length",
+        "max_burst_length",
+        "max_recv_data_segment_length",
+        "max_xmit_data_segment_length"]
+
+    LIO_YES_NO_SETTINGS = ["immediate_data", "initial_r2t"]
+
+    _float_regex = re.compile("^[0-9]*\.{1}[0-9]$")
+    _int_regex = re.compile("^[0-9]+")
+
+    @staticmethod
+    def convert_lio_yes_no(value):
+        """
+        Convert true/false/yes/no to boolean
+        """
+
+        value = str(value).lower()
+        if value in ['1', 'true', 'yes']:
+            return True
+        elif value in ['0', 'false', 'no']:
+            return False
+        raise ValueError(value)
+
+    @staticmethod
+    def normalize(k, v):
+        if k == 'trusted_ip_list':
+            v = v.split(',') if v else []
+
+        if k in Settings.LIO_YES_NO_SETTINGS:
+            try:
+                v = Settings.convert_lio_yes_no(v)
+            except:
+                v = True
+        elif v in ['true', 'True', 'false', 'False']:
+            v = strtobool(v)
+
+        if isinstance(v, str):
+            # convert any strings that hold numbers to int/float
+            if Settings._float_regex.search(v):
+                v = float(v)
+
+            if Settings._int_regex.search(v):
+                v = int(v)
+        return v
+
 
     defaults = {"cluster_name": "ceph",
                 "gateway_keyring": "ceph.client.admin.keyring",
@@ -37,9 +90,18 @@ class Settings(object):
                 }
 
     target_defaults = {"osd_op_timeout": 30,
+                       "dataout_timeout": 20,
                        "nopin_response_timeout" : 5,
                        "nopin_timeout" : 5,
                        "qfull_timeout" : 5,
+                       "cmdsn_depth": 128,
+                       "immediate_data": "Yes",
+                       "initial_r2t": "Yes",
+                       "max_outstanding_r2t": 1,
+                       "first_burst_length": 262144,
+                       "max_burst_length": 524288,
+                       "max_recv_data_segment_length": 262144,
+                       "max_xmit_data_segment_length": 262144,
                        "max_data_area_mb" : 8
                        }
 
@@ -89,25 +151,8 @@ class Settings(object):
         :return: None
         """
 
-        float_regex = re.compile("^[0-9]*\.{1}[0-9]$")
-        int_regex = re.compile("^[0-9]+")
-
         for k in settings:
-
             v = settings[k]
-
-            if k == 'trusted_ip_list':
-                v = v.split(',') if v else []
-
-            if v in ['true', 'True', 'false', 'False']:
-                v = strtobool(v)
-
-            if isinstance(v, str):
-                # convert any strings that hold numbers to int/float
-                if float_regex.search(settings[k]):
-                    v = float(settings[k])
-
-                if int_regex.search(settings[k]):
-                    v = int(settings[k])
+            v = self.normalize(k, settings[k])
 
             self.__setattr__(k, v)
