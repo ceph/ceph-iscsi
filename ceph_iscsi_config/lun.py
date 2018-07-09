@@ -676,6 +676,8 @@ class LUN(object):
             cfgstring = "rbd/{}/{};osd_op_timeout={}".format(self.pool,
                                          self.image,
                                          settings.config.osd_op_timeout)
+            if (settings.config.cephconf != '/etc/ceph/ceph.conf'):
+                cfgstring += ";conf={}".format(settings.config.cephconf)
 
             new_lun = UserBackedStorageObject(name=self.config_key,
                                               config=cfgstring,
