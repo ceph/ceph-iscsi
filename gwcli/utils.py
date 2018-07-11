@@ -37,7 +37,7 @@ def readcontents(filename):
 def human_size(num):
     for unit, precision in [('b', 0), ('K', 0), ('M', 0), ('G', 0), ('T', 1),
                             ('P', 1), ('E', 2), ('Z', 2)]:
-        if abs(num) < 1024.0:
+        if num % 1024 != 0:
             return "{0:.{1}f}{2}".format(num, precision, unit)
         num /= 1024.0
     return "{0:.2f}{1}".format(num, "Y")
