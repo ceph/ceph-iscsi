@@ -193,6 +193,13 @@ def get_ip_address(iscsi_network):
 
 def convert_2_bytes(disk_size):
 
+    try:
+        # If it's already an integer or a string with no suffix then assume
+        # it's already in bytes.
+        return int(disk_size)
+    except ValueError:
+        pass
+
     power = [2, 3, 4]
     unit = disk_size[-1].upper()
     offset = size_suffixes.index(unit)

@@ -25,7 +25,7 @@ from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.lio import LIO, Gateway
-from ceph_iscsi_config.utils import this_host, human_size, CephiSCSIError
+from ceph_iscsi_config.utils import this_host, CephiSCSIError
 
 # Create a flask instance
 app = Flask(__name__)
