@@ -15,6 +15,8 @@ import ceph_iscsi_config.settings as settings
 
 __author__ = 'pcuzner@redhat.com'
 
+size_suffixes = ['M', 'G', 'T']
+
 class CephiSCSIError(Exception):
     '''
     Generic Ceph iSCSI config error.
@@ -92,7 +94,7 @@ def valid_size(size):
     valid = True
     unit = size[-1]
 
-    if unit.upper() not in settings.config.size_suffixes:
+    if unit.upper() not in size_suffixes:
         valid = False
     else:
         try:
@@ -193,7 +195,7 @@ def convert_2_bytes(disk_size):
 
     power = [2, 3, 4]
     unit = disk_size[-1].upper()
-    offset = settings.config.size_suffixes.index(unit)
+    offset = size_suffixes.index(unit)
     value = int(disk_size[:-1])     # already validated, so no need for
                                     # try/except clause
 

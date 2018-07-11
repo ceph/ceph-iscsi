@@ -107,8 +107,6 @@ class Settings(object):
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):
 
-        self.size_suffixes = ['M', 'G', 'T']
-
         self.error = False
         self.error_msg = ''
 
