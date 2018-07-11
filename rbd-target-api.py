@@ -30,8 +30,7 @@ from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
-                                     gen_file_hash, valid_rpm, human_size,
-                                     CephiSCSIError)
+                                     gen_file_hash, valid_rpm, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
                          valid_disk, valid_client, valid_snapshot_name,
@@ -794,15 +793,13 @@ def _disk(image_id):
                                        "found".format(image_id)), 404
 
             # calculate required values for LUN object
-            rbd_image = RBDDev(image_name, '0G', pool_name)
+            rbd_image = RBDDev(image_name, 0, pool_name)
             size = rbd_image.current_size
             if not size:
                 logger.error("LUN size unknown - {}".format(image_id))
                 return jsonify(message="LUN {} failure".format(mode)), 500
 
-            size_h = human_size(size)
-
-            lun = LUN(logger, pool_name, image_name, size_h, disk['owner'])
+            lun = LUN(logger, pool_name, image_name, size, disk['owner'])
             if mode == 'deactivate':
                 so = lun.lio_stg_object()
                 if not so:
@@ -924,7 +921,7 @@ def _disk(image_id):
         lun = LUN(logger,
                   pool,
                   image,
-                  '0G',
+                  0,
                   purge_host)
 
         if lun.error:
@@ -975,7 +972,7 @@ def _reconfigure(image_id, **kwargs):
         return "failed to deactivate disk: {}".format(resp_text), resp_code
 
     pool_name, image_name = image_id.split('.', 1)
-    lun = LUN(logger, pool_name, image_name, '0G', disk['owner'])
+    lun = LUN(logger, pool_name, image_name, 0, disk['owner'])
 
     for k,v in kwargs.items():
         # exclude attributes which are unset and reset to defaults
