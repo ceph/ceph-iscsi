@@ -15,6 +15,8 @@ import ceph_iscsi_config.settings as settings
 
 __author__ = 'pcuzner@redhat.com'
 
+size_suffixes = ['M', 'G', 'T']
+
 class CephiSCSIError(Exception):
     '''
     Generic Ceph iSCSI config error.
@@ -92,7 +94,7 @@ def valid_size(size):
     valid = True
     unit = size[-1]
 
-    if unit.upper() not in settings.config.size_suffixes:
+    if unit.upper() not in size_suffixes:
         valid = False
     else:
         try:
@@ -191,29 +193,22 @@ def get_ip_address(iscsi_network):
 
 def convert_2_bytes(disk_size):
 
+    try:
+        # If it's already an integer or a string with no suffix then assume
+        # it's already in bytes.
+        return int(disk_size)
+    except ValueError:
+        pass
+
     power = [2, 3, 4]
     unit = disk_size[-1].upper()
-    offset = settings.config.size_suffixes.index(unit)
+    offset = size_suffixes.index(unit)
     value = int(disk_size[:-1])     # already validated, so no need for
                                     # try/except clause
 
     _bytes = value*(1024**power[offset])
 
     return _bytes
-
-
-def human_size(num):
-    """
-    convert a bytes value into a more human readable format
-    :param num(int): bytes
-    :return: Size as M/G/T suffixed
-    """
-    for unit, precision in [('b', 0), ('K', 0), ('M', 0), ('G', 0), ('T', 0),
-                            ('P', 1), ('E', 2), ('Z', 2)]:
-        if abs(num) < 1024.0:
-            return "{0:.{1}f}{2}".format(num, precision, unit)
-        num /= 1024.0
-    return "{0:.2f}{1}".format(num, "Y")
 
 
 def get_pool_id(conf=None, pool_name='rbd'):

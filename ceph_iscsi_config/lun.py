@@ -16,7 +16,7 @@ import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.common import Config
 # from ceph_iscsi_config.alua import ALUATargetPortGroup
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
-                                     get_pool_id, human_size, ipv4_addresses,
+                                     get_pool_id, ipv4_addresses,
                                      this_host, CephiSCSIError)
 
 __author__ = 'pcuzner@redhat.com'
@@ -30,7 +30,6 @@ class RBDDev(object):
 
     def __init__(self, image, size, pool='rbd'):
         self.image = image
-        self.size = size
         self.size_bytes = convert_2_bytes(size)
         self.pool = pool
         self.pool_id = get_pool_id(pool_name=self.pool)
@@ -229,7 +228,6 @@ class LUN(object):
         self.image = image
         self.pool = pool
         self.pool_id = 0
-        self.size = size
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}.{}'.format(self.pool, self.image)
         self.controls = {}
@@ -392,7 +390,7 @@ class LUN(object):
                           "allocations is {}".format(this_host,
                                                      self.allocating_host))
 
-        rbd_image = RBDDev(self.image, self.size, self.pool)
+        rbd_image = RBDDev(self.image, self.size_bytes, self.pool)
         self.pool_id = rbd_image.pool_id
 
         # if the image required isn't defined, create it!
@@ -462,7 +460,7 @@ class LUN(object):
             if rbd_image.changed:
                 self.logger.info("rbd image {} resized "
                                  "to {}".format(self.config_key,
-                                                self.size))
+                                                self.size_bytes))
                 self.num_changes += 1
             else:
                 self.logger.debug("rbd image {} size matches the configuration"
@@ -821,13 +819,10 @@ class LUN(object):
 
                         try:
                             with rbd.Image(ioctx, image_name) as rbd_image:
-                                image_bytes = rbd_image.size()
-                                image_size_h = human_size(image_bytes)
-
                                 RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
 
                                 lun = LUN(logger, pool, image_name,
-                                           image_size_h, local_gw)
+                                           rbd_image.size(), local_gw)
                                 if lun.error:
                                     raise CephiSCSIError("Error defining rbd "
                                                          "image {}".format(
