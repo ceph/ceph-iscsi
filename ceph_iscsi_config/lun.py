@@ -14,7 +14,6 @@ from rtslib_fb.alua import ALUATargetPortGroup
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config
-# from ceph_iscsi_config.alua import ALUATargetPortGroup
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      get_pool_id, ipv4_addresses,
                                      this_host, CephiSCSIError)

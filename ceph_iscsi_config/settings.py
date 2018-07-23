@@ -102,7 +102,8 @@ class Settings(object):
                        "max_burst_length": 524288,
                        "max_recv_data_segment_length": 262144,
                        "max_xmit_data_segment_length": 262144,
-                       "max_data_area_mb" : 8
+                       "max_data_area_mb" : 8,
+                       "alua_failover_type" : "implicit"
                        }
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):
