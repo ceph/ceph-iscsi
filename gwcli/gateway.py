@@ -737,6 +737,10 @@ class Gateway(UINode):
 
         lookup = {200: {"status": "UP",
                         "iscsi": "UP", "api": "UP"},
+                  401: {"status": "UNAUTHORIZED",
+                        "iscsi": "UNKNOWN", "api": "UP"},
+                  403: {"status": "UNAUTHORIZED",
+                        "iscsi": "UNKNOWN", "api": "UP"},
                   500: {"status": "UNKNOWN",
                         "iscsi": "UNKNOWN", "api": "UNKNOWN"},
                   503: {"status": "PARTIAL",
@@ -752,6 +756,8 @@ class Gateway(UINode):
         try:
             api.get()
             rc = api.response.status_code
+            if rc not in lookup:
+                rc = 999
         except GatewayAPIError:
             rc = 999
 
