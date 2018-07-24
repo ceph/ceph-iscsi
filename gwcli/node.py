@@ -88,7 +88,8 @@ class UINode(UIGroup):
 
                         if isinstance(attr_value[dict_key], dict):
                             inner_dict = attr_value[dict_key]
-                            display_value = ", ".join(["=".join([key, str(val)]) for key, val in inner_dict.items()])
+                            display_value = ", ".join(["=".join(
+                                [key, str(val)]) for key, val in inner_dict.items()])
                             display_text += ("- {:<{}} .. {}\n".format(dict_key,
                                                                        max_dict_field,
                                                                        display_value))
@@ -109,7 +110,7 @@ class UINode(UIGroup):
                         attr_string = "{}\n".format(str(item))
                         item_1 = False
                     else:
-                        attr_string += "{}{}\n".format(" "*(max_field_size + 4),
+                        attr_string += "{}{}\n".format(" " * (max_field_size + 4),
                                                        str(item))
 
                 attr_value = attr_string[:-1]
@@ -129,6 +130,3 @@ class UIRoot(UICommon):
     def __init__(self, shell, as_root=False):
         UICommon.__init__(self, '/', shell=shell)
         self.as_root = as_root
-
-
-

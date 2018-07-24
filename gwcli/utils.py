@@ -15,11 +15,12 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (get_ip, ipv4_addresses, gen_file_hash,
-                                     valid_size, convert_2_bytes)
+from ceph_iscsi_config.utils import (get_ip, gen_file_hash, valid_size,
+                                     convert_2_bytes)
 
 
 __author__ = 'Paul Cuzner'
+
 
 class Colors(object):
 
@@ -27,6 +28,7 @@ class Colors(object):
            'red': '\x1b[31;1m',
            'yellow': '\x1b[33;1m',
            'blue': '\x1b[34;1m'}
+
 
 def readcontents(filename):
     with open(filename, 'r') as input_file:
@@ -49,6 +51,7 @@ def this_host():
     """
     return socket.gethostname().split('.')[0]
 
+
 def get_config():
     """
     use the /config api to return the current gateway configuration
@@ -64,7 +67,7 @@ def get_config():
     if api.response.status_code == 200:
         try:
             return api.response.json()
-        except:
+        except Exception:
             pass
 
     return {}
@@ -78,7 +81,7 @@ def valid_iqn(iqn):
     """
 
     try:
-        valid_iqn = normalize_wwn(['iqn'], iqn)
+        normalize_wwn(['iqn'], iqn)
     except RTSLibError:
         return False
 
@@ -130,7 +133,7 @@ def valid_gateway(gw_name, gw_ip, config):
 
     try:
         target_ips = api.response.json()['data']
-    except:
+    except Exception:
         return "Malformed REST API response"
 
     if gw_ip not in target_ips:
@@ -151,7 +154,7 @@ def valid_gateway(gw_name, gw_ip, config):
     local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
     try:
         remote_hash = str(api.response.json()['data'])
-    except:
+    except Exception:
         remote_hash = None
 
     if local_hash != remote_hash:
@@ -165,7 +168,7 @@ def valid_gateway(gw_name, gw_ip, config):
     if api.response.status_code != 200:
         try:
             errors = api.response.json()['data']
-        except:
+        except Exception:
             return "Malformed REST API response"
 
         return ("{} failed package validation checks - "
@@ -218,10 +221,10 @@ def valid_disk(**kwargs):
     :return: (str) either 'ok' or an error description
     """
 
-    mode_vars = {"create"      : ['pool', 'image', 'size', 'count'],
-                 "resize"      : ['pool', 'image', 'size'],
-                 "reconfigure" : ['pool', 'image', 'max_data_area_mb'],
-                 "delete"      : ['pool', 'image']}
+    mode_vars = {"create": ['pool', 'image', 'size', 'count'],
+                 "resize": ['pool', 'image', 'size'],
+                 "reconfigure": ['pool', 'image', 'max_data_area_mb'],
+                 "delete": ['pool', 'image']}
 
     config = get_config()
     if not config:
@@ -283,7 +286,6 @@ def valid_disk(**kwargs):
                     "configuration".format(kwargs['pool'],
                                            kwargs['image']))
 
-
     if mode == 'resize':
 
         size = kwargs['size'].upper()
@@ -315,6 +317,7 @@ def valid_disk(**kwargs):
 
     return 'ok'
 
+
 def get_other_gateways(gw_objects):
     """
     Look at the set of objects passed and look for gateway objects,
@@ -327,8 +330,7 @@ def get_other_gateways(gw_objects):
 
     local_gw = this_host()
 
-    gws_root = list(gw_objects)  # children returns a set, so need to
-                                                  # cast to a list
+    gws_root = list(gw_objects)  # children returns a set, so need to cast to a list
     if len(gws_root) > 0:
         gw_group = [obj for obj in gws_root[0].children if obj.name == 'gateways']
         gw_list = list(gw_group[0].children)        # list of Gateway objects
@@ -355,9 +357,10 @@ def valid_credentials(credentials_str, auth_type='chap'):
         return False
 
     if auth_type == 'chap':
-        # username is 8-64 chars long containing any alphanumeric in [0-9a-zA-Z] and '.' ':' '@' '_' '-'
-        # password is 12-16 chars long containing any alphanumeric in [0-9a-zA-Z] and '@' '-' '_'
-        # or !,_,& symbol
+        # username is 8-64 chars long containing any alphanumeric in
+        # [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+        # password is 12-16 chars long containing any alphanumeric in
+        # [0-9a-zA-Z] and '@' '-' '_' or !,_,& symbol
         usr_regex = re.compile("^[\w\\.\:\@\_\-]{8,64}$")
         pw_regex = re.compile("^[\w\@\-\_]{12,16}$")
         if not usr_regex.search(user_name) or not pw_regex.search(password):
@@ -378,7 +381,6 @@ def valid_client(**kwargs):
 
     valid_modes = ['create', 'delete', 'auth', 'disk']
     parms_passed = set(kwargs.keys())
-
 
     if 'mode' in kwargs:
         if kwargs['mode'] not in valid_modes:
@@ -507,6 +509,7 @@ def valid_client(**kwargs):
 
     return 'Unknown error in valid_client function'
 
+
 def valid_snapshot_name(name):
     regex = re.compile("^[^/@]+$")
     if not regex.search(name):
@@ -525,6 +528,7 @@ class GatewayAPIError(GatewayError):
 class GatewayLIOError(GatewayError):
     pass
 
+
 class APIRequest(object):
 
     def __init__(self, *args, **kwargs):
@@ -538,7 +542,7 @@ class APIRequest(object):
         if 'verify' not in self.kwargs:
             self.kwargs['verify'] = settings.config.api_ssl_verify
 
-        self.http_methods = ['get', 'put',  'delete']
+        self.http_methods = ['get', 'put', 'delete']
         self.data = None
 
     def _get_response(self):
@@ -556,7 +560,7 @@ class APIRequest(object):
                 self.data.status_code = 500
                 self.data._content = '{{"message": "{}" }}'.format(msg)
                 return self._get_response
-            except:
+            except Exception:
                 raise GatewayAPIError("Unknown error connecting to "
                                       "{}".format(self.args[0]))
             else:
@@ -576,6 +580,7 @@ def progress_message(text, color='green'):
                                        '\x1b[0m'))
     sys.stdout.flush()
 
+
 def console_message(text, color='green'):
 
     color_needed = getattr(settings.config, 'interactive', True)
@@ -586,6 +591,7 @@ def console_message(text, color='green'):
                               '\x1b[0m'))
     else:
         print(text)
+
 
 def get_port_state(ip_address, port):
     """
@@ -629,6 +635,7 @@ def os_cmd(command):
     else:
         return ''
 
+
 def response_message(response, logger=None):
     """
     Attempts to retrieve the "message" value from a JSON-encoded response
@@ -640,10 +647,9 @@ def response_message(response, logger=None):
     """
     try:
         return response.json()['message']
-    except:
+    except Exception:
         if logger:
             logger.debug("Failed API request: {} {}\n{}".format(response.request.method,
                                                                 response.request.url,
                                                                 response.text))
         return "{} {}".format(response.status_code, response.reason)
-

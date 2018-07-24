@@ -20,7 +20,7 @@ import rados
 import rbd
 
 import werkzeug
-from flask import Flask, jsonify, make_response, request
+from flask import Flask, jsonify, request
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
@@ -29,14 +29,12 @@ from ceph_iscsi_config.group import Group
 from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
-                                     gen_file_hash, valid_rpm, CephiSCSIError)
+from ceph_iscsi_config.utils import (get_ip, ipv4_addresses, gen_file_hash,
+                                     valid_rpm, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
                          valid_disk, valid_client, valid_snapshot_name,
                          GatewayAPIError)
-
-from gwcli.client import Client
 
 app = Flask(__name__)
 
@@ -78,7 +76,7 @@ def requires_restricted_auth(f):
         gw_names = [gw for gw in config.config['gateways']
                     if isinstance(config.config['gateways'][gw], dict)]
         gw_ips = [get_ip(gw_name) for gw_name in gw_names] + \
-                 local_gw + settings.config.trusted_ip_list
+            local_gw + settings.config.trusted_ip_list
 
         if request.remote_addr not in gw_ips:
             return jsonify(message="API access not available to "
@@ -90,7 +88,7 @@ def requires_restricted_auth(f):
             return jsonify(message="Missing credentials"), 401
 
         if (auth.username != settings.config.api_user or
-                    auth.password != settings.config.api_password):
+                auth.password != settings.config.api_password):
             return jsonify(message="username/password mismatch with the "
                                    "configuration file"), 401
 
@@ -177,6 +175,7 @@ def get_sys_info(query_type=None):
         # Request Unknown
         return jsonify(message="Unknown /sysinfo query"), 404
 
+
 def _parse_target_controls(controls_json):
     controls = {}
     raw_controls = json.loads(controls_json)
@@ -199,6 +198,7 @@ def _parse_target_controls(controls_json):
                 controls[k] = None
     return controls
 
+
 @app.route('/api/target/<target_iqn>', methods=['PUT'])
 @requires_restricted_auth
 def target(target_iqn=None):
@@ -211,8 +211,10 @@ def target(target_iqn=None):
     :param controls: (JSON dict) valid control overrides
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
-    curl --insecure --user admin:admin -d mode=reconfigure -d controls='{cmdsn_depth=128}' -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
+    curl --insecure --user admin:admin
+        -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
+    curl --insecure --user admin:admin -d mode=reconfigure -d controls='{cmdsn_depth=128}'
+        -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
     """
 
     mode = request.form.get('mode', None)
@@ -278,6 +280,7 @@ def target(target_iqn=None):
                                     api_vars=request.form)
     return jsonify(message="Target reconfigure {}".format(resp_text)), resp_code
 
+
 @app.route('/api/_target/<target_iqn>', methods=['PUT'])
 @requires_restricted_auth
 def _target(target_iqn=None):
@@ -305,7 +308,7 @@ def _target(target_iqn=None):
         return jsonify(message="GWTarget problem - "
                                "{}".format(target.error_msg)), 500
 
-    for k,v in controls.iteritems():
+    for k, v in controls.iteritems():
         setattr(target, k, v)
 
     if target.exists():
@@ -313,7 +316,7 @@ def _target(target_iqn=None):
         if target.error:
             logger.error("Unable to refresh tpg state")
             return jsonify(message="Unable to refresh tpg state - "
-                                    "{}".format(target.error_msg)), 500
+                                   "{}".format(target.error_msg)), 500
 
     target.update_tpg_controls()
     if target.error:
@@ -349,6 +352,7 @@ def _target(target_iqn=None):
 
     return jsonify(message="Target reconfigured successfully"), 200
 
+
 @app.route('/api/config', methods=['GET'])
 @requires_restricted_auth
 def get_config():
@@ -377,6 +381,7 @@ def gateways():
     if request.method == 'GET':
         return jsonify(config.config['gateways']), 200
 
+
 @app.route('/api/gateway/<gateway_name>', methods=['PUT'])
 @requires_restricted_auth
 def gateway(gateway_name=None):
@@ -391,14 +396,14 @@ def gateway(gateway_name=None):
            default: FALSE
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d ip_address=192.168.122.69 -X PUT http://192.168.122.69:5000/api/gateway/iscsi-gw0
+    curl --insecure --user admin:admin -d ip_address=192.168.122.69
+        -X PUT http://192.168.122.69:5000/api/gateway/iscsi-gw0
     """
 
     # the definition of a gateway into an existing configuration can apply the
     # running config to the new host. The downside is that this sync task
     # could take a while if there are 100's of disks/clients. Future work should
     # aim to make this synchronisation of the new gateway an async task
-
 
     ip_address = request.form.get('ip_address')
     nosync = request.form.get('nosync', 'false')
@@ -422,7 +427,6 @@ def gateway(gateway_name=None):
         return jsonify(message=gateway_usable), 400
 
     resp_text = "Gateway added"  # Assume the best!
-    http_mode = 'https' if settings.config.api_secure else 'http'
 
     current_disks = config.config['disks']
     current_clients = config.config['clients']
@@ -442,14 +446,14 @@ def gateway(gateway_name=None):
     first_gateway = (len(gateway_ip_list) == 1)
 
     if first_gateway:
-        gateways =['127.0.0.1']
+        gateways = ['127.0.0.1']
     else:
         gateways = gateway_ip_list
 
     api_vars = {"target_iqn": target_iqn,
                 "gateway_ip_list": ",".join(gateway_ip_list),
                 "mode": "target",
-                "nosync": nosync,}
+                "nosync": nosync}
 
     resp_text, resp_code = call_api(gateways, '_gateway',
                                     gateway_name,
@@ -537,7 +541,7 @@ def _gateway(gateway_name=None):
                 except CephiSCSIError as err:
                     gateway.manage('clearconfig')
                     return jsonify(message="Failed to sync clients on gateway"
-                                            ". Err {}.".format(err)), 500
+                                           ". Err {}.".format(err)), 500
 
         return jsonify(message="Gateway defined/mapped"), 200
 
@@ -607,8 +611,10 @@ def disk(image_id):
                               SCSI command's data.
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
-    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd -dmax_data_area_mb=32 -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
+    curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
+        -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
+    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd -dmax_data_area_mb=32
+        -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
@@ -664,7 +670,7 @@ def disk(image_id):
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
-        suffixes = [n for n in range(1, int(count)+1)]
+        suffixes = [n for n in range(1, int(count) + 1)]
         # make call to local api server first!
         gateways.insert(0, '127.0.0.1')
 
@@ -686,7 +692,7 @@ def disk(image_id):
                                        "{}".format(resp_text)), resp_code
 
         return jsonify(message="disk create/update {}".format(resp_text)), \
-               resp_code
+            resp_code
 
     else:
         # this is a DELETE request
@@ -709,7 +715,7 @@ def disk(image_id):
                                         api_vars=api_vars)
 
         return jsonify(message="disk map deletion {}".format(resp_text)), \
-               resp_code
+            resp_code
 
 
 @app.route('/api/_disk/<image_id>', methods=['GET', 'PUT', 'DELETE'])
@@ -734,7 +740,8 @@ def _disk(image_id):
 
     elif request.method == 'PUT':
         # A put is for either a create or a resize
-        # put('http://127.0.0.1:5000/api/disk/rbd.ansible3',data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
+        # put('http://127.0.0.1:5000/api/disk/rbd.ansible3',
+        #     data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
 
         pool_name, image_name = image_id.split('.', 1)
         mode = request.form['mode']
@@ -814,7 +821,10 @@ def _disk(image_id):
                     for mlun in alun.mapped_luns:
                         node_acl = mlun.parent_nodeacl
 
-                        if node_acl.session and node_acl.session.get('state', '').upper() == 'LOGGED_IN':
+                for attached_lun in so.attached_luns:
+                    for node_acl in attached_lun.parent_tpg.node_acls:
+                        if node_acl.session and \
+                                node_acl.session.get('state', '').upper() == 'LOGGED_IN':
                             logger.error("LUN {} in-use".format(image_id))
                             return jsonify(message="LUN deactivate failure - in-use"), 500
 
@@ -863,7 +873,7 @@ def _disk(image_id):
                         continue
 
                     image_list = client_metadata['luns'].keys()
-                    if not image_id in image_list:
+                    if image_id not in image_list:
                         continue
 
                     client_chap = CHAP(client_metadata['auth']['chap'])
@@ -897,7 +907,7 @@ def _disk(image_id):
                     group.apply()
                     if group.error:
                         logger.error("LUN mapping failed "
-                                     "{} - {}".format(group_iqn,
+                                     "{} - {}".format(group_name,
                                                       group.error_msg))
                         client_errors = True
 
@@ -951,6 +961,7 @@ def _disk(image_id):
 
         return jsonify(message="LUN removed"), 200
 
+
 def _reconfigure(image_id, **kwargs):
     logger.debug("lun reconfigure request")
 
@@ -980,7 +991,7 @@ def _reconfigure(image_id, **kwargs):
     pool_name, image_name = image_id.split('.', 1)
     lun = LUN(logger, pool_name, image_name, 0, disk['owner'])
 
-    for k,v in kwargs.items():
+    for k, v in kwargs.items():
         # exclude attributes which are unset and reset to defaults
         # if empty
         if v is not None:
@@ -1009,6 +1020,7 @@ def _reconfigure(image_id, **kwargs):
 
     return resp_text, resp_code
 
+
 @app.route('/api/disksnap/<image_id>/<name>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
 def disksnap(image_id, name):
@@ -1023,8 +1035,10 @@ def disksnap(image_id, name):
     :param mode: (str) 'create' or 'rollback' the rbd snapshot
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d mode=create -X PUT https://192.168.122.69:5000/api/disksnap/rbd.image/new1
-    curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disksnap/rbd.image/new1
+    curl --insecure --user admin:admin -d mode=create
+        -X PUT https://192.168.122.69:5000/api/disksnap/rbd.image/new1
+    curl --insecure --user admin:admin
+        -X DELETE https://192.168.122.69:5000/api/disksnap/rbd.image/new1
     """
 
     disk_regex = re.compile("[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
@@ -1039,7 +1053,7 @@ def disksnap(image_id, name):
 
     if image_id not in config.config['disks']:
         return jsonify(message="rbd image {} not "
-                                "found".format(image_id)), 404
+                               "found".format(image_id)), 404
 
     pool_name, image_name = image_id.split('.')
     if request.method == 'PUT':
@@ -1061,6 +1075,7 @@ def disksnap(image_id, name):
     else:
         return jsonify(message=resp_text), resp_code
 
+
 def _disksnap_create(pool_name, image_name, name):
     logger.debug("snapshot create request")
     try:
@@ -1078,6 +1093,7 @@ def _disksnap_create(pool_name, image_name, name):
         resp_text = "failed to create snapshot: {}".format(err)
         resp_code = 400
     return resp_text, resp_code
+
 
 def _disksnap_delete(pool_name, image_name, name):
     logger.debug("snapshot delete request")
@@ -1098,6 +1114,7 @@ def _disksnap_delete(pool_name, image_name, name):
         resp_text = "failed to delete snapshot: {}".format(err)
         resp_code = 400
     return resp_text, resp_code
+
 
 def _disksnap_rollback(image_id, pool_name, image_name, name):
     logger.debug("snapshot rollback request")
@@ -1215,12 +1232,16 @@ def clientauth(client_iqn):
     The following parameters are needed to manage client auth
     :param client_iqn: (str) client IQN name
     :param chap: (str) chap string of the form username/password or ''
-            username is 8-64 chars long containing any alphanumeric in [0-9a-zA-Z] and '.' ':' '@' '_' '-'
-            password is 12-16 chars long containing any alphanumeric in [0-9a-zA-Z] and '@' '-' '_'
+            username is 8-64 chars long containing any alphanumeric in
+                [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+            password is 12-16 chars long containing any alphanumeric in
+                [0-9a-zA-Z] and '@' '-' '_'
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d chap='' -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
-    curl --insecure --user admin:admin -d chap=dmin1234/admin12345678 -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
+    curl --insecure --user admin:admin -d chap=''
+        -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
+    curl --insecure --user admin:admin -d chap=dmin1234/admin12345678
+        -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
     """
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
@@ -1251,7 +1272,7 @@ def clientauth(client_iqn):
                                     api_vars=api_vars)
 
     return jsonify(message="client auth {}".format(resp_text)), \
-           resp_code
+        resp_code
 
 
 @app.route('/api/_clientauth/<client_iqn>', methods=['PUT'])
@@ -1286,7 +1307,8 @@ def clientlun(client_iqn):
     :param disk: (str) rbd image name of the format pool.image
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -d disk=rbd.new2_1 -X PUT https://192.168.122.69:5000/api/clientlun/iqn.2017-08.org.ceph:iscsi-gw0
+    curl --insecure --user admin:admin -d disk=rbd.new2_1
+        -X PUT https://192.168.122.69:5000/api/clientlun/iqn.2017-08.org.ceph:iscsi-gw0
     """
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
@@ -1334,7 +1356,7 @@ def clientlun(client_iqn):
                                     api_vars=api_vars)
 
     return jsonify(message="client masking update {}".format(resp_text)), \
-           resp_code
+        resp_code
 
 
 @app.route('/api/_clientlun/<client_iqn>', methods=['GET', 'PUT'])
@@ -1379,8 +1401,10 @@ def client(client_iqn):
     :param client_iqn: (str) IQN of the client to create or delete
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X PUT https://192.168.122.69:5000/api/client/iqn.1994-05.com.redhat:myhost4
-    curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/client/iqn.1994-05.com.redhat:myhost4
+    curl --insecure --user admin:admin
+        -X PUT https://192.168.122.69:5000/api/client/iqn.1994-05.com.redhat:myhost4
+    curl --insecure --user admin:admin
+        -X DELETE https://192.168.122.69:5000/api/client/iqn.1994-05.com.redhat:myhost4
     """
 
     method = {"PUT": 'create',
@@ -1413,7 +1437,7 @@ def client(client_iqn):
                                         api_vars=api_vars)
 
         return jsonify(message="client create/update {}".format(resp_text)),\
-               resp_code
+            resp_code
 
     else:
         # DELETE client request
@@ -1425,7 +1449,7 @@ def client(client_iqn):
                                         api_vars=api_vars)
 
         return jsonify(message="client delete {}".format(resp_text)), \
-               resp_code
+            resp_code
 
 
 @app.route('/api/_client/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
@@ -1448,7 +1472,7 @@ def _client(client_iqn):
     elif request.method == 'PUT':
 
         try:
-            valid_iqn = normalize_wwn(['iqn'], client_iqn)
+            normalize_wwn(['iqn'], client_iqn)
         except RTSLibError:
             return jsonify(message="'{}' is not a valid name for "
                                    "iSCSI".format(client_iqn)), 400
@@ -1491,6 +1515,7 @@ def _client(client_iqn):
             logger.error("Delete request for non existent client!")
             return jsonify(message="Client does not exist!"), 404
 
+
 @app.route('/api/hostgroups', methods=['GET'])
 @requires_restricted_auth
 def hostgroups():
@@ -1518,9 +1543,12 @@ def hostgroup(group_name):
     :return:
     Examples:
     curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/hostgroup/group_name
-    curl --insecure --user admin:admin -d members=iqn.1994-05.com.redhat:myhost4 -d disks=rbd.disk1 -X PUT http://192.168.122.69:5000/api/hostgroup/group_name
-    curl --insecure --user admin:admin -d action=remove -d disks=rbd.disk1 -X PUT http://192.168.122.69:5000/api/hostgroup/group_name
-    curl --insecure --user admin:admin -X DELETE http://192.168.122.69:5000/api/hostgroup/group_name
+    curl --insecure --user admin:admin -d members=iqn.1994-05.com.redhat:myhost4
+        -d disks=rbd.disk1 -X PUT http://192.168.122.69:5000/api/hostgroup/group_name
+    curl --insecure --user admin:admin -d action=remove -d disks=rbd.disk1
+        -X PUT http://192.168.122.69:5000/api/hostgroup/group_name
+    curl --insecure --user admin:admin
+        -X DELETE http://192.168.122.69:5000/api/hostgroup/group_name
     """
     http_mode = 'https' if settings.config.api_secure else 'http'
     valid_hostgroup_actions = ['add', 'remove']
@@ -1583,8 +1611,8 @@ def hostgroup(group_name):
         resp_text, resp_code = call_api(gw_list, '_hostgroup', group_name,
                                         http_method='put', api_vars=api_vars)
 
-        return jsonify(message="hostgroup create/update {}".format(resp_text)),\
-               resp_code
+        return jsonify(message="hostgroup create/update {}".format(resp_text)), \
+            resp_code
 
     else:
         # Delete request just purges the entry from the config, so we only
@@ -1662,8 +1690,7 @@ def _hostgroup(group_name):
         grp = Group(logger, group_name)
         grp.purge()
         if not grp.error:
-            return jsonify(message="Group '{}' removed".format(group_name)), \
-                   200
+            return jsonify(message="Group '{}' removed".format(group_name)), 200
         else:
             return jsonify(message=grp.error_msg), 400
 
@@ -1702,8 +1729,7 @@ def _ping():
             # so just return a 200 OK back to the caller
             rc = 200
 
-        return jsonify(message='pong'), \
-               rc
+        return jsonify(message='pong'), rc
 
 
 def target_ready(gateway_list):
@@ -1756,8 +1782,7 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
     target_state = target_ready(gateway_list)
     if target_state.get('status') != 'OK':
         return ('failed, gateway(s) unavailable:'
-                '{}'.format(target_state.get('summary'))), \
-               503
+                '{}'.format(target_state.get('summary'))), 503
 
     http_mode = 'https' if settings.config.api_secure else 'http'
     updated = []

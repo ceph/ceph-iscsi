@@ -11,24 +11,24 @@ class HostGroups(UIGroup):
 
     help_intro = '''
                  Hosts groups provide a more convenient way of managing multiple
-                 hosts that require access to the same set of LUNs. The host 
-                 group 'policy' defines the clients and the LUNs (rbd images) 
+                 hosts that require access to the same set of LUNs. The host
+                 group 'policy' defines the clients and the LUNs (rbd images)
                  that should be associated together.
 
                  There are two commands used to manage the host group
-                 
+
                  create <group_name>
                  delete <group_name>
 
-                 Since the same disks will be seen by multiple systems, you 
+                 Since the same disks will be seen by multiple systems, you
                  should only use this feature for hosts that are cluster aware.
-                 Failing to adhere to this constraint is likely to result in 
+                 Failing to adhere to this constraint is likely to result in
                  **data loss**
-                 
-                 Once a group has been created you can associate clients and 
-                 LUNs to the group with the 'host' and 'disk' sub-commands. 
-                 
-                 Note that a client can only belong to a single group definition, 
+
+                 Once a group has been created you can associate clients and
+                 LUNs to the group with the 'host' and 'disk' sub-commands.
+
+                 Note that a client can only belong to a single group definition,
                  but a disk can be defined across several groups.
 
     '''
@@ -160,14 +160,14 @@ class HostGroups(UIGroup):
 class HostGroup(UIGroup):
 
     help_intro = '''
-                 A host group provides a simple way to manage the LUN masking 
+                 A host group provides a simple way to manage the LUN masking
                  of a number of iscsi clients as a single unit. The host group
-                 contains hosts (iscsi clients) and disks (rbd images). 
-                 
-                 Once a host is defined to a group, it's lun masking must be 
-                 managed through the group. In fact attempts to manage the 
+                 contains hosts (iscsi clients) and disks (rbd images).
+
+                 Once a host is defined to a group, it's lun masking must be
+                 managed through the group. In fact attempts to manage the
                  disks of a client directly are blocked.
-                 
+
                  The following commands enable you to manage the membership of
                  the host group.
 
@@ -337,6 +337,7 @@ class HostGroup(UIGroup):
     def members(self):
         return [child.name for child in self.children
                 if child.member_type == 'host']
+
     @property
     def disks(self):
         return [child.name for child in self.children
@@ -380,9 +381,9 @@ class HostGroup(UIGroup):
 class HostGroupMember(UINode):
     help_intro = '''
                     The entries here show the hosts and disks that are held
-                    within a specific host group definition. Care should be 
+                    within a specific host group definition. Care should be
                     taken when removing disks from a host group, as the remove
-                    operation will be performed across each client within the 
+                    operation will be performed across each client within the
                     group.
                  '''
 

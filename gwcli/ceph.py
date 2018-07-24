@@ -29,7 +29,6 @@ class CephGroup(UIGroup):
                  the pool(s), together with the current over-commit percentage.
                  '''
 
-
     ceph_config_dir = '/etc/ceph'
     default_ceph_conf = '{}/ceph.conf'.format(ceph_config_dir)
 
@@ -113,7 +112,6 @@ class CephGroup(UIGroup):
             cluster.update_state()
             cluster.pools.refresh()
 
-
     def summary(self):
         """
         return the number of clusters
@@ -174,8 +172,8 @@ class CephCluster(UIGroup):
         output += "\nMONs : {:>4} ({})\n".format(self.topology.num_mons,
                                                  q_str)
         output += "OSDs : {:>4} ({} up, {} in)\n".format(self.topology.num_osds,
-                                                        osdmap['num_up_osds'],
-                                                        osdmap['num_in_osds'])
+                                                         osdmap['num_up_osds'],
+                                                         osdmap['num_in_osds'])
         output += "Pools: {:>4}\n".format(self.num_pools)
         raw = status['pgmap']['bytes_total']
         output += "Raw capacity: {}\n".format(human_size(raw))
@@ -226,8 +224,7 @@ class CephCluster(UIGroup):
                         "HEALTH_WARN": None,
                         "HEALTH_ERR": False}
 
-        return self.health_status, \
-               color_lookup[self.health_status]
+        return self.health_status, color_lookup[self.health_status]
 
     @property
     def healthy_mon(self):

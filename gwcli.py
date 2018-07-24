@@ -50,6 +50,7 @@ def exception_handler(exception_type, exception, traceback,
         print("{}{}: {}{}".format(color_red, exception_type.__name__,
                                   exception, color_off))
 
+
 def get_options():
 
     # Set up the runtime overrides, any of these could be provided
@@ -80,6 +81,7 @@ def get_options():
     opts.cli_command = ' '.join(opts.cli_command)
 
     return opts
+
 
 def kbd_handler(*args):
     pass
@@ -148,6 +150,7 @@ def log_in_color(fn):
 
         return fn(*args)
     return new
+
 
 if __name__ == "__main__":
     options = get_options()
