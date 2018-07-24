@@ -10,8 +10,6 @@ import subprocess
 import time
 import sys
 
-import rados
-import rbd
 from flask import Flask, Response
 
 from rtslib_fb.root import RTSRoot
@@ -29,6 +27,7 @@ from ceph_iscsi_config.utils import this_host, CephiSCSIError
 
 # Create a flask instance
 app = Flask(__name__)
+
 
 def exception_handler(exception_type, exception, traceback,
                       debug_hook=sys.excepthook):
@@ -332,11 +331,11 @@ def prom_root():
     """ handle the '/' endpoint - just redirect point the user at /metrics"""
     return '''<!DOCTYPE html>
     <html>
-    	<head><title>Ceph/iSCSI Prometheus Exporter</title></head>
-    	<body>
-    		<h1>Ceph/iSCSI Prometheus Exporter</h1>
-    		<p><a href='/metrics'>Metrics</a></p>
-    	</body>
+        <head><title>Ceph/iSCSI Prometheus Exporter</title></head>
+        <body>
+            <h1>Ceph/iSCSI Prometheus Exporter</h1>
+            <p><a href='/metrics'>Metrics</a></p>
+        </body>
     </html>'''
 
 

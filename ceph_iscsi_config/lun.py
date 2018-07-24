@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import os
 import rados
 import rbd
 
@@ -8,8 +7,7 @@ from time import sleep
 from socket import gethostname
 
 from rtslib_fb import UserBackedStorageObject, root
-from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS
-from rtslib_fb.alua import ALUATargetPortGroup
+from rtslib_fb.utils import RTSLibError
 
 import ceph_iscsi_config.settings as settings
 
@@ -56,9 +54,9 @@ class RBDDev(object):
                 except (rbd.ImageExists, rbd.InvalidArgument) as err:
                     self.error = True
                     self.error_msg = ("Failed to create rbd image {} in "
-                                     "pool {} : {}".format(self.image,
-                                                           self.pool,
-                                                           err))
+                                      "pool {} : {}".format(self.image,
+                                                            self.pool,
+                                                            err))
 
     def delete(self):
         """
@@ -93,7 +91,6 @@ class RBDDev(object):
                 else:
                     self.error = True
 
-
     def rbd_size(self):
         """
         Confirm that the existing rbd image size, matches the requirement
@@ -115,7 +112,7 @@ class RBDDev(object):
                         # so using a generic catch all (Yuk!)
                         try:
                             rbd_image.resize(self.size_bytes)
-                        except:
+                        except Exception:
                             self.error = True
                             self.error_msg = ("rbd image resize failed for "
                                               "{}".format(self.image))
@@ -186,8 +183,8 @@ class RBDDev(object):
             with rbd.Image(ioctx, self.image) as rbd_image:
 
                 if rbd_image.features() & RBDDev.required_features() != \
-                    RBDDev.required_features():
-                    valid_state = False
+                        RBDDev.required_features():
+                        valid_state = False
 
         return valid_state
 
@@ -671,8 +668,8 @@ class LUN(object):
             # config string = rbd identifier / config_key (pool/image) /
             # optional osd timeout
             cfgstring = "rbd/{}/{};osd_op_timeout={}".format(self.pool,
-                                         self.image,
-                                         settings.config.osd_op_timeout)
+                                                             self.image,
+                                                             settings.config.osd_op_timeout)
             if (settings.config.cephconf != '/etc/ceph/ceph.conf'):
                 cfgstring += ";conf={}".format(settings.config.cephconf)
 
@@ -683,8 +680,8 @@ class LUN(object):
         except RTSLibError as err:
             self.error = True
             self.error_msg = ("failed to add {} to LIO - "
-                             "error({})".format(self.config_key,
-                                                str(err)))
+                              "error({})".format(self.config_key,
+                                                 str(err)))
             self.logger.error(self.error_msg)
             return None
 
@@ -695,9 +692,9 @@ class LUN(object):
         except RTSLibError as err:
             self.error = True
             self.error_msg = ("Could not set LIO device attribute "
-                             "cmd_time_out/qfull_time_out for device: {}. "
-                             "Kernel not supported. - "
-                             "error({})".format(self.config_key, str(err)))
+                              "cmd_time_out/qfull_time_out for device: {}. "
+                              "Kernel not supported. - "
+                              "error({})".format(self.config_key, str(err)))
             self.logger.error(self.error_msg)
             new_lun.delete()
             return None
@@ -821,26 +818,25 @@ class LUN(object):
                                 RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
 
                                 lun = LUN(logger, pool, image_name,
-                                           rbd_image.size(), local_gw)
+                                          rbd_image.size(), local_gw)
                                 if lun.error:
                                     raise CephiSCSIError("Error defining rbd "
-                                                         "image {}".format(
-                                                         disk_key))
+                                                         "image {}".format(disk_key))
 
                                 lun.allocate()
                                 if lun.error:
                                     raise CephiSCSIError("Error unable to "
                                                          "register  {} with "
-                                                         "LIO - {}".format(
-                                                         disk_key,
-                                                         lun.error_msg))
+                                                         "LIO - {}".format(disk_key,
+                                                                           lun.error_msg))
 
                         except rbd.ImageNotFound:
                             raise CephiSCSIError("Disk '{}' defined to the "
                                                  "config, but image '{}' can "
                                                  "not be found in '{}' "
                                                  "pool".format(disk_key,
-                                                 image_name, pool))
+                                                               image_name,
+                                                               pool))
 
         # Gateway Mapping : Map the LUN's registered to all tpg's within the
         # LIO target
@@ -848,6 +844,7 @@ class LUN(object):
         if gateway.error:
             raise CephiSCSIError("Error mapping the LUNs to the tpg's within "
                                  "the iscsi Target")
+
 
 def rados_pool(conf=None, pool='rbd'):
     """

@@ -3,12 +3,12 @@
 import rados
 import time
 import json
-import os
 import sys
 import traceback
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import get_time
+
 
 class ConfigTransaction(object):
 
@@ -50,16 +50,15 @@ class CephCluster(object):
 
 class Config(object):
 
-    seed_config = {
-                    "disks": {},
-                    "gateways": {},
-                    "clients": {},
-                    "groups": {},
-                    "version": 3,
-                    "epoch": 0,
-                    "created": '',
-                    "updated": ''
-                    }
+    seed_config = {"disks": {},
+                   "gateways": {},
+                   "clients": {},
+                   "groups": {},
+                   "version": 3,
+                   "epoch": 0,
+                   "created": '',
+                   "updated": ''
+                   }
 
     lock_time_limit = 30
 
@@ -86,9 +85,10 @@ class Config(object):
 
     def _read_config_object(self, ioctx):
         """
-        Return config string from the config object. The string is checked to see if it's valid
-        json. If it's not the read is likely to be a against the object while it's being updated by another
-        host - if this happens, we wait and reread until we get valid json.
+        Return config string from the config object. The string is checked to
+        see if it's valid json. If it's not the read is likely to be a against
+        the object while it's being updated by another host - if this happens,
+        we wait and reread until we get valid json.
         :param ioctx: rados ioctx
         :return: (str) current string.
         """
@@ -106,7 +106,7 @@ class Config(object):
                 valid = False
                 while not valid:
                     try:
-                        cfg_js = json.loads(cfg_str)
+                        json.loads(cfg_str)
                     except ValueError:
                         #
                         self.logger.debug("_read_config_object not valid json, rereading")
@@ -187,7 +187,8 @@ class Config(object):
                 self.config_locked = True
                 break
             except (rados.ObjectBusy, rados.ObjectExists):
-                self.logger.debug("(Config.lock) waiting for excl lock on {} object".format(self.config_name))
+                self.logger.debug("(Config.lock) waiting for excl lock on "
+                                  "{} object".format(self.config_name))
                 time.sleep(1)
                 secs += 1
 
@@ -206,7 +207,7 @@ class Config(object):
         try:
             ioctx.unlock(self.config_name, 'lock', 'config')
             self.config_locked = False
-        except Exception as e:
+        except Exception:
             self.error = True
             self.error_msg = ("Unable to unlock {} - {}".format(self.config_name,
                                                                 traceback.format_exc()))
@@ -302,7 +303,8 @@ class Config(object):
 
         self.logger.debug("(Config.update_item) config is {}".format(self.config))
         self.changed = True
-        self.logger.debug("update_item: type={}, item={}, update={}".format(cfg_type, element_name, element_value))
+        self.logger.debug("update_item: type={}, item={}, update={}".format(
+            cfg_type, element_name, element_value))
 
         txn = ConfigTransaction(cfg_type, element_name, 'add')
         txn.item_content = element_value
@@ -311,7 +313,8 @@ class Config(object):
     def set_item(self, cfg_type, element_name, element_value):
         self.logger.debug("(Config.update_item) config is {}".format(self.config))
         self.changed = True
-        self.logger.debug("update_item: type={}, item={}, update={}".format(cfg_type, element_name, element_value))
+        self.logger.debug("update_item: type={}, item={}, update={}".format(
+            cfg_type, element_name, element_value))
 
         txn = ConfigTransaction(cfg_type, element_name, 'add')
         txn.item_content = element_value
@@ -342,22 +345,25 @@ class Config(object):
                 del current_config[txn.type][txn.item_name]
             else:
                 self.error = True
-                self.error_msg = "Unknown transaction type ({}} encountered in _commit_rbd".format(txn.action)
+                self.error_msg = "Unknown transaction type ({}} encountered in " \
+                                 "_commit_rbd".format(txn.action)
 
         if not self.error:
             if self.reset:
                 current_config["epoch"] = 0
             else:
-                current_config["epoch"] += 1        # Python will switch from plain to long int automagically
+                # Python will switch from plain to long int automagically
+                current_config["epoch"] += 1
 
             now = get_time()
             current_config['updated'] = now
             config_str = json.dumps(current_config)
             self.logger.debug("_commit_rbd updating config to {}".format(config_str))
-            config_str_fmtd = json.dumps(current_config, sort_keys=True, indent=4, separators=(',', ': '))
+            config_str_fmtd = json.dumps(current_config, sort_keys=True,
+                                         indent=4, separators=(',', ': '))
             ioctx.write_full(self.config_name, config_str_fmtd)
             ioctx.set_xattr(self.config_name, "epoch", str(current_config["epoch"]))
-            del self.txn_list[:]                # emtpy the list of transactions
+            del self.txn_list[:]                # empty the list of transactions
 
         self.unlock()
         ioctx.close()
@@ -371,19 +377,20 @@ class Config(object):
 
 def ansible_control():
     """
-    establish whether ansible modules are in the current path to determine whether the code is called
-    through ansible, or directly through a module import. This is done by looking at the call stack, and
-    relies on the main method in the ansible custom module being prefixed by 'ansible' e.g. ansible_main()
+    establish whether ansible modules are in the current path to determine
+    whether the code is called through ansible, or directly through a module
+    import. This is done by looking at the call stack, and relies on the main
+    method in the ansible custom module being prefixed by 'ansible'
+    e.g. ansible_main()
     :return: Boolean
     """
 
     return sys._getframe(2).f_code.co_name.startswith('ansible')
 
 
-
 def main():
     pass
 
-if __name__ == '__main__':
 
+if __name__ == '__main__':
     main()

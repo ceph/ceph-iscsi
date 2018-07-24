@@ -6,12 +6,14 @@ from distutils.util import strtobool
 
 import re
 
+
 # this module when imported preserves the global values
 # defined by the init method allowing other classes to
 # access common configuration settings
 def init():
     global config
     config = Settings()
+
 
 class Settings(object):
     GATEWAY_SETTINGS = [
@@ -53,7 +55,7 @@ class Settings(object):
         if k in Settings.LIO_YES_NO_SETTINGS:
             try:
                 v = Settings.convert_lio_yes_no(v)
-            except:
+            except Exception:
                 v = True
         elif v in ['true', 'True', 'false', 'False']:
             v = strtobool(v)
@@ -66,7 +68,6 @@ class Settings(object):
             if Settings._int_regex.search(v):
                 v = int(v)
         return v
-
 
     defaults = {"cluster_name": "ceph",
                 "gateway_keyring": "ceph.client.admin.keyring",
@@ -91,9 +92,9 @@ class Settings(object):
 
     target_defaults = {"osd_op_timeout": 30,
                        "dataout_timeout": 20,
-                       "nopin_response_timeout" : 5,
-                       "nopin_timeout" : 5,
-                       "qfull_timeout" : 5,
+                       "nopin_response_timeout": 5,
+                       "nopin_timeout": 5,
+                       "qfull_timeout": 5,
                        "cmdsn_depth": 128,
                        "immediate_data": "Yes",
                        "initial_r2t": "Yes",
@@ -102,8 +103,8 @@ class Settings(object):
                        "max_burst_length": 524288,
                        "max_recv_data_segment_length": 262144,
                        "max_xmit_data_segment_length": 262144,
-                       "max_data_area_mb" : 8,
-                       "alua_failover_type" : "implicit"
+                       "max_data_area_mb": 8,
+                       "alua_failover_type": "implicit"
                        }
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):

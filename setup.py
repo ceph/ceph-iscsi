@@ -38,7 +38,7 @@ setup(
     license="GPLv3",
     packages=[
         "ceph_iscsi_config"
-        ],
+    ],
     scripts=[
         "rbd-target-gw.py"
     ],

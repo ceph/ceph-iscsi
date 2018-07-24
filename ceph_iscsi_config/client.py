@@ -18,13 +18,13 @@ from ceph_iscsi_config.utils import encryption_available, CephiSCSIError
 
 import gateway
 
+
 class GWClient(object):
     """
     This class holds a representation of a client connecting to LIO
     """
 
-    seed_metadata = {
-                     "auth": {"chap": ''},
+    seed_metadata = {"auth": {"chap": ''},
                      "luns": {},
                      "group_name": ""
                      }
@@ -78,7 +78,7 @@ class GWClient(object):
         self.error_msg = ''
 
         try:
-            valid_iqn = normalize_wwn(['iqn'], client_iqn)
+            normalize_wwn(['iqn'], client_iqn)
         except RTSLibError as err:
             self.error = True
             self.error_msg = "Invalid client name for iSCSI - {}".format(err)
@@ -150,7 +150,7 @@ class GWClient(object):
         self.acl.set_attribute('dataout_timeout', '{}'.format(
                                self.controls['dataout_timeout']))
         # LIO default 30
-        self.acl.set_attribute('nopin_response_timeout','{}'.format(
+        self.acl.set_attribute('nopin_response_timeout', '{}'.format(
                                self.controls['nopin_response_timeout']))
         # LIO default 15
         self.acl.set_attribute('nopin_timeout', '{}'.format(
@@ -225,7 +225,7 @@ class GWClient(object):
             if client_chap.error:
                 raise CephiSCSIError("Unable to decode password for {}. "
                                      "CHAP error: {}".format(client_iqn,
-                                     client_chap.error_msg))
+                                                             client_chap.error_msg))
 
             client = GWClient(logger,
                               client_iqn,
@@ -254,10 +254,10 @@ class GWClient(object):
         :return:
         """
 
-        chap_enabled=False
+        chap_enabled = False
         if '/' in credentials:
             client_username, client_password = credentials.split('/', 1)
-            chap_enabled=True
+            chap_enabled = True
         elif not credentials:
             client_username = ''
             client_password = ''
@@ -283,10 +283,9 @@ class GWClient(object):
                         self.acl.chap_password = client_password
 
                         new_chap = CHAP(credentials)
-                        self.logger.debug("chap object set to: {},{},{},{}".format(new_chap.chap_str,
-                                                                       new_chap.user,
-                                                                       new_chap.password,
-                                                                       new_chap.password_str))
+                        self.logger.debug("chap object set to: {},{},{},{}".format(
+                            new_chap.chap_str, new_chap.user, new_chap.password,
+                            new_chap.password_str))
 
                         new_chap.chap_str = "{}/{}".format(client_username,
                                                            client_password)
@@ -691,7 +690,7 @@ class CHAP(object):
 
             cipher = PKCS1_OAEP.new(key)
             plain_pw = cipher.decrypt(b64decode(self.password_str))
-        except:
+        except Exception:
             self.error = True
             self.error_msg = 'Problems decoding the encrypted password'
             return None
@@ -705,13 +704,12 @@ class CHAP(object):
             key = RSA.importKey(open(key_path))
             cipher = PKCS1_OAEP.new(key)
             encrypted_pw = b64encode(cipher.encrypt(self.password_str))
-        except:
+        except Exception:
             self.error = True
             self.error_msg = 'Encoding password failed'
             return None
         else:
             return encrypted_pw
-
 
     chap_str = property(_get_chap_str,
                         _set_chap_str,

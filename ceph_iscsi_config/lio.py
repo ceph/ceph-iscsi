@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 
-
-import os
-
 from rtslib_fb import root
-from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS
+from rtslib_fb.utils import RTSLibError
 
 __author__ = 'Paul Cuzner, Michael Christie'
 

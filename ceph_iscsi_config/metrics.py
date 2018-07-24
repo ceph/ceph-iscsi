@@ -175,9 +175,9 @@ class GatewayStats(object):
                 iops.add(perf_labels,
                          lun_iops)
                 read_bytes.add(perf_labels,
-                               mbytes_read*(1024**2))
+                               mbytes_read * (1024 ** 2))
                 write_bytes.add(perf_labels,
-                                mbytes_write*(1024**2))
+                                mbytes_write * (1024 ** 2))
 
         self.metrics["ceph_iscsi_lun_iops"] = iops
         self.metrics["ceph_iscsi_lun_read_bytes"] = read_bytes

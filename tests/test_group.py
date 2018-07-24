@@ -19,7 +19,7 @@ ch = logging.StreamHandler(sys.stdout)
 log.addHandler(ch)
 
 
-#1. Create a new group definition
+# 1. Create a new group definition
 new_group = Group(log, "mygroup",
                   ['iqn.1994-05.com.redhat:my-esx-1',
                    'iqn.1994-05.com.redhat:my-esx-2'],
@@ -32,16 +32,16 @@ assert "mygroup" in new_group.config.config["groups"], \
        "Group did not create/commit correctly to the configuration"
 
 update_group = Group(log, "mygroup",
-                  ['iqn.1994-05.com.redhat:my-esx-1',
-                   'iqn.1994-05.com.redhat:my-esx-2',
-                   'iqn.1994-05.com.redhat:my-esx-3'],
-                  ['rbd.disk_2', 'rbd.disk_1','rbd.disk_3'])
+                     ['iqn.1994-05.com.redhat:my-esx-1',
+                      'iqn.1994-05.com.redhat:my-esx-2',
+                      'iqn.1994-05.com.redhat:my-esx-3'],
+                     ['rbd.disk_2', 'rbd.disk_1', 'rbd.disk_3'])
 
 update_group.apply()
 assert len(update_group.config.config['groups']['mygroup']['members']) == 3, \
-       "mygroup doesn't contain 3 members"
+    "mygroup doesn't contain 3 members"
 
-#?. Delete the group, just created
+# ?. Delete the group, just created
 old_group = Group(log, "mygroup")
 old_group.purge()
 #
