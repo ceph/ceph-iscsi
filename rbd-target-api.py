@@ -524,6 +524,10 @@ def _gateway(gateway_name=None):
 
                 logger.info("Syncing TPG to LUN mapping")
                 gateway.manage('map')
+                if gateway.error:
+                    gateway.manage('clearconfig')
+                    return jsonify(message="Failed to sync LUNs on gateway, "
+                                           "Err {}.".format(gateway.error_msg)), 500
 
                 logger.info("Syncing client configuration")
                 try:
