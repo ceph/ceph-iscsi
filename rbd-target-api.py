@@ -181,8 +181,8 @@ def _parse_target_controls(controls_json):
     controls = {}
     raw_controls = json.loads(controls_json)
     for k in settings.Settings.GATEWAY_SETTINGS:
-        if raw_controls.has_key(k):
-            value = raw_controls[k] if raw_controls[k] else None
+        if k in raw_controls:
+            value = raw_controls.get(k, '')
             if value:
                 if k in settings.Settings.LIO_YES_NO_SETTINGS:
                     try:
@@ -194,7 +194,9 @@ def _parse_target_controls(controls_json):
                         value = str(int(value))
                     except ValueError:
                         raise ValueError("expected integer for {}".format(k))
-            controls[k] = value
+                controls[k] = value
+            else:
+                controls[k] = None
     return controls
 
 @app.route('/api/target/<target_iqn>', methods=['PUT'])
@@ -220,7 +222,7 @@ def target(target_iqn=None):
                                "{}".format(target_iqn, mode)), 500
 
     controls = {}
-    if request.form.has_key('controls'):
+    if 'controls' in request.form:
         try:
             controls = _parse_target_controls(request.form['controls'])
         except ValueError as err:
@@ -286,7 +288,7 @@ def _target(target_iqn=None):
                                "{}".format(target_iqn, mode)), 500
 
     controls = {}
-    if request.form.has_key('controls'):
+    if 'controls' in request.form:
         try:
             controls = _parse_target_controls(request.form['controls'])
         except ValueError as err:
