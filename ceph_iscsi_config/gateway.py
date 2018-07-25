@@ -11,8 +11,9 @@ from rtslib_fb.alua import ALUATargetPortGroup
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.utils import (ipv4_addresses, this_host,
-                                     format_lio_yes_no)
+                                     format_lio_yes_no, CephiSCSIInval)
 from ceph_iscsi_config.common import Config
+from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -192,9 +193,14 @@ class GWTarget(object):
         for tpg in self.tpg_list:
             if tpg._get_enable():
                 for lun in tpg.luns:
-                    self.bind_alua_group_to_lun(config,
-                                                lun,
-                                                tpg_ip_address=self.active_portal_ip)
+                    try:
+                        self.bind_alua_group_to_lun(config,
+                                                    lun,
+                                                    tpg_ip_address=self.active_portal_ip)
+                    except CephiSCSIInval as err:
+                        self.error = True
+                        self.error_msg = e
+                        return
 
                 try:
                     NetworkPortal(tpg, self.active_portal_ip)
@@ -349,13 +355,12 @@ class GWTarget(object):
         bind lun to one of the alua groups. Query the config to see who
         'owns' the primary path for this LUN. Then either bind the LUN
         to the ALUA 'AO' group if the host matches, or default to the
-        'ANO' alua group
+        'ANO'/'Standby' alua group
 
         param config: Config object
         param lun: lun object on the tpg
         param tpg_ip: IP of Network Portal for the lun's tpg.
         """
-        # return
 
         stg_object = lun.storage_object
 
@@ -372,57 +377,42 @@ class GWTarget(object):
             # this is being run during boot so the NP is not setup yet.
             return
 
-        # TODO: The ports in a alua group must export the same state for a LU
-        # group. For different LUs we are exporting different states, so
-        # we should be creating different LU groups or creating different
-        # alua groups for each LU.
+        is_owner = False
+        if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
+            is_owner = True
+
         try:
-            if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
-                self.logger.info("setting {} to ALUA/ActiveOptimised "
-                                 "group id {}".format(stg_object.name, tpg.tag))
-                group_name = "ao"
-                alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
-                alua_tpg.preferred = 1
-            else:
-                self.logger.info("setting {} to ALUA/Standby"
-                                 "group id {}".format(stg_object.name, tpg.tag))
-                group_name = "standby{}".format(tpg.tag)
-                alua_tpg = ALUATargetPortGroup(stg_object, group_name, tpg.tag)
+            alua_tpg = alua_create_group(settings.config.alua_failover_type,
+                                         tpg, stg_object, is_owner)
+        except CephiSCSIInval as err:
+            raise
         except RTSLibError as err:
-                self.logger.info("ALUA group id {} for stg obj {} lun {} "
-                                 "already made".format(tpg.tag, stg_object, lun))
-                # someone mapped a LU then unmapped it without deleting the
-                # stg_object, or we are reloading the config.
-                alua_tpg = ALUATargetPortGroup(stg_object, group_name)
-                if alua_tpg.tpg_id != tpg.tag:
-                    # ports and owner were rearranged. Not sure we support that.
-                    raise RTSLibError
+            self.logger.info("ALUA group id {} for stg obj {} lun {} "
+                             "already made".format(tpg.tag, stg_object, lun))
+            group_name = alua_format_group_name(tpg,
+                                                settings.config.alua_failover_type,
+                                                is_owner)
+            # someone mapped a LU then unmapped it without deleting the
+            # stg_object, or we are reloading the config.
+            alua_tpg = ALUATargetPortGroup(stg_object, group_name)
+            if alua_tpg.tpg_id != tpg.tag:
+                # ports and owner were rearranged. Not sure we support that.
+                raise CephiSCSIInval("Existing ALUA group tag for group {} "
+                                     "in invalid state.\n".format(group_name))
 
-                # drop down in case we are restarting due to error and we
-                # were not able to bind to a lun last time.
+            # drop down in case we are restarting due to error and we
+            # were not able to bind to a lun last time.
 
-        self.logger.debug("ALUA defined, updating state")
-        # Use Explicit but also set the Implicit bit so we can
-        # update the kernel from configfs.
-        alua_tpg.alua_access_type = 3
-        # start ports in Standby, and let the initiator drive the initial
-        # transition to AO.
-        alua_tpg.alua_access_state = 2
+        self.logger.info("Setup group {} for {} on tpg {} (state {}, owner {}, "
+                         "failover type {})".format(alua_tpg.name,
+                         stg_object.name, tpg.tag, alua_tpg.alua_access_state,
+                         is_owner, alua_tpg.alua_access_type))
 
-        alua_tpg.alua_support_offline = 0
-        alua_tpg.alua_support_unavailable = 0
-        alua_tpg.alua_support_standby = 1
-        alua_tpg.alua_support_transitioning = 1
-        alua_tpg.implicit_trans_secs = 60
-        alua_tpg.nonop_delay_msecs = 0
-
-
-        # alua_tpg.bind_to_lun(lun)
-        self.logger.debug("Setting Luns tg_pt_gp to {}".format(group_name))
-        lun.alua_tg_pt_gp_name = group_name
+        self.logger.debug("Setting Luns tg_pt_gp to {}".format(alua_tpg.name))
+        lun.alua_tg_pt_gp_name = alua_tpg.name
         self.logger.debug("Bound {} on tpg{} to {}".format(stg_object.name,
                                                            tpg.tag,
-                                                           group_name))
+                                                           alua_tpg.name))
 
     def map_luns(self, config):
         """
@@ -454,7 +444,14 @@ class GWTarget(object):
                         self.error_msg = err
                         return
 
-                    self.bind_alua_group_to_lun(config, mapped_lun)
+                    try:
+                        self.bind_alua_group_to_lun(config, mapped_lun)
+                    except CephiSCSIInval as err:
+                        self.logger.error("Could not bind LUN to ALUA group: "
+                                          "{}".format(err))
+                        self.error = True
+                        self.error_msg = err
+                        return
 
     def lun_mapped(self, tpg, storage_object):
         """
