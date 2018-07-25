@@ -3,6 +3,7 @@ from rtslib_fb import BlockStorageObject
 from rtslib_fb.target import TPG
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.utils import CephiSCSIInval
 
 def alua_format_group_name(tpg, failover_type, is_owner):
     if is_owner:
@@ -55,10 +56,12 @@ def alua_create_group(failover_type, tpg, so, is_owner):
 
     if failover_type == "explicit":
         alua_tpg = alua_create_explicit_group(tpg, so, group_name, is_owner)
-    else:
+    elif failover_type == "implicit":
         # tmp drop down to implicit. Next patch will check for "implicit"
         # and add error handling up the stack if the failover_type is invalid.
         alua_tpg = alua_create_implicit_group(tpg, so, group_name, is_owner)
+    else:
+        raise CephiSCSIInval("Invalid failover type {}".format(failover_type))
 
     alua_tpg.alua_support_active_optimized = 1
     alua_tpg.alua_support_offline = 0

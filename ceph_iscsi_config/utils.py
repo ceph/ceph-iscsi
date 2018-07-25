@@ -23,6 +23,12 @@ class CephiSCSIError(Exception):
     '''
     pass
 
+class CephiSCSIInval(CephiSCSIError):
+    '''
+    Invalid setting/param.
+    '''
+    pass
+
 def shellcommand(command_string):
 
     try:

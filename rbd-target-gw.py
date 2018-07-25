@@ -319,7 +319,8 @@ def apply_config():
         logger.info("Adding the IP to the enabled tpg, allowing iSCSI logins")
         gateway.enable_active_tpg(config)
         if gateway.error:
-            halt("Error enabling the IP with the active TPG")
+            halt("Error enabling the IP with the active TPG: {}".format(
+                 gateway.error_msg))
 
     config_loading = False
 

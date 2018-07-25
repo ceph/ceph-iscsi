@@ -11,7 +11,7 @@ from rtslib_fb.alua import ALUATargetPortGroup
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.utils import (ipv4_addresses, this_host,
-                                     format_lio_yes_no)
+                                     format_lio_yes_no, CephiSCSIInval)
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
 
@@ -193,9 +193,14 @@ class GWTarget(object):
         for tpg in self.tpg_list:
             if tpg._get_enable():
                 for lun in tpg.luns:
-                    self.bind_alua_group_to_lun(config,
-                                                lun,
-                                                tpg_ip_address=self.active_portal_ip)
+                    try:
+                        self.bind_alua_group_to_lun(config,
+                                                    lun,
+                                                    tpg_ip_address=self.active_portal_ip)
+                    except CephiSCSIInval as err:
+                        self.error = True
+                        self.error_msg = e
+                        return
 
                 try:
                     NetworkPortal(tpg, self.active_portal_ip)
@@ -379,6 +384,8 @@ class GWTarget(object):
         try:
             alua_tpg = alua_create_group(settings.config.alua_failover_type,
                                          tpg, stg_object, is_owner)
+        except CephiSCSIInval as err:
+            raise
         except RTSLibError as err:
                 self.logger.info("ALUA group id {} for stg obj {} lun {} "
                                  "already made".format(tpg.tag, stg_object, lun))
@@ -390,7 +397,9 @@ class GWTarget(object):
                 alua_tpg = ALUATargetPortGroup(stg_object, group_name)
                 if alua_tpg.tpg_id != tpg.tag:
                     # ports and owner were rearranged. Not sure we support that.
-                    raise RTSLibError
+                    raise CephiSCSIInval("Existing ALUA group tag for group {} "
+                                         "in invalid state.\n".format(
+                                         group_name))
 
                 # drop down in case we are restarting due to error and we
                 # were not able to bind to a lun last time.
@@ -436,7 +445,14 @@ class GWTarget(object):
                         self.error_msg = err
                         return
 
-                    self.bind_alua_group_to_lun(config, mapped_lun)
+                    try:
+                        self.bind_alua_group_to_lun(config, mapped_lun)
+                    except CephiSCSIInval as err:
+                        self.logger.error("Could not bind LUN to ALUA group: "
+                                          "{}".format(err))
+                        self.error = True
+                        self.error_msg = err
+                        return
 
     def lun_mapped(self, tpg, storage_object):
         """
