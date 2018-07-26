@@ -199,7 +199,7 @@ class GWTarget(object):
                                                     tpg_ip_address=self.active_portal_ip)
                     except CephiSCSIInval as err:
                         self.error = True
-                        self.error_msg = e
+                        self.error_msg = err
                         return
 
                 try:
