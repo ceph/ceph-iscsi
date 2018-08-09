@@ -283,7 +283,9 @@ class Client(UINode):
 
 
         Specifying 'nochap' will remove chap authentication for the client
-        across all gateways.
+        across all gateways. If there are multiple clients, CHAP must be
+        enabled for all clients or  disabled for all clients. gwcli does not
+        support mixing CHAP clients with IQN ACL clients.
 
         """
 
