@@ -152,7 +152,7 @@ class Disks(UIGroup):
         Short format : create pool.image <size>
 
         e.g.
-        create pool=rbd image=testimage size=100g ring_buffer_size=16
+        create pool=rbd image=testimage size=100g max_data_area_mb=16
         create rbd.testimage 100g
 
         The syntax of each parameter is as follows;
