@@ -160,6 +160,18 @@ class ISCSIRoot(UIRoot):
         print(fmtd_config)
 
     def ui_command_export(self, mode='ansible'):
+        """
+        Print the configuration in a format that can be used by ceph-ansible or
+        as a backup.
+
+        The export command supports two modes:
+
+        ansible - The configuration will be printed in a format that can be
+                  used for the ceph-ansible iscsigws.yml.
+        copy - This prints the internal configuration. It can used for backup
+               or for support requests.
+        """
+
         valid_modes = ['ansible', 'copy']
 
         self.logger.debug("CMD: export mode={}".format(mode))
