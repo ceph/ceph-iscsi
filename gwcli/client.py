@@ -359,7 +359,7 @@ class Client(UINode):
         a string of the form <username>/<password>
 
         e.g.
-        auth chap=username/password | nochap
+        auth chap=username/password
 
         username ... the username is 8-64 character string. Each character
                      may either be an alphanumeric or use one of the following
@@ -371,18 +371,28 @@ class Client(UINode):
                      containing alphanumeric characters, plus the following
                      special characters @,_,-
 
-        WARNING: Using unsupported special characters may result in truncation,
-                 resulting in failed logins.
+        WARNING1: Using unsupported special characters may result in truncation,
+                  resulting in failed logins.
 
-
-        Specifying 'nochap' will remove chap authentication for the client
-        across all gateways. If there are multiple clients, CHAP must be
-        enabled for all clients or  disabled for all clients. gwcli does not
-        support mixing CHAP clients with IQN ACL clients.
+        WARNING2: If there are multiple clients, CHAP must be enabled for all
+        clients or  disabled for all clients. gwcli does not support mixing CHAP
+        clients with IQN ACL clients.
 
         """
 
         self.logger.debug("CMD: ../hosts/<client_iqn> auth *")
+
+        if not chap:
+            self.logger.error("To set authentication, specify "
+                              "chap=<user>/<password>")
+            return
+
+        if chap == 'nochap':
+            self.logger.error("CHAP must be disabled for all clients at the "
+                              "same time. Run the 'auth nochap' command from "
+                              "the hosts node within gwcli.")
+            return
+
         self.set_auth(chap)
 
     @staticmethod
