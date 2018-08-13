@@ -157,6 +157,11 @@ The create command will define the client IQN to all gateways within the configu
 The delete command will attempt to remove client IQN from all gateways within the configuration. The client must be logged out, for the delete command to be successful.
 .TP
 .nf
+\fB/iscsi-target/<iqn>/hosts/ auth nochap\fR
+.fi
+CHAP authentication can be reset to initiator based ACLs target wide for all setup ACLs using the \fBnochap\fR keyword. If there are multiple clients, CHAP must be enabled for all clients or disabled for all clients. gwcli does not support mixing CHAP clients with IQN ACL clients.
+.TP
+.nf
 \fB/iscsi-target/<iqn>/hosts/<client_iqn>/ auth chap=<user>/<pswd> | nochap\fR
 .fi
 CHAP authentication can be defined for the client with the \fBchap=\fR parameter. The username and password defined here must then be used within the client'd login credentials for this iscsi target. To remove chap authentication use the \fBnochap\fR keyword. If there are multiple clients, CHAP must be enabled for all clients or disabled for all clients. gwcli does not support mixing CHAP clients with IQN ACL clients.
