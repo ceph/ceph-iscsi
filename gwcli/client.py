@@ -209,7 +209,7 @@ class Clients(UIGroup):
         auth_stat_str = "None"
 
         for client in self.children:
-            if client.auth['chap'] == '':
+            if client.auth['chap'] == 'None':
                 chap_disabled = True
             else:
                 chap_enabled = True
@@ -261,7 +261,13 @@ class Client(UINode):
         # decode the password if necessary
         if 'chap' in self.auth:
             self.chap = CHAP(self.auth['chap'])
-            self.auth['chap'] = self.chap.chap_str
+
+            if self.chap.chap_str != '':
+                self.auth['chap'] = self.chap.chap_str
+            else:
+                self.auth['chap'] = "None"
+        else:
+            self.auth['chap'] = "None"
 
         self.refresh_luns()
 
@@ -297,7 +303,7 @@ class Client(UINode):
         status = False
 
         if 'chap' in self.auth:
-            if self.auth['chap']:
+            if self.auth['chap'] != 'None':
                 auth_text = "Auth: CHAP"
                 status = True
 
@@ -344,7 +350,11 @@ class Client(UINode):
 
         if api.response.status_code == 200:
             self.logger.debug("- client credentials updated")
-            self.auth['chap'] = chap
+            if chap != '':
+                self.auth['chap'] = chap
+            else:
+                self.auth['chap'] = "None"
+
             self.logger.info('ok')
 
         else:
