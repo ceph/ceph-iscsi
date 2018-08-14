@@ -603,11 +603,12 @@ def disk(image_id):
     :param pool: (str) the pool name the rbd image will be in
     :param count: (str) the number of images will be created
     :param owner: (str) the owner of the rbd image
-    :param ring_buffer_size: (str) size of the kernel ring buffer for this LUN
+    :param max_data_area_mb: (str) size of the kernel ring buffer that holds
+                              SCSI command's data.
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5 -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
-    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd -dring_buffer_size=32 -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
+    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd -dmax_data_area_mb=32 -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """

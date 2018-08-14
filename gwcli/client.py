@@ -176,8 +176,56 @@ class Clients(UIGroup):
         del self.client_map[child.client_iqn]
         self.remove_child(child)
 
+    def ui_command_auth(self, chap=None):
+        """
+        Clear CHAP settings for all clients on the target.
+
+        Specifying 'nochap' will remove chap authentication for all clients
+        across all gateways. Initiator name based authentication will then be
+        used.
+
+        e.g.
+        auth nochap
+
+        """
+
+        if not chap:
+            self.logger.error("Missing auth argument. Use 'auth nochap'")
+            return
+
+        if chap != 'nochap':
+            self.logger.error("Invalid auth argument. Use 'auth nochap'")
+            return
+
+        for client in self.children:
+            client.set_auth(chap)
+
     def summary(self):
-        return "Hosts: {}".format(len(self.children)), None
+        chap_enabled = False
+        chap_disabled = False
+        status = False
+        # initiator name based ACL is the default with the current kernel
+        # settings.
+        auth_stat_str = "None"
+
+        for client in self.children:
+            if client.auth['chap'] == 'None':
+                chap_disabled = True
+            else:
+                chap_enabled = True
+
+            if chap_enabled and chap_disabled:
+                auth_stat_str = "MISCONFIG"
+                status = False
+                break
+
+        if auth_stat_str != "MISCONFIG":
+            if chap_enabled:
+                auth_stat_str = "CHAP"
+                status = True
+
+        return "Hosts: {}: Auth: {}".format(len(self.children), auth_stat_str),\
+                status
 
 
 class Client(UINode):
@@ -213,7 +261,13 @@ class Client(UINode):
         # decode the password if necessary
         if 'chap' in self.auth:
             self.chap = CHAP(self.auth['chap'])
-            self.auth['chap'] = self.chap.chap_str
+
+            if self.chap.chap_str != '':
+                self.auth['chap'] = self.chap.chap_str
+            else:
+                self.auth['chap'] = "None"
+        else:
+            self.auth['chap'] = "None"
 
         self.refresh_luns()
 
@@ -249,7 +303,7 @@ class Client(UINode):
         status = False
 
         if 'chap' in self.auth:
-            if self.auth['chap']:
+            if self.auth['chap'] != 'None':
                 auth_text = "Auth: CHAP"
                 status = True
 
@@ -260,32 +314,7 @@ class Client(UINode):
 
         return ", ".join(msg), status
 
-    def ui_command_auth(self, chap=None):
-        """
-        Client authentication can be set to use CHAP by supplying the
-        a string of the form <username>/<password>
-
-        e.g.
-        auth chap=username/password | nochap
-
-        username ... the username is 8-64 character string. Each character
-                     may either be an alphanumeric or use one of the following
-                     special characters .,:,-,@.
-                     Consider using the hosts 'shortname' or the initiators IQN
-                     value as the username
-
-        password ... the password must be between 12-16 chars in length
-                     containing alphanumeric characters, plus the following
-                     special characters @,_,-
-
-        WARNING: Using unsupported special characters may result in truncation,
-                 resulting in failed logins.
-
-
-        Specifying 'nochap' will remove chap authentication for the client
-        across all gateways.
-
-        """
+    def set_auth(self, chap=None):
 
         self.logger.debug("CMD: ../hosts/<client_iqn> auth *")
 
@@ -321,7 +350,11 @@ class Client(UINode):
 
         if api.response.status_code == 200:
             self.logger.debug("- client credentials updated")
-            self.auth['chap'] = chap
+            if chap != '':
+                self.auth['chap'] = chap
+            else:
+                self.auth['chap'] = "None"
+
             self.logger.info('ok')
 
         else:
@@ -329,6 +362,48 @@ class Client(UINode):
                               " :{}".format(response_message(api.response,
                                                              self.logger)))
             return
+
+    def ui_command_auth(self, chap=None):
+        """
+        Client authentication can be set to use CHAP by supplying the
+        a string of the form <username>/<password>
+
+        e.g.
+        auth chap=username/password
+
+        username ... the username is 8-64 character string. Each character
+                     may either be an alphanumeric or use one of the following
+                     special characters .,:,-,@.
+                     Consider using the hosts 'shortname' or the initiators IQN
+                     value as the username
+
+        password ... the password must be between 12-16 chars in length
+                     containing alphanumeric characters, plus the following
+                     special characters @,_,-
+
+        WARNING1: Using unsupported special characters may result in truncation,
+                  resulting in failed logins.
+
+        WARNING2: If there are multiple clients, CHAP must be enabled for all
+        clients or  disabled for all clients. gwcli does not support mixing CHAP
+        clients with IQN ACL clients.
+
+        """
+
+        self.logger.debug("CMD: ../hosts/<client_iqn> auth *")
+
+        if not chap:
+            self.logger.error("To set authentication, specify "
+                              "chap=<user>/<password>")
+            return
+
+        if chap == 'nochap':
+            self.logger.error("CHAP must be disabled for all clients at the "
+                              "same time. Run the 'auth nochap' command from "
+                              "the hosts node within gwcli.")
+            return
+
+        self.set_auth(chap)
 
     @staticmethod
     def get_srtd_names(lun_list):

@@ -152,7 +152,7 @@ class Disks(UIGroup):
         Short format : create pool.image <size>
 
         e.g.
-        create pool=rbd image=testimage size=100g ring_buffer_size=16
+        create pool=rbd image=testimage size=100g max_data_area_mb=16
         create rbd.testimage 100g
 
         The syntax of each parameter is as follows;
@@ -391,9 +391,9 @@ class Disks(UIGroup):
 
         e.g.
         set max_data_area_mb
-          - reconfigure image=rbd.disk_1 attribute=max_data_area_mb value=128
+          - reconfigure image_id=rbd.disk_1 attribute=max_data_area_mb value=128
         reset max_data_area_mb to default
-          - reconfigure image=rbd.disk_1 attribute=max_data_area_mb value=
+          - reconfigure image_id=rbd.disk_1 attribute=max_data_area_mb value=
         """
         if image_id in self.disk_lookup:
             disk = self.disk_lookup[image_id]
