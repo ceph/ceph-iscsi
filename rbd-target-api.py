@@ -812,8 +812,10 @@ def _disk(image_id):
                     logger.error("LUN {} already deactivated".format(image_id))
                     return jsonify(message="LUN deactivate failure"), 500
 
-                for attached_lun in so.attached_luns:
-                    for node_acl in attached_lun.parent_tpg.node_acls:
+                for alun in so.attached_luns:
+                    for mlun in alun.mapped_luns:
+                        node_acl = mlun.parent_nodeacl
+
                         if node_acl.session and node_acl.session.get('state', '').upper() == 'LOGGED_IN':
                             logger.error("LUN {} in-use".format(image_id))
                             return jsonify(message="LUN deactivate failure - in-use"), 500
