@@ -811,7 +811,7 @@ def _disk(image_id):
                 so = lun.lio_stg_object()
                 if not so:
                     logger.error("LUN {} already deactivated".format(image_id))
-                    return jsonify(message="LUN deactivate failure"), 500
+                    return jsonify(message="LUN already deactivated"), 200
 
                 for alun in so.attached_luns:
                     for mlun in alun.mapped_luns:
@@ -1125,38 +1125,38 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
                                     image_id,
                                     http_method='put',
                                     api_vars=api_vars)
-    if resp_code != 200:
-        return "failed to deactivate disk: {}".format(resp_text), resp_code
+    if resp_code == 200:
+        try:
+            with rados.Rados(conffile=settings.config.cephconf) as cluster, \
+                    cluster.open_ioctx(pool_name) as ioctx, \
+                    rbd.Image(ioctx, image_name) as image:
 
-    try:
-        with rados.Rados(conffile=settings.config.cephconf) as cluster, \
-                cluster.open_ioctx(pool_name) as ioctx, \
-                rbd.Image(ioctx, image_name) as image:
+                try:
+                    logger.debug("rolling back to snapshot")
+                    image.rollback_to_snap(name)
+                    resp_text = "rolled back to snapshot"
+                    resp_code = 200
 
-            try:
-                logger.debug("rolling back to snapshot")
-                image.rollback_to_snap(name)
-                resp_text = "rolled back to snapshot"
-                resp_code = 200
+                except rbd.ImageNotFound:
+                    resp_text = "snapshot {} does not exist".format(name)
+                    resp_code = 404
 
-            except rbd.ImageNotFound:
-                resp_text = "snapshot {} does not exist".format(name)
-                resp_code = 404
+        except Exception as err:
+            resp_text = "failed to rollback snapshot: {}".format(err)
+            resp_code = 400
 
-    except Exception as err:
-        resp_text = "failed to rollback snapshot: {}".format(err)
-        resp_code = 400
+    else:
+        resp_text = "failed to deactivate disk: {}".format(resp_text)
 
-    finally:
-        logger.debug("activating disk")
-        api_vars['mode'] = 'activate'
-        activate_resp_text, activate_resp_code = call_api(gateways, '_disk',
-                                                          image_id,
-                                                          http_method='put',
-                                                          api_vars=api_vars)
-        if resp_code == 200 and activate_resp_code != 200:
-            resp_text = activate_resp_text
-            resp_code = activate_resp_code
+    logger.debug("activating disk")
+    api_vars['mode'] = 'activate'
+    activate_resp_text, activate_resp_code = call_api(gateways, '_disk',
+                                                      image_id,
+                                                      http_method='put',
+                                                      api_vars=api_vars)
+    if resp_code == 200 and activate_resp_code != 200:
+        resp_text = activate_resp_text
+        resp_code = activate_resp_code
 
     return resp_text, resp_code
 
