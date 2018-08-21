@@ -290,7 +290,7 @@ class Disks(UIGroup):
             self.logger.debug("Updating UI for the new disk(s)")
             for n in range(1, (int(count)+1), 1):
 
-                if count > 1:
+                if int(count) > 1:
                     disk_key = "{}.{}{}".format(pool, image, n)
                 else:
                     disk_key = "{}.{}".format(pool, image)
