@@ -716,7 +716,7 @@ class LUN(object):
                 if lun.storage_object.name == self.config_key:
                     try:
                         lun.delete()
-                    except RTSLibError as e:
+                    except Exception as e:
                         self.error = True
                         self.error_msg = ("Delete from LIO/TPG failed - "
                                           "{}".format(e))
@@ -726,25 +726,9 @@ class LUN(object):
 
         for stg_object in lio_root.storage_objects:
             if stg_object.name == self.config_key:
-
-                # alua_dir = os.path.join(stg_object.path, "alua")
-
-                # # remove the alua directories (future versions will handle this
-                # # natively within rtslib_fb
-                # for dirname in next(os.walk(alua_dir))[1]:
-                #     if dirname != "default_tg_pt_gp":
-                #         try:
-                #             alua_tpg = ALUATargetPortGroup(stg_object, dirname)
-                #             alua_tpg.delete()
-                #         except (RTSLibError, RTSLibNotInCFS) as err:
-                #             self.error = True
-                #             self.error_msg = ("Delete of ALUA dirs failed - "
-                #                               "{}".format(err))
-                #             return
-
                 try:
                     stg_object.delete()
-                except RTSLibError as e:
+                except Exception as e:
                     self.error = True
                     self.error_msg = ("Delete from LIO/backstores failed - "
                                       "{}".format(e))
