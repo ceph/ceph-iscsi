@@ -342,7 +342,7 @@ class Group(object):
     def update_client(self, client_iqn, image_list):
 
         client = GWClient(self.logger, client_iqn, image_list, '')
-        client.define_client()                          # sets up tpg lun list
+        client.manage('reconfigure')
 
         # grab the client's metadata from the config (needed by setup_luns)
         client.metadata = self.config.config['clients'][client_iqn]
