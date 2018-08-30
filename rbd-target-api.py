@@ -750,10 +750,7 @@ def _disk(image_id):
                       image_name,
                       str(request.form['size']),
                       str(request.form['owner']))
-            logger.error("TEST: {}".format(request.form.keys()))
-            logger.error("TEST: {}".format(request.form.get('max_data_area_mb', None)))
             lun.max_data_area_mb = request.form.get('max_data_area_mb', None)
-            logger.error("TEST: {}".format(lun.max_data_area_mb))
             if lun.error:
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
