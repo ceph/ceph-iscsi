@@ -1,12 +1,12 @@
 Name:		ceph-iscsi-cli
-Version:	2.7
+Version:	2.8
 Release:	1%{?dist}
 Summary:	CLI configuration tool to manage multiple iSCSI gateways
 Group:		Applications/System
 License:	GPLv3
 
-URL:		https://github.com/pcuzner/ceph-iscsi-cli
-Source0:	https://github.com/pcuzner/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
+URL:		https://github.com/ceph/ceph-iscsi-cli
+Source0:	https://github.com/ceph/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
 BuildArch:  noarch
 
 BuildRequires: python2-devel
