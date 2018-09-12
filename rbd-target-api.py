@@ -6,6 +6,7 @@ import signal
 import json
 import logging
 import logging.handlers
+from logging.handlers import RotatingFileHandler
 import ssl
 import OpenSSL
 import threading
@@ -2041,7 +2042,9 @@ if __name__ == '__main__':
     syslog_handler.setFormatter(syslog_format)
 
     # file target - more verbose logging for diagnostics
-    file_handler = logging.FileHandler('/var/log/rbd-target-api.log', mode='w')
+    file_handler = RotatingFileHandler('/var/log/rbd-target-api.log',
+                                       maxBytes=5242880,
+                                       backupCount=7)
     file_handler.setLevel(logging.DEBUG)
     file_format = logging.Formatter(
         "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "
