@@ -758,11 +758,12 @@ def _disk(image_id):
                       image_name,
                       str(request.form['size']),
                       str(request.form['owner']))
-            lun.max_data_area_mb = request.form.get('max_data_area_mb', None)
             if lun.error:
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
+
+            lun.max_data_area_mb = request.form.get('max_data_area_mb', None)
 
             if mode == 'create' and len(config.config['disks']) >= 256:
                 logger.error("LUN alloc problem - too many LUNs")
