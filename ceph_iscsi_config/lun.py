@@ -777,7 +777,7 @@ class LUN(object):
                 return "pool name is invalid"
 
         if mode == 'create':
-            disk_regex = re.compile("[a-zA-Z0-9\-]+")
+            disk_regex = re.compile("^[a-zA-Z0-9\-]+$")
             if not disk_regex.search(kwargs['image']):
                 return "Invalid image name"
 
