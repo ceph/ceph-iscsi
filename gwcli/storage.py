@@ -175,7 +175,7 @@ class Disks(UIGroup):
         """
         # NB the text above is shown on a help create request in the CLI
 
-        if '.' in pool:
+        if pool and '.' in pool:
             # shorthand version of the command
             self.logger.debug("user provided pool.image format request")
 
