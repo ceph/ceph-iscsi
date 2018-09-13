@@ -620,12 +620,6 @@ def disk(image_id):
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
 
-    disk_regex = re.compile("[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
-    if not disk_regex.search(image_id):
-        logger.debug("disk request rejected due to invalid image name")
-        return jsonify(message="image id format is invalid - must be "
-                               "pool.image_name"), 400
-
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
 

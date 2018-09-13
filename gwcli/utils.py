@@ -254,6 +254,9 @@ def valid_disk(**kwargs):
             return "pool name is invalid"
 
     if mode == 'create':
+        disk_regex = re.compile("[a-zA-Z0-9\-]+")
+        if not disk_regex.search(kwargs['image']):
+            return "Invalid image name"
 
         if kwargs['count'].isdigit():
             if not 1 <= int(kwargs['count']) <= 10:
