@@ -17,12 +17,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class Clients(UIGroup):
     help_intro = '''
-                 The host section shows the clients that have been defined 
+                 The host section shows the clients that have been defined
                  across each of the gateways in the configuration.
-                 
-                 Clients may be created or deleted, but once defined they can 
+
+                 Clients may be created or deleted, but once defined they can
                  not be renamed.
-                 
+
                  e.g.
                  create iqn.1994-05.com.redhat:rh7-client4
                  '''
@@ -87,7 +87,6 @@ class Clients(UIGroup):
             self.logger.error("Failed: {}".format(response_message(api.response,
                                                                    self.logger)))
             return
-
 
         # switch the current directory to the new client for auth or disk
         # definitions as part of the users workflow
@@ -225,22 +224,21 @@ class Clients(UIGroup):
                 status = True
 
         return "Hosts: {}: Auth: {}".format(len(self.children), auth_stat_str),\
-                status
+            status
 
 
 class Client(UINode):
     help_intro = '''
                  Client definitions can be managed through two sub-commands;
-                 'auth' and 'disk'. These commands allow you to manage the 
-                 CHAP authentication for the client (1-WAY) and change the 
+                 'auth' and 'disk'. These commands allow you to manage the
+                 CHAP authentication for the client (1-WAY) and change the
                  rbd images masked to a specific client.
-                  
+
                  LUN masking automatically associates a specific LUN id to the
-                 for an rbd image, simplifying the workflow. The lun id's 
-                 assigned can be seen by running the 'info' command. This will 
-                 show all the clients details that are stored within the 
+                 for an rbd image, simplifying the workflow. The lun id's
+                 assigned can be seen by running the 'info' command. This will
+                 show all the clients details that are stored within the
                  iscsi gateway configuration.
-                 
                  '''
 
     display_attributes = ["client_iqn", "ip_address", "alias", "logged_in",
@@ -438,7 +436,7 @@ class Client(UINode):
 
         self.logger.debug("CMD: ../hosts/<client_iqn> disk action={}"
                           " disk={}".format(action,
-                                           disk))
+                                            disk))
 
         valid_actions = ['add', 'remove']
 
@@ -538,7 +536,7 @@ class Client(UINode):
                 if api.response.status_code == 200:
                     try:
                         lun_dict = api.response.json()['message']
-                    except:
+                    except Exception:
                         self.logger.error("Malformed REST API response")
                         return
 

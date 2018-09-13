@@ -103,7 +103,7 @@ class ISCSIRoot(UIRoot):
         if api.response.status_code == 200:
             try:
                 return api.response.json()
-            except:
+            except Exception:
                 self.error = True
                 self.error_msg = "Malformed REST API response"
                 return {}
@@ -123,7 +123,8 @@ class ISCSIRoot(UIRoot):
         ansible_vars.append("deploy_settings: true")
         ansible_vars.append("perform_system_checks: true")
         ansible_vars.append('gateway_iqn: "{}"'.format(config['gateways']['iqn']))
-        ansible_vars.append('gateway_ip_list: "{}"'.format(",".join(config['gateways']['ip_list'])))
+        ansible_vars.append('gateway_ip_list: "{}"'.format(
+            ",".join(config['gateways']['ip_list'])))
         ansible_vars.append("# rbd device definitions")
         ansible_vars.append("rbd_devices:")
 
@@ -144,8 +145,8 @@ class ISCSIRoot(UIRoot):
         for client in sorted(config['clients'].keys()):
             client_metadata = config['clients'][client]
             lun_data = client_metadata['luns']
-            sorted_luns = [s[0] for s in sorted(lun_data.iteritems(),
-                                                key=lambda (x, y): y['lun_id'])]
+            sorted_luns = [s[0] for s in sorted(lun_data.items(),
+                                                key=lambda v: v[1]['lun_id'])]
             chap = CHAP(client_metadata['auth']['chap'])
             ansible_vars.append(client_template.format(client,
                                                        ','.join(sorted_luns),
@@ -208,11 +209,11 @@ class ISCSIRoot(UIRoot):
 
 class ISCSITarget(UIGroup):
     help_intro = '''
-                 The iscsi-target group defines the ISCSI Target that the 
+                 The iscsi-target group defines the ISCSI Target that the
                  group of gateways will be known as by iSCSI initiators (clients).
-                 
+
                  Only one iSCSI target is allowed, but each target can consist
-                 of 2-4 gateway nodes. Multiple gateways are needed to deliver 
+                 of 2-4 gateway nodes. Multiple gateways are needed to deliver
                  high availability storage to the iSCSI client.
 
                  '''
@@ -250,7 +251,6 @@ class ISCSITarget(UIGroup):
             self.logger.error("IQN name '{}' is not valid for "
                               "iSCSI".format(target_iqn))
             return
-
 
         # 'safe' to continue with the definition
         self.logger.debug("Create an iscsi target definition in the UI")
@@ -309,7 +309,7 @@ class ISCSITarget(UIGroup):
 
         try:
             current_config = api.response.json()
-        except:
+        except Exception:
             self.logger.error("Malformed REST API response")
             raise GatewayAPIError
 
@@ -335,7 +335,7 @@ class ISCSITarget(UIGroup):
         this_gw = this_host()
         if this_gw not in gw_list:
             self.logger.warning("Executor({}) must be in gateway list: "
-                              "{}".format(this_gw, gw_list))
+                                "{}".format(this_gw, gw_list))
             return
 
         gw_list.remove(this_gw)
@@ -390,6 +390,7 @@ class Target(UINode):
                  The iscsi target is the name that the group of gateways are
                  known as by the iscsi initiators (clients).
                  '''
+
     def __init__(self, target_iqn, parent):
         UIGroup.__init__(self, target_iqn, parent)
         self.target_iqn = target_iqn
@@ -437,7 +438,7 @@ class Target(UINode):
         reset cmdsn_depth
           - reconfigure attribute=cmdsn_depth value=
         """
-        if not attribute in settings.Settings.GATEWAY_SETTINGS:
+        if attribute not in settings.Settings.GATEWAY_SETTINGS:
             self.logger.error("supported attributes: {}".format(",".join(
                 sorted(settings.Settings.GATEWAY_SETTINGS))))
             return
@@ -491,13 +492,13 @@ class GatewayGroup(UIGroup):
                  The gateway-group shows you the high level details of the
                  iscsi gateway nodes that have been configured. It also allows
                  you to add further gateways to the configuration, but this
-                 requires the API service instance to be started on the new 
+                 requires the API service instance to be started on the new
                  gateway host
 
                  If in doubt, use Ansible :)
                  '''
 
-    def __init__(self,  parent):
+    def __init__(self, parent):
 
         UIGroup.__init__(self, 'gateways', parent)
 
@@ -565,7 +566,6 @@ class GatewayGroup(UIGroup):
             self.last_state = gateways_down
 
         self.thread_lock.release()
-
 
     def ui_command_refresh(self):
         """

@@ -36,7 +36,7 @@ setup(
     license="GPLv3",
     packages=[
         "gwcli"
-        ],
+    ],
     scripts=[
         'gwcli.py',
         'rbd-target-api.py'

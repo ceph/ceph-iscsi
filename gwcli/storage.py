@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import os
 import time
 import Queue
 import threading
@@ -11,9 +10,9 @@ from gwcli.node import UIGroup, UINode
 
 from gwcli.client import Clients
 
-from gwcli.utils import (human_size, readcontents, console_message,
-                         response_message, GatewayAPIError, GatewayError,
-                         this_host, APIRequest, valid_snapshot_name, get_config)
+from gwcli.utils import (human_size, console_message, response_message,
+                         GatewayAPIError, this_host, APIRequest,
+                         valid_snapshot_name, get_config)
 
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes
 
@@ -269,8 +268,8 @@ class Disks(UIGroup):
 
         # make call to local api server's disk endpoint
         disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
-                                                              settings.config.api_port,
-                                                              disk_key)
+                                                          settings.config.api_port,
+                                                          disk_key)
 
         api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
                     'count': count, 'max_data_area_mb': max_data_area_mb,
@@ -288,7 +287,7 @@ class Disks(UIGroup):
             self.logger.info("ok")
 
             self.logger.debug("Updating UI for the new disk(s)")
-            for n in range(1, (int(count)+1), 1):
+            for n in range(1, (int(count) + 1), 1):
 
                 if int(count) > 1:
                     disk_key = "{}.{}{}".format(pool, image, n)
@@ -306,7 +305,7 @@ class Disks(UIGroup):
                 if api.response.status_code == 200:
                     try:
                         image_config = api.response.json()
-                    except:
+                    except Exception:
                         raise GatewayAPIError("Malformed REST API response")
 
                     Disk(parent, disk_key, image_config)
@@ -415,8 +414,6 @@ class Disks(UIGroup):
         else:
             self.logger.error("disk name provided does not exist")
 
-
-
     def ui_command_delete(self, image_id):
         """
         Delete a given rbd image from the configuration and ceph. This is a
@@ -451,9 +448,9 @@ class Disks(UIGroup):
         api_vars = {'purge_host': local_gw}
 
         disk_api = '{}://{}:{}/api/disk/{}'.format(self.http_mode,
-                                                       local_gw,
-                                                       settings.config.api_port,
-                                                       image_id)
+                                                   local_gw,
+                                                   settings.config.api_port,
+                                                   image_id)
         api = APIRequest(disk_api, data=api_vars)
         api.delete()
 
@@ -677,7 +674,7 @@ class Disk(UINode):
 
     def reconfigure(self, attribute, value):
         allowed_attributes = ['max_data_area_mb']
-        if not attribute in allowed_attributes:
+        if attribute not in allowed_attributes:
             self.logger.error("supported attributes: {}".format(",".join(allowed_attributes)))
             return
 
