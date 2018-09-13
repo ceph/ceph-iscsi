@@ -197,7 +197,7 @@ class Group(object):
                                self.disks)
 
         if set(self.disks) != set(this_group.get('disks')) or \
-            set(self.group_members) != set(this_group.get('members')):
+                set(self.group_members) != set(this_group.get('members')):
             group_changed = True
         else:
             group_changed = False
@@ -302,7 +302,6 @@ class Group(object):
                                     this_group)
         self.config.commit()
 
-
     def enforce_policy(self):
 
         config_dict = self.config.config
@@ -310,9 +309,8 @@ class Group(object):
         group_disks = this_group.get('disks')
         host_group = this_group.get('members')
 
-        # FIXME this approach is python2 specific
-        image_list = sorted(group_disks.iteritems(),
-                              key=lambda (k,v): v['lun_id'])
+        image_list = sorted(group_disks.items(),
+                            key=lambda v: v[1]['lun_id'])
 
         for client_iqn in host_group:
             self.update_client(client_iqn, image_list)
@@ -322,7 +320,6 @@ class Group(object):
                                   ": {}".format(client_iqn,
                                                 self.error_msg))
                 return
-
 
     def add_client(self, client_iqn):
         client_metadata = self.config.config['clients'][client_iqn]

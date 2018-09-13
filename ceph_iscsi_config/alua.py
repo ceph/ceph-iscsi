@@ -1,9 +1,8 @@
 from rtslib_fb.alua import ALUATargetPortGroup
-from rtslib_fb import BlockStorageObject
-from rtslib_fb.target import TPG
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import CephiSCSIInval
+
 
 def alua_format_group_name(tpg, failover_type, is_owner):
     if is_owner:
@@ -14,12 +13,14 @@ def alua_format_group_name(tpg, failover_type, is_owner):
     else:
         return "ano{}".format(tpg.tag)
 
+
 def alua_create_ao_group(so, tpg, group_name):
     alua_tpg = ALUATargetPortGroup(so, group_name, tpg.tag)
     alua_tpg.alua_support_active_optimized = 1
     alua_tpg.alua_access_state = 0
 
     return alua_tpg
+
 
 def alua_create_implicit_group(tpg, so, group_name, is_owner):
     if is_owner:
@@ -34,6 +35,7 @@ def alua_create_implicit_group(tpg, so, group_name, is_owner):
     # process.
     alua_tpg.implicit_trans_secs = settings.config.osd_op_timeout + 15
     return alua_tpg
+
 
 def alua_create_explicit_group(tpg, so, group_name, is_owner):
     if is_owner:
@@ -50,6 +52,7 @@ def alua_create_explicit_group(tpg, so, group_name, is_owner):
     # transition to AO.
     alua_tpg.alua_access_state = 2
     return alua_tpg
+
 
 def alua_create_group(failover_type, tpg, so, is_owner):
     group_name = alua_format_group_name(tpg, failover_type, is_owner)

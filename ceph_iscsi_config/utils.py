@@ -17,17 +17,20 @@ __author__ = 'pcuzner@redhat.com'
 
 size_suffixes = ['M', 'G', 'T']
 
+
 class CephiSCSIError(Exception):
     '''
     Generic Ceph iSCSI config error.
     '''
     pass
 
+
 class CephiSCSIInval(CephiSCSIError):
     '''
     Invalid setting/param.
     '''
     pass
+
 
 def shellcommand(command_string):
 
@@ -61,7 +64,6 @@ def get_ip(addr):
             pass
     else:
         converted_addr = addr
-
 
     return converted_addr
 
@@ -104,7 +106,7 @@ def valid_size(size):
         valid = False
     else:
         try:
-            value = int(size[:-1])
+            int(size[:-1])
         except ValueError:
             valid = False
 
@@ -123,7 +125,7 @@ def valid_cidr(subnet):
         netmask = int(s_mask)
         if not 1 <= netmask <= 32:
             raise ValueError
-        ip_as_long = struct.unpack('!L', socket.inet_aton(ip))[0]
+        struct.unpack('!L', socket.inet_aton(ip))[0]
     except ValueError:
         # netmask is invalid
         return False
@@ -184,11 +186,10 @@ def get_ip_address(iscsi_network):
     required subnet
     """
 
-    ip = ''
     subnet = netaddr.IPSet([iscsi_network])
-    target_ip_range = [str(ip) for ip in subnet]   # list where each element
-                                                   # is an ip address
+    target_ip_range = [str(ip) for ip in subnet]  # list where each element is an ip address
 
+    ip = ''
     for local_ip in ipv4_address():
         if local_ip in target_ip_range:
             ip = local_ip
@@ -209,10 +210,9 @@ def convert_2_bytes(disk_size):
     power = [2, 3, 4]
     unit = disk_size[-1].upper()
     offset = size_suffixes.index(unit)
-    value = int(disk_size[:-1])     # already validated, so no need for
-                                    # try/except clause
+    value = int(disk_size[:-1])  # already validated, so no need for try/except clause
 
-    _bytes = value*(1024**power[offset])
+    _bytes = value * (1024 ** power[offset])
 
     return _bytes
 
@@ -293,8 +293,6 @@ def valid_rpm(in_rpm):
     :param in_rpm: a dict of name, version and release to check against
     :return: bool representing whether the rpm is valid or not
     """
-    rpm_state = False
-
     ts = rpm.TransactionSet()
     mi = ts.dbMatch('name', in_rpm['name'])
     if mi:
@@ -321,8 +319,7 @@ def encryption_available():
     :return: (bool) True if all keys are present, else False
     """
     encryption_keys = list([settings.config.priv_key,
-                           settings.config.pub_key])
-
+                            settings.config.pub_key])
 
     config_dir = settings.config.ceph_config_dir
     keys = [os.path.join(config_dir, key_name)
@@ -330,17 +327,19 @@ def encryption_available():
 
     return all([os.path.exists(key) for key in keys])
 
+
 def gen_control_string(controls):
     """
     Generate a kernel control string from a given dictionary
     of control arguments.
     :return: control string (str)
     """
-    control=''
-    for key,value in controls.iteritems():
+    control = ''
+    for key, value in controls.iteritems():
         if value is not None:
             control += "{}={},".format(key, value)
     return None if control == '' else control[:-1]
+
 
 class ListComparison(object):
 
@@ -379,4 +378,3 @@ class ListComparison(object):
         if len(removals) > 0:
             self.changed = True
         return list(removals)
-

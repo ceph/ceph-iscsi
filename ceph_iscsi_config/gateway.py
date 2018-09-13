@@ -36,7 +36,6 @@ class GWTarget(object):
             all_controls[k] = v
         return all_controls
 
-
     def __init__(self, logger, iqn, gateway_ip_list, enable_portal=True):
         """
         Instantiate the class
@@ -49,10 +48,8 @@ class GWTarget(object):
         self.error = False
         self.error_msg = ''
 
-        self.enable_portal = enable_portal      # boolean to trigger portal
-                                                # IP creation
-
-        self.logger = logger                    # logger object
+        self.enable_portal = enable_portal  # boolean to trigger portal IP creation
+        self.logger = logger                # logger object
 
         self.iqn = iqn
 
@@ -161,7 +158,6 @@ class GWTarget(object):
                 self.create_tpg(ip)
         self.update_tpg_controls()
 
-
     def update_tpg_controls(self):
         # Build our set of control overrides
         controls = {}
@@ -177,8 +173,10 @@ class GWTarget(object):
                 tpg.set_parameter('MaxOutstandingR2T', str(controls['max_outstanding_r2t']))
                 tpg.set_parameter('FirstBurstLength', str(controls['first_burst_length']))
                 tpg.set_parameter('MaxBurstLength', str(controls['max_burst_length']))
-                tpg.set_parameter('MaxRecvDataSegmentLength', str(controls['max_recv_data_segment_length']))
-                tpg.set_parameter('MaxXmitDataSegmentLength', str(controls['max_xmit_data_segment_length']))
+                tpg.set_parameter('MaxRecvDataSegmentLength',
+                                  str(controls['max_recv_data_segment_length']))
+                tpg.set_parameter('MaxXmitDataSegmentLength',
+                                  str(controls['max_xmit_data_segment_length']))
         except RTSLibError as err:
             self.error = True
             self.error_msg = "Failed to update TPG control parameters - {}".format(err)
@@ -242,15 +240,13 @@ class GWTarget(object):
             self.error = True
             self.error_msg = "Unable to delete target - {}".format(err)
 
-
-
     def create_tpg(self, ip):
 
         try:
             tpg = TPG(self.target)
 
             # Use initiator name based ACL by default.
-            tpg.set_attribute('authentication', '0');
+            tpg.set_attribute('authentication', '0')
 
             self.logger.debug("(Gateway.create_tpg) Added tpg for portal "
                               "ip {}".format(ip))
@@ -282,7 +278,6 @@ class GWTarget(object):
             self.logger.info("(Gateway.create_tpg) created TPG '{}' "
                              "for target iqn '{}'".format(tpg.tag,
                                                           self.iqn))
-
 
     def create_target(self):
         """
@@ -323,7 +318,6 @@ class GWTarget(object):
             self.changes_made = True
             self.logger.info("(Gateway.create_target) created an iscsi target "
                              "with iqn of '{}'".format(self.iqn))
-
 
     def load_config(self):
         """
@@ -384,9 +378,9 @@ class GWTarget(object):
         try:
             alua_tpg = alua_create_group(settings.config.alua_failover_type,
                                          tpg, stg_object, is_owner)
-        except CephiSCSIInval as err:
+        except CephiSCSIInval:
             raise
-        except RTSLibError as err:
+        except RTSLibError:
             self.logger.info("ALUA group id {} for stg obj {} lun {} "
                              "already made".format(tpg.tag, stg_object, lun))
             group_name = alua_format_group_name(tpg,
@@ -404,9 +398,9 @@ class GWTarget(object):
             # were not able to bind to a lun last time.
 
         self.logger.info("Setup group {} for {} on tpg {} (state {}, owner {}, "
-                         "failover type {})".format(alua_tpg.name,
-                         stg_object.name, tpg.tag, alua_tpg.alua_access_state,
-                         is_owner, alua_tpg.alua_access_type))
+                         "failover type {})".format(alua_tpg.name, stg_object.name,
+                                                    tpg.tag, alua_tpg.alua_access_state,
+                                                    is_owner, alua_tpg.alua_access_type))
 
         self.logger.debug("Setting Luns tg_pt_gp to {}".format(alua_tpg.name))
         lun.alua_tg_pt_gp_name = alua_tpg.name
@@ -540,7 +534,7 @@ class GWTarget(object):
                 # gateway already defined, so check that the IP list it has
                 # matches the current request
                 gw_details = config.config['gateways'][local_gw]
-                if cmp(gw_details['gateway_ip_list'], self.gateway_ip_list) != 0:
+                if gw_details['gateway_ip_list'] != self.gateway_ip_list:
                     inactive_portal_ip = list(self.gateway_ip_list)
                     inactive_portal_ip.remove(self.active_portal_ip)
                     gw_details['tpgs'] = len(self.tpg_list)
@@ -617,5 +611,3 @@ class GWTarget(object):
                     config.del_item('gateways', 'created')
 
                 config.commit()
-
-
