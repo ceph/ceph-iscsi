@@ -10,11 +10,10 @@ from gwcli.node import UIGroup, UINode
 
 from gwcli.client import Clients
 
-from gwcli.utils import (human_size, console_message, response_message,
-                         GatewayAPIError, this_host, APIRequest,
-                         valid_snapshot_name, get_config)
+from gwcli.utils import (console_message, response_message, GatewayAPIError,
+                         this_host, APIRequest, valid_snapshot_name, get_config)
 
-from ceph_iscsi_config.utils import valid_size, convert_2_bytes
+from ceph_iscsi_config.utils import valid_size, convert_2_bytes, human_size
 
 import ceph_iscsi_config.settings as settings
 
@@ -175,7 +174,7 @@ class Disks(UIGroup):
         """
         # NB the text above is shown on a help create request in the CLI
 
-        if '.' in pool:
+        if pool and '.' in pool:
             # shorthand version of the command
             self.logger.debug("user provided pool.image format request")
 

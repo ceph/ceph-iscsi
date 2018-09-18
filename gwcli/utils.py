@@ -4,8 +4,6 @@ import socket
 import requests
 from requests import Response
 import sys
-import rados
-import rbd
 import re
 import os
 import subprocess
@@ -15,8 +13,7 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (get_ip, gen_file_hash, valid_size,
-                                     convert_2_bytes)
+from ceph_iscsi_config.utils import (get_ip, gen_file_hash)
 
 
 __author__ = 'Paul Cuzner'
@@ -34,15 +31,6 @@ def readcontents(filename):
     with open(filename, 'r') as input_file:
         content = input_file.read().rstrip()
     return content
-
-
-def human_size(num):
-    for unit, precision in [('b', 0), ('K', 0), ('M', 0), ('G', 0), ('T', 1),
-                            ('P', 1), ('E', 2), ('Z', 2)]:
-        if num % 1024 != 0:
-            return "{0:.{1}f}{2}".format(num, precision, unit)
-        num /= 1024.0
-    return "{0:.2f}{1}".format(num, "Y")
 
 
 def this_host():
@@ -177,145 +165,6 @@ def valid_gateway(gw_name, gw_ip, config):
 
     # At this point the gateway seems valid
     return "ok"
-
-
-def rbd_size(pool, image, conf=None):
-    """
-    return the size of a given rbd from the local ceph cluster
-    :param pool: (str) pool name
-    :param image: (str) rbd image name
-    :return: (int) size in bytes of the rbd
-    """
-
-    if conf is None:
-        conf = settings.config.cephconf
-
-    with rados.Rados(conffile=conf) as cluster:
-        with cluster.open_ioctx(pool) as ioctx:
-            with rbd.Image(ioctx, image) as rbd_image:
-                size = rbd_image.size()
-    return size
-
-
-def rados_pools(conf=None):
-    """
-    return a list of pools in the local ceph cluster
-    :param conf: (str) or None
-    :return: (list) of pool names
-    """
-
-    if conf is None:
-        conf = settings.config.cephconf
-
-    with rados.Rados(conffile=conf) as cluster:
-        pool_list = cluster.list_pools()
-
-    return pool_list
-
-
-def valid_disk(**kwargs):
-    """
-    determine whether the given image info is valid for a disk operation
-
-    :param image_id: (str) <pool>.<image> format
-    :return: (str) either 'ok' or an error description
-    """
-
-    mode_vars = {"create": ['pool', 'image', 'size', 'count'],
-                 "resize": ['pool', 'image', 'size'],
-                 "reconfigure": ['pool', 'image', 'max_data_area_mb'],
-                 "delete": ['pool', 'image']}
-
-    config = get_config()
-    if not config:
-        return "Unable to query the local API for the current config"
-
-    if 'mode' in kwargs.keys():
-        mode = kwargs['mode']
-    else:
-        mode = None
-
-    if mode in mode_vars:
-        if not all(x in kwargs for x in mode_vars[mode]):
-            return ("{} request must contain the following "
-                    "variables: ".format(mode,
-                                         ','.join(mode_vars[mode])))
-    else:
-        return "disk operation mode '{}' is invalid".format(mode)
-
-    disk_key = "{}.{}".format(kwargs['pool'], kwargs['image'])
-
-    if mode in ['create', 'resize']:
-
-        if not valid_size(kwargs['size']):
-            return "Size is invalid"
-
-        elif kwargs['pool'] not in rados_pools():
-            return "pool name is invalid"
-
-    if mode == 'create':
-
-        if kwargs['count'].isdigit():
-            if not 1 <= int(kwargs['count']) <= 10:
-                return "invalid count specified, must be an integer (1-10)"
-        else:
-            return "invalid count specified, must be an integer (1-10)"
-
-        if kwargs['count'] == '1':
-            new_disks = {disk_key}
-        else:
-            limit = int(kwargs['count']) + 1
-            new_disks = set(['{}{}'.format(disk_key, ctr)
-                             for ctr in range(1, limit)])
-
-        if any(new_disk in config['disks'] for new_disk in new_disks):
-            return ("at least one rbd image(s) with that name/prefix is "
-                    "already defined")
-
-        gateways_defined = len([key for key in config['gateways']
-                               if isinstance(config['gateways'][key],
-                                             dict)])
-        if gateways_defined < settings.config.minimum_gateways:
-            return ("disks can not be added until at least {} gateways "
-                    "are defined".format(settings.config.minimum_gateways))
-
-    if mode in ["resize", "delete", "reconfigure"]:
-        # disk must exist in the config
-        if disk_key not in config['disks']:
-            return ("rbd {}/{} is not defined to the "
-                    "configuration".format(kwargs['pool'],
-                                           kwargs['image']))
-
-    if mode == 'resize':
-
-        size = kwargs['size'].upper()
-        current_size = rbd_size(kwargs['pool'], kwargs['image'])
-        if convert_2_bytes(size) <= current_size:
-            return ("resize value must be larger than the "
-                    "current size ({}/{})".format(human_size(current_size),
-                                                  current_size))
-
-    if mode == 'reconfigure':
-
-        max_data_area_mb = kwargs['max_data_area_mb']
-        if max_data_area_mb and not str(max_data_area_mb).isdigit():
-            return ("max_data_area_mb must be an integer in MiB")
-
-    if mode == 'delete':
-
-        # disk must *not* be allocated to a client in the config
-        allocation_list = []
-        for client_iqn in config['clients']:
-            client_metadata = config['clients'][client_iqn]
-            if disk_key in client_metadata['luns']:
-                allocation_list.append(client_iqn)
-
-        if allocation_list:
-            return ("Unable to delete {}. Allocated "
-                    "to: {}".format(disk_key,
-                                    ','.join(allocation_list)))
-
-    return 'ok'
 
 
 def get_other_gateways(gw_objects):

@@ -6,6 +6,7 @@ import signal
 import json
 import logging
 import logging.handlers
+from logging.handlers import RotatingFileHandler
 import ssl
 import OpenSSL
 import threading
@@ -33,8 +34,7 @@ from ceph_iscsi_config.utils import (get_ip, ipv4_addresses, gen_file_hash,
                                      valid_rpm, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
-                         valid_disk, valid_client, valid_snapshot_name,
-                         GatewayAPIError)
+                         valid_client, valid_snapshot_name, GatewayAPIError)
 
 app = Flask(__name__)
 
@@ -619,12 +619,6 @@ def disk(image_id):
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
 
-    disk_regex = re.compile("[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
-    if not disk_regex.search(image_id):
-        logger.debug("disk request rejected due to invalid image name")
-        return jsonify(message="image id format is invalid - must be "
-                               "pool.image_name"), 400
-
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
 
@@ -665,8 +659,9 @@ def disk(image_id):
 
         pool, image_name = image_id.split('.')
 
-        disk_usable = valid_disk(pool=pool, image=image_name, size=size,
-                                 mode=mode, count=count, max_data_area_mb=max_data_area_mb)
+        disk_usable = LUN.valid_disk(config, logger, pool=pool,
+                                     image=image_name, size=size, mode=mode,
+                                     count=count, max_data_area_mb=max_data_area_mb)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
@@ -697,8 +692,8 @@ def disk(image_id):
     else:
         # this is a DELETE request
         pool_name, image_name = image_id.split('.')
-        disk_usable = valid_disk(mode='delete', pool=pool_name,
-                                 image=image_name)
+        disk_usable = LUN.valid_disk(config, logger, mode='delete',
+                                     pool=pool_name, image=image_name)
 
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
@@ -757,11 +752,12 @@ def _disk(image_id):
                       image_name,
                       str(request.form['size']),
                       str(request.form['owner']))
-            lun.max_data_area_mb = request.form.get('max_data_area_mb', None)
             if lun.error:
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
+
+            lun.max_data_area_mb = request.form.get('max_data_area_mb', None)
 
             if mode == 'create' and len(config.config['disks']) >= 256:
                 logger.error("LUN alloc problem - too many LUNs")
@@ -2041,7 +2037,9 @@ if __name__ == '__main__':
     syslog_handler.setFormatter(syslog_format)
 
     # file target - more verbose logging for diagnostics
-    file_handler = logging.FileHandler('/var/log/rbd-target-api.log', mode='w')
+    file_handler = RotatingFileHandler('/var/log/rbd-target-api.log',
+                                       maxBytes=5242880,
+                                       backupCount=7)
     file_handler.setLevel(logging.DEBUG)
     file_format = logging.Formatter(
         "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "

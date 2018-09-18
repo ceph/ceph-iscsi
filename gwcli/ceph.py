@@ -6,8 +6,9 @@ import rados
 import glob
 import os
 
-from gwcli.utils import human_size, console_message, os_cmd
+from gwcli.utils import console_message, os_cmd
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.utils import human_size
 
 
 class CephGroup(UIGroup):

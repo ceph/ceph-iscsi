@@ -2,10 +2,11 @@
 
 from gwcli.node import UIGroup, UINode
 
-from gwcli.utils import human_size, response_message, valid_iqn, APIRequest
+from gwcli.utils import response_message, valid_iqn, APIRequest
 
 from ceph_iscsi_config.client import CHAP
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.utils import human_size
 
 import rtslib_fb.root as root
 
