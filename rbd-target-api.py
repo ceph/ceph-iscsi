@@ -34,8 +34,7 @@ from ceph_iscsi_config.utils import (get_ip, ipv4_addresses, gen_file_hash,
                                      valid_rpm, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
-                         valid_disk, valid_client, valid_snapshot_name,
-                         GatewayAPIError)
+                         valid_client, valid_snapshot_name, GatewayAPIError)
 
 app = Flask(__name__)
 
@@ -660,8 +659,9 @@ def disk(image_id):
 
         pool, image_name = image_id.split('.')
 
-        disk_usable = valid_disk(pool=pool, image=image_name, size=size,
-                                 mode=mode, count=count, max_data_area_mb=max_data_area_mb)
+        disk_usable = LUN.valid_disk(config, logger, pool=pool,
+                                     image=image_name, size=size, mode=mode,
+                                     count=count, max_data_area_mb=max_data_area_mb)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
@@ -692,8 +692,8 @@ def disk(image_id):
     else:
         # this is a DELETE request
         pool_name, image_name = image_id.split('.')
-        disk_usable = valid_disk(mode='delete', pool=pool_name,
-                                 image=image_name)
+        disk_usable = LUN.valid_disk(config, logger, mode='delete',
+                                     pool=pool_name, image=image_name)
 
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
