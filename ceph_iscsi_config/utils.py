@@ -6,6 +6,7 @@ import netifaces
 import struct
 import subprocess
 import rados
+import rbd
 import datetime
 import hashlib
 import os
@@ -198,6 +199,15 @@ def get_ip_address(iscsi_network):
     return ip
 
 
+def human_size(num):
+    for unit, precision in [('b', 0), ('K', 0), ('M', 0), ('G', 0), ('T', 1),
+                            ('P', 1), ('E', 2), ('Z', 2)]:
+        if num % 1024 != 0:
+            return "{0:.{1}f}{2}".format(num, precision, unit)
+        num /= 1024.0
+    return "{0:.2f}{1}".format(num, "Y")
+
+
 def convert_2_bytes(disk_size):
 
     try:
@@ -249,6 +259,40 @@ def get_pool_name(conf=None, pool_id=0):
         pool_name = cluster.pool_reverse_lookup(pool_id)
 
     return pool_name
+
+
+def get_rbd_size(pool, image, conf=None):
+    """
+    return the size of a given rbd from the local ceph cluster
+    :param pool: (str) pool name
+    :param image: (str) rbd image name
+    :return: (int) size in bytes of the rbd
+    """
+
+    if conf is None:
+        conf = settings.config.cephconf
+
+    with rados.Rados(conffile=conf) as cluster:
+        with cluster.open_ioctx(pool) as ioctx:
+            with rbd.Image(ioctx, image) as rbd_image:
+                size = rbd_image.size()
+    return size
+
+
+def get_pools(conf=None):
+    """
+    return a list of pools in the local ceph cluster
+    :param conf: (str) or None
+    :return: (list) of pool names
+    """
+
+    if conf is None:
+        conf = settings.config.cephconf
+
+    with rados.Rados(conffile=conf) as cluster:
+        pool_list = cluster.list_pools()
+
+    return pool_list
 
 
 def get_time():

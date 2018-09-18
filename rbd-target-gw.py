@@ -5,6 +5,7 @@
 import signal
 import logging
 import logging.handlers
+from logging.handlers import RotatingFileHandler
 import netifaces
 import subprocess
 import time
@@ -405,7 +406,9 @@ if __name__ == '__main__':
     syslog_handler.setFormatter(syslog_format)
 
     # file target - more verbose logging for diagnostics
-    file_handler = logging.FileHandler('/var/log/rbd-target-gw.log', mode='w')
+    file_handler = RotatingFileHandler('/var/log/rbd-target-gw.log',
+                                       maxBytes=5242880,
+                                       backupCount=7)
     file_handler.setLevel(logging.DEBUG)
     file_format = logging.Formatter("%(asctime)s [%(levelname)8s] - %(message)s")
     file_handler.setFormatter(file_format)
