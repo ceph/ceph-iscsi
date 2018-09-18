@@ -2,6 +2,7 @@
 
 import rados
 import rbd
+import re
 
 from time import sleep
 from socket import gethostname
@@ -13,8 +14,9 @@ import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
-                                     get_pool_id, ipv4_addresses,
-                                     this_host, CephiSCSIError)
+                                     valid_size, get_pool_id, ipv4_addresses,
+                                     get_pools, get_rbd_size, this_host,
+                                     human_size, CephiSCSIError)
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -732,6 +734,114 @@ class LUN(object):
                     return
 
                 break
+
+    @staticmethod
+    def valid_disk(ceph_iscsi_config, logger, **kwargs):
+        """
+        determine whether the given image info is valid for a disk operation
+
+        :param ceph_iscsi_config: Config object
+        :param logger: logger object
+        :param image_id: (str) <pool>.<image> format
+        :return: (str) either 'ok' or an error description
+        """
+
+        mode_vars = {"create": ['pool', 'image', 'size', 'count'],
+                     "resize": ['pool', 'image', 'size'],
+                     "reconfigure": ['pool', 'image', 'max_data_area_mb'],
+                     "delete": ['pool', 'image']}
+
+        if 'mode' in kwargs.keys():
+            mode = kwargs['mode']
+        else:
+            mode = None
+
+        if mode in mode_vars:
+            if not all(x in kwargs for x in mode_vars[mode]):
+                return ("{} request must contain the following "
+                        "variables: ".format(mode,
+                                             ','.join(mode_vars[mode])))
+        else:
+            return "disk operation mode '{}' is invalid".format(mode)
+
+        config = ceph_iscsi_config.config
+
+        disk_key = "{}.{}".format(kwargs['pool'], kwargs['image'])
+
+        if mode in ['create', 'resize']:
+
+            if not valid_size(kwargs['size']):
+                return "Size is invalid"
+
+            elif kwargs['pool'] not in get_pools():
+                return "pool name is invalid"
+
+        if mode == 'create':
+            disk_regex = re.compile("[a-zA-Z0-9\-]+")
+            if not disk_regex.search(kwargs['image']):
+                return "Invalid image name"
+
+            if kwargs['count'].isdigit():
+                if not 1 <= int(kwargs['count']) <= 10:
+                    return "invalid count specified, must be an integer (1-10)"
+            else:
+                return "invalid count specified, must be an integer (1-10)"
+
+            if kwargs['count'] == '1':
+                new_disks = {disk_key}
+            else:
+                limit = int(kwargs['count']) + 1
+                new_disks = set(['{}{}'.format(disk_key, ctr)
+                                 for ctr in range(1, limit)])
+
+            if any(new_disk in config['disks'] for new_disk in new_disks):
+                return ("at least one rbd image(s) with that name/prefix is "
+                        "already defined")
+
+            gateways_defined = len([key for key in config['gateways']
+                                   if isinstance(config['gateways'][key],
+                                                 dict)])
+            if gateways_defined < settings.config.minimum_gateways:
+                return ("disks can not be added until at least {} gateways "
+                        "are defined".format(settings.config.minimum_gateways))
+
+        if mode in ["resize", "delete", "reconfigure"]:
+            # disk must exist in the config
+            if disk_key not in config['disks']:
+                return ("rbd {}/{} is not defined to the "
+                        "configuration".format(kwargs['pool'],
+                                               kwargs['image']))
+
+        if mode == 'resize':
+
+            size = kwargs['size'].upper()
+            current_size = get_rbd_size(kwargs['pool'], kwargs['image'])
+            if convert_2_bytes(size) <= current_size:
+                return ("resize value must be larger than the "
+                        "current size ({}/{})".format(human_size(current_size),
+                                                      current_size))
+
+        if mode == 'reconfigure':
+
+            max_data_area_mb = kwargs['max_data_area_mb']
+            if max_data_area_mb and not str(max_data_area_mb).isdigit():
+                return ("max_data_area_mb must be an integer in MiB")
+
+        if mode == 'delete':
+
+            # disk must *not* be allocated to a client in the config
+            allocation_list = []
+            for client_iqn in config['clients']:
+                client_metadata = config['clients'][client_iqn]
+                if disk_key in client_metadata['luns']:
+                    allocation_list.append(client_iqn)
+
+            if allocation_list:
+                return ("Unable to delete {}. Allocated "
+                        "to: {}".format(disk_key,
+                                        ','.join(allocation_list)))
+
+        return 'ok'
 
     @staticmethod
     def set_owner(gateways):
