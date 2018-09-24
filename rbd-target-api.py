@@ -2004,7 +2004,8 @@ def main():
     # request makes further api requests
     app.run(host='0.0.0.0',
             port=settings.config.api_port,
-            debug=True,
+            debug=settings.config.debug,
+            use_evalex=False,
             threaded=True,
             use_reloader=False,
             ssl_context=context)
