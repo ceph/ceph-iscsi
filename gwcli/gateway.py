@@ -115,7 +115,6 @@ class ISCSIRoot(UIRoot):
 
     def export_ansible(self, config):
 
-        this_gw = this_host()
         ansible_vars = []
         ansible_vars.append("seed_monitor: {}".format(self.ceph.local_ceph.healthy_mon))
         ansible_vars.append("cluster_name: {}".format(settings.config.cluster_name))
@@ -124,7 +123,7 @@ class ISCSIRoot(UIRoot):
         ansible_vars.append("perform_system_checks: true")
         ansible_vars.append('gateway_iqn: "{}"'.format(config['gateways']['iqn']))
         ansible_vars.append('gateway_ip_list: "{}"'.format(
-            ",".join(config['gateways']['ip_list'])))
+            ",".join(config['gateways'].get('ip_list', []))))
         ansible_vars.append("# rbd device definitions")
         ansible_vars.append("rbd_devices:")
 
@@ -132,11 +131,11 @@ class ISCSIRoot(UIRoot):
                          "host: '{}', state: 'present' }}")
 
         for disk in self.disks.children:
-
             ansible_vars.append(disk_template.format(disk.pool,
                                                      disk.image,
                                                      disk.size_h,
-                                                     this_gw))
+                                                     disk.owner))
+
         ansible_vars.append("# client connections")
         ansible_vars.append("client_connections:")
         client_template = ("  - {{ client: '{}', image_list: '{}', "
