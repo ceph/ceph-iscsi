@@ -718,9 +718,10 @@ class LUN(GWObject):
         :return: (str) either 'ok' or an error description
         """
 
+        # create can also pass optional controls dict
         mode_vars = {"create": ['pool', 'image', 'size', 'count'],
                      "resize": ['pool', 'image', 'size'],
-                     "reconfigure": ['pool', 'image', 'max_data_area_mb'],
+                     "reconfigure": ['pool', 'image', 'controls'],
                      "delete": ['pool', 'image']}
 
         if 'mode' in kwargs.keys():
@@ -793,11 +794,13 @@ class LUN(GWObject):
                         "current size ({}/{})".format(human_size(current_size),
                                                       current_size))
 
-        if mode == 'reconfigure':
+        if mode in ['create', 'reconfigure']:
 
-            max_data_area_mb = kwargs['max_data_area_mb']
-            if max_data_area_mb and not str(max_data_area_mb).isdigit():
-                return ("max_data_area_mb must be an integer in MiB")
+            try:
+                settings.Settings.normalize_controls(kwargs['controls'],
+                                                     LUN.SETTINGS)
+            except ValueError as err:
+                return(err)
 
         if mode == 'delete':
 
