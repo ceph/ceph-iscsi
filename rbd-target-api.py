@@ -179,7 +179,8 @@ def get_sys_info(query_type=None):
 def _parse_target_controls(controls_json):
     controls = {}
     raw_controls = json.loads(controls_json)
-    for k in settings.Settings.GATEWAY_SETTINGS:
+    settings_list = GWTarget.SETTINGS
+    for k in settings_list:
         if k in raw_controls:
             value = raw_controls.get(k, '')
             if value:
@@ -257,12 +258,12 @@ def target(target_iqn=None):
         config.refresh()
         return jsonify(message="Target defined successfully"), 200
 
-    target.manage('reconfigure')
-    if target.error:
+    try:
+        target.commit_controls()
+    except CephiSCSIError as err:
         logger.error("Failure during gateway 'reconfigure' processing")
         return jsonify(message="iscsi target 'reconfigure' process failed "
-                               "for {} - {}".format(target_iqn,
-                                                    target.error_msg)), 500
+                               "for {} - {}".format(target_iqn, err)), 500
     config.refresh()
 
     # This is a reconfigure operation, so first confirm the gateways
@@ -290,16 +291,9 @@ def _target(target_iqn=None):
         return jsonify(message="Unexpected mode provided for {} - "
                                "{}".format(target_iqn, mode)), 500
 
-    controls = {}
-    if 'controls' in request.form:
-        try:
-            controls = _parse_target_controls(request.form['controls'])
-        except ValueError as err:
-            logger.error("Unexpected or invalid controls")
-            return jsonify(message="Unexpected or invalid controls - "
-                                   "{}".format(err)), 500
-        logger.debug("controls {}".format(controls))
-
+    # The caller has already committed the new controls so we do not need
+    # to parse and set them here. The refresh and GWTarget calls will give
+    # us the updated values.
     config.refresh()
 
     target = GWTarget(logger, str(target_iqn), [])
@@ -308,9 +302,6 @@ def _target(target_iqn=None):
         return jsonify(message="GWTarget problem - "
                                "{}".format(target.error_msg)), 500
 
-    for k, v in controls.iteritems():
-        setattr(target, k, v)
-
     if target.exists():
         target.load_config()
         if target.error:
@@ -318,11 +309,12 @@ def _target(target_iqn=None):
             return jsonify(message="Unable to refresh tpg state - "
                                    "{}".format(target.error_msg)), 500
 
-    target.update_tpg_controls()
-    if target.error:
+    try:
+        target.update_tpg_controls()
+    except RTSLibError as err:
         logger.error("Unable to update tpg control overrides")
         return jsonify(message="Unable to update tpg control overrides - "
-                               "{}".format(target.error_msg)), 500
+                               "{}".format(err)), 500
 
     # re-apply client control overrides
     client_errors = False
@@ -998,9 +990,10 @@ def _reconfigure(image_id, **kwargs):
                 break
 
     if not lun.error:
-        lun.update_config(True)
-        if lun.error:
-            resp_text = "LUN reconfigure failure: {}".format(lun.error_msg)
+        try:
+            lun.commit_controls()
+        except CephiSCSIError as err:
+            resp_text = "LUN reconfigure failure: {}".format(err)
             resp_code = 500
 
     # activate disk
