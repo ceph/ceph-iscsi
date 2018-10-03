@@ -22,6 +22,40 @@ class Settings(object):
     _int_regex = re.compile("^[0-9]+")
 
     @staticmethod
+    def normalize_controls(raw_controls, settings_list):
+        """
+        Convert a controls dictionary from a json converted or a user input
+        dictionary where the values are strings.
+        """
+        controls = {}
+
+        for key, raw_value in raw_controls.iteritems():
+            if key not in settings_list:
+                raise ValueError("Supported controls: {}".format(",".join(settings_list)))
+
+            if not raw_value:
+                # Use the default/reset.
+                controls[key] = None
+                continue
+
+            # Do not use normalize() because if the user inputs invalid
+            # values we want to pass up more detailed errors.
+            if key in Settings.LIO_YES_NO_SETTINGS:
+                try:
+                    value = Settings.convert_lio_yes_no(raw_value)
+                except ValueError:
+                    raise ValueError("expected yes or no for {}".format(key))
+            else:
+                try:
+                    value = int(raw_value)
+                except ValueError:
+                    raise ValueError("expected integer for {}".format(key))
+
+            controls[key] = value
+
+        return controls
+
+    @staticmethod
     def convert_lio_yes_no(value):
         """
         Convert true/false/yes/no to boolean
