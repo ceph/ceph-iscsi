@@ -804,110 +804,19 @@ def _disk(image_id):
 
             lun = LUN(logger, pool_name, image_name, size, disk['owner'])
             if mode == 'deactivate':
-                so = lun.lio_stg_object()
-                if not so:
-                    logger.error("LUN {} already deactivated".format(image_id))
-                    return jsonify(message="LUN already deactivated"), 200
-
-                for alun in so.attached_luns:
-                    for mlun in alun.mapped_luns:
-                        node_acl = mlun.parent_nodeacl
-
-                for attached_lun in so.attached_luns:
-                    for node_acl in attached_lun.parent_tpg.node_acls:
-                        if node_acl.session and \
-                                node_acl.session.get('state', '').upper() == 'LOGGED_IN':
-                            logger.error("LUN {} in-use".format(image_id))
-                            return jsonify(message="LUN deactivate failure - in-use"), 500
-
-                lun.remove_dev_from_lio()
-                if lun.error:
-                    logger.error("LUN deactivate problem - "
-                                 "{}".format(lun.error_msg))
-                    return jsonify(message="LUN deactivate failure"), 500
+                try:
+                    lun.deactivate()
+                except CephiSCSIError as err:
+                    return jsonify(message="deactivate failed - {}".format(err)), 500
 
                 return jsonify(message="LUN deactivated"), 200
-
             elif mode == 'activate':
-                wwn = disk.get('wwn', None)
-                if not wwn:
-                    logger.error("LUN {} missing wwn".format(image_id))
-                    return jsonify(message="LUN activate failure"), 500
-
-                # re-add backend storage object
-                so = lun.lio_stg_object()
-                if not so:
-                    lun.add_dev_to_lio(wwn)
-                    if lun.error:
-                        logger.error("LUN activate problem - "
-                                     "{}".format(lun.error_msg))
-                        return jsonify(message="LUN activate failure"), 500
-
-                # re-add LUN to target
-                iqn = config.config['gateways']['iqn']
-                ip_list = config.config['gateways']['ip_list']
-
-                # Add the mapping for the lun to ensure the block device is
-                # present on all TPG's
-                gateway = GWTarget(logger, iqn, ip_list)
-
-                gateway.manage('map')
-                if gateway.error:
-                    logger.error("LUN mapping failed : "
-                                 "{}".format(gateway.error_msg))
-                    return jsonify(message="LUN map failed"), 500
-
-                # re-map LUN to hosts
-                client_errors = False
-                for client_iqn in config.config['clients']:
-                    client_metadata = config.config['clients'][client_iqn]
-                    if client_metadata.get('group_name', ''):
-                        continue
-
-                    image_list = client_metadata['luns'].keys()
-                    if image_id not in image_list:
-                        continue
-
-                    client_chap = CHAP(client_metadata['auth']['chap'])
-                    chap_str = client_chap.chap_str
-                    if client_chap.error:
-                        logger.debug("Password decode issue : "
-                                     "{}".format(client_chap.error_msg))
-                        halt("Unable to decode password for "
-                             "{}".format(client_iqn))
-
-                    client = GWClient(logger,
-                                      client_iqn,
-                                      image_list,
-                                      chap_str)
-                    client.manage('present')
-                    if client.error:
-                        logger.error("LUN mapping failed "
-                                     "{} - {}".format(client_iqn,
-                                                      client.error_msg))
-                        client_errors = True
-
-                # re-map LUN to host groups
-                for group_name in config.config['groups']:
-                    host_group = config.config['groups'][group_name]
-                    members = host_group.get('members')
-                    disks = host_group.get('disks').keys()
-                    if image_id not in disks:
-                        continue
-
-                    group = Group(logger, group_name, members, disks)
-                    group.apply()
-                    if group.error:
-                        logger.error("LUN mapping failed "
-                                     "{} - {}".format(group_name,
-                                                      group.error_msg))
-                        client_errors = True
-
-                if client_errors:
-                    return jsonify(message="LUN map failed"), 500
+                try:
+                    lun.activate()
+                except CephiSCSIError as err:
+                    return jsonify(message="activate failed - {}".format(err)), 500
 
                 return jsonify(message="LUN activated"), 200
-
         elif mode == 'reconfigure':
             resp_text, resp_code = _reconfigure(image_id, controls)
             if resp_code == 200:
