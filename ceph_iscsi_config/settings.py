@@ -32,7 +32,7 @@ class Settings(object):
     LIO_YES_NO_SETTINGS = ["immediate_data", "initial_r2t"]
 
     _float_regex = re.compile("^[0-9]*\.{1}[0-9]$")
-    _int_regex = re.compile("^[0-9]+")
+    _int_regex = re.compile("^[0-9]+$")
 
     @staticmethod
     def convert_lio_yes_no(value):
