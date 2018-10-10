@@ -176,28 +176,9 @@ def get_sys_info(query_type=None):
         return jsonify(message="Unknown /sysinfo query"), 404
 
 
-def _parse_target_controls(controls_json):
-    controls = {}
-    raw_controls = json.loads(controls_json)
-    settings_list = GWTarget.SETTINGS
-    for k in settings_list:
-        if k in raw_controls:
-            value = raw_controls.get(k, '')
-            if value:
-                if k in settings.Settings.LIO_YES_NO_SETTINGS:
-                    try:
-                        value = settings.Settings.convert_lio_yes_no(value)
-                    except ValueError:
-                        raise ValueError("expected yes or no for {}".format(k))
-                else:
-                    try:
-                        value = str(int(value))
-                    except ValueError:
-                        raise ValueError("expected integer for {}".format(k))
-                controls[k] = value
-            else:
-                controls[k] = None
-    return controls
+def _parse_controls(controls_json, settings_list):
+    return settings.Settings.normalize_controls(json.loads(controls_json),
+                                                settings_list)
 
 
 @app.route('/api/target/<target_iqn>', methods=['PUT'])
@@ -227,7 +208,8 @@ def target(target_iqn=None):
     controls = {}
     if 'controls' in request.form:
         try:
-            controls = _parse_target_controls(request.form['controls'])
+            controls = _parse_controls(request.form['controls'],
+                                       GWTarget.SETTINGS)
         except ValueError as err:
             logger.error("Unexpected or invalid controls")
             return jsonify(message="Unexpected or invalid controls - "
