@@ -581,14 +581,13 @@ def disk(image_id):
     :param pool: (str) the pool name the rbd image will be in
     :param count: (str) the number of images will be created
     :param owner: (str) the owner of the rbd image
-    :param max_data_area_mb: (str) size of the kernel ring buffer that holds
-                              SCSI command's data.
+    :param controls: (JSON dict) valid control overrides
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
         -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
-    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd -dmax_data_area_mb=32
-        -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
+    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd
+        -d controls='{max_data_area_mb=32}' -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
@@ -629,13 +628,23 @@ def disk(image_id):
         size = request.form.get('size')
         mode = request.form.get('mode')
         count = request.form.get('count', '1')
-        max_data_area_mb = request.form.get('max_data_area_mb', None)
+
+        controls = {}
+        if 'controls' in request.form:
+            try:
+                controls = _parse_controls(request.form['controls'],
+                                           LUN.SETTINGS)
+            except ValueError as err:
+                logger.error("Unexpected or invalid {} controls".format(mode))
+                return jsonify(message="Unexpected or invalid controls - "
+                                       "{}".format(err)), 500
+            logger.debug("{} controls {}".format(mode, controls))
 
         pool, image_name = image_id.split('.')
 
         disk_usable = LUN.valid_disk(config, logger, pool=pool,
                                      image=image_name, size=size, mode=mode,
-                                     count=count, max_data_area_mb=max_data_area_mb)
+                                     count=count, controls=controls)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
@@ -649,7 +658,7 @@ def disk(image_id):
                                                                      sfx)
 
             api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
-                        'mode': mode, 'max_data_area_mb': max_data_area_mb}
+                        'mode': mode, 'controls': request.form['controls']}
 
             resp_text, resp_code = call_api(gateways, '_disk',
                                             image_name,
@@ -714,6 +723,18 @@ def _disk(image_id):
 
         pool_name, image_name = image_id.split('.', 1)
         mode = request.form['mode']
+
+        controls = {}
+        if 'controls' in request.form:
+            try:
+                controls = _parse_controls(request.form['controls'],
+                                           LUN.SETTINGS)
+            except ValueError as err:
+                logger.error("Unexpected or invalid {} controls".format(mode))
+                return jsonify(message="Unexpected or invalid controls - "
+                                       "{}".format(err)), 500
+            logger.debug("{} controls {}".format(mode, controls))
+
         if mode in ['create', 'resize']:
             rqst_fields = set(request.form.keys())
             if not rqst_fields.issuperset(("pool", "size", "owner", "mode")):
@@ -731,7 +752,8 @@ def _disk(image_id):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            lun.max_data_area_mb = request.form.get('max_data_area_mb', None)
+            for k, v in controls.iteritems():
+                setattr(lun, k, v)
 
             if mode == 'create' and len(config.config['disks']) >= 256:
                 logger.error("LUN alloc problem - too many LUNs")
@@ -887,9 +909,7 @@ def _disk(image_id):
                 return jsonify(message="LUN activated"), 200
 
         elif mode == 'reconfigure':
-            max_data_area_mb = request.form.get('max_data_area_mb', None)
-            resp_text, resp_code = _reconfigure(image_id,
-                                                max_data_area_mb=max_data_area_mb)
+            resp_text, resp_code = _reconfigure(image_id, controls)
             if resp_code == 200:
                 return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
             else:
@@ -932,7 +952,7 @@ def _disk(image_id):
         return jsonify(message="LUN removed"), 200
 
 
-def _reconfigure(image_id, **kwargs):
+def _reconfigure(image_id, controls):
     logger.debug("lun reconfigure request")
 
     config.refresh()
@@ -961,22 +981,13 @@ def _reconfigure(image_id, **kwargs):
     pool_name, image_name = image_id.split('.', 1)
     lun = LUN(logger, pool_name, image_name, 0, disk['owner'])
 
-    for k, v in kwargs.items():
-        # exclude attributes which are unset and reset to defaults
-        # if empty
-        if v is not None:
-            lun.__setattr__(k, v if v != '' else None)
-            if lun.error:
-                resp_text = "Unable to create LUN instance: {}".format(lun.error_msg)
-                resp_code = 500
-                break
-
-    if not lun.error:
-        try:
-            lun.commit_controls()
-        except CephiSCSIError as err:
-            resp_text = "LUN reconfigure failure: {}".format(err)
-            resp_code = 500
+    for k, v in controls.iteritems():
+        setattr(lun, k, v)
+    try:
+        lun.commit_controls()
+    except CephiSCSIError as err:
+        resp_text = "LUN reconfigure failure: {}".format(err)
+        resp_code = 500
 
     # activate disk
     api_vars['mode'] = 'activate'
