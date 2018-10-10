@@ -176,6 +176,8 @@ class Disks(UIGroup):
                        Default 5.
         osd_op_timeout: integer, optional time in seconds to wait for a Ceph op.
                         Default 30.
+        hw_max_sectors: integer, optional in units of 512 byte sectors reported to
+                        initiators as max IO size. Default 1024.
 
         Notes.
         1) size does not support decimal representations
