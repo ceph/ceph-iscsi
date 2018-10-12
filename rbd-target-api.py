@@ -704,6 +704,13 @@ def disk(image_id):
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
+        if mode == 'reconfigure':
+            resp_text, resp_code = lun_reconfigure(image_id, controls)
+            if resp_code == 200:
+                return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
+            else:
+                return jsonify(message=resp_text), resp_code
+
         suffixes = [n for n in range(1, int(count) + 1)]
         # make call to local api server first!
         gateways.insert(0, '127.0.0.1')
@@ -867,19 +874,15 @@ def _disk(image_id):
 
                 return jsonify(message="LUN deactivated"), 200
             elif mode == 'activate':
+                for k, v in controls.iteritems():
+                    setattr(lun, k, v)
+
                 try:
                     lun.activate()
                 except CephiSCSIError as err:
                     return jsonify(message="activate failed - {}".format(err)), 500
 
                 return jsonify(message="LUN activated"), 200
-        elif mode == 'reconfigure':
-            resp_text, resp_code = lun_reconfigure(image_id, controls)
-            if resp_code == 200:
-                return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
-            else:
-                return jsonify(message=resp_text), resp_code
-
     else:
         # DELETE request
         # let's assume that the request has been validated by the caller
@@ -944,15 +947,25 @@ def lun_reconfigure(image_id, controls):
         return "failed to deactivate disk: {}".format(resp_text), resp_code
 
     pool_name, image_name = image_id.split('.', 1)
-    lun = LUN(logger, pool_name, image_name, 0, disk['owner'])
+
+    rbd_image = RBDDev(image_name, 0, pool_name)
+    size = rbd_image.current_size
+
+    lun = LUN(logger, pool_name, image_name, size, disk['owner'])
 
     for k, v in controls.iteritems():
         setattr(lun, k, v)
+
     try:
-        lun.commit_controls()
+        lun.activate()
     except CephiSCSIError as err:
-        resp_text = "LUN reconfigure failure: {}".format(err)
+        logger.error("local LUN activation failed - {}".format(err))
         resp_code = 500
+        resp_text = "{}".format(err)
+    else:
+        # We already activated this local node, so skip it
+        gateways.remove('127.0.0.1')
+        api_vars['controls'] = json.dumps(controls)
 
     # activate disk
     api_vars['mode'] = 'activate'
@@ -964,6 +977,15 @@ def lun_reconfigure(image_id, controls):
     if resp_code == 200 and activate_resp_code != 200:
         resp_text = activate_resp_text
         resp_code = activate_resp_code
+
+    if resp_code == 200:
+        try:
+            lun.commit_controls()
+        except CephiSCSIError as err:
+            resp_text = "Could not commit controls: {}".format(err)
+            resp_code = 500
+        else:
+            config.refresh()
 
     return resp_text, resp_code
 
