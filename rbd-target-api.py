@@ -181,6 +181,24 @@ def _parse_controls(controls_json, settings_list):
                                                 settings_list)
 
 
+def parse_target_controls(request):
+    tpg_controls = {}
+    client_controls = {}
+
+    if 'controls' not in request.form:
+        return tpg_controls, client_controls
+
+    controls = _parse_controls(request.form['controls'], GWTarget.SETTINGS)
+    for k, v in controls.iteritems():
+        if k in GWClient.SETTINGS:
+            client_controls[k] = v
+        else:
+            tpg_controls[k] = v
+
+    logger.debug("controls tpg {} acl {}".format(tpg_controls, client_controls))
+    return tpg_controls, client_controls
+
+
 @app.route('/api/target/<target_iqn>', methods=['PUT'])
 @requires_restricted_auth
 def target(target_iqn=None):
@@ -205,16 +223,12 @@ def target(target_iqn=None):
         return jsonify(message="Unexpected mode provided for {} - "
                                "{}".format(target_iqn, mode)), 500
 
-    controls = {}
-    if 'controls' in request.form:
-        try:
-            controls = _parse_controls(request.form['controls'],
-                                       GWTarget.SETTINGS)
-        except ValueError as err:
-            logger.error("Unexpected or invalid controls")
-            return jsonify(message="Unexpected or invalid controls - "
-                                   "{}".format(err)), 500
-        logger.debug("controls {}".format(controls))
+    try:
+        tpg_controls, client_controls = parse_target_controls(request)
+    except ValueError as err:
+        logger.error("Unexpected or invalid controls")
+        return jsonify(message="Unexpected or invalid controls - "
+                               "{}".format(err)), 500
 
     gateway_ip_list = []
     target = GWTarget(logger,
@@ -226,7 +240,14 @@ def target(target_iqn=None):
         return jsonify(message="GWTarget problem - "
                                "{}".format(target.error_msg)), 500
 
-    for k, v in controls.iteritems():
+    orig_tpg_controls = {}
+    orig_client_controls = {}
+    for k, v in tpg_controls.iteritems():
+        orig_tpg_controls[k] = getattr(target, k)
+        setattr(target, k, v)
+
+    for k, v in client_controls.iteritems():
+        orig_client_controls[k] = getattr(target, k)
         setattr(target, k, v)
 
     target.manage('init')
@@ -240,13 +261,8 @@ def target(target_iqn=None):
         config.refresh()
         return jsonify(message="Target defined successfully"), 200
 
-    try:
-        target.commit_controls()
-    except CephiSCSIError as err:
-        logger.error("Failure during gateway 'reconfigure' processing")
-        return jsonify(message="iscsi target 'reconfigure' process failed "
-                               "for {} - {}".format(target_iqn, err)), 500
-    config.refresh()
+    if not tpg_controls and not client_controls:
+        return jsonify(message="Target reconfigured."), 200
 
     # This is a reconfigure operation, so first confirm the gateways
     # are in place (we need defined gateways)
@@ -255,48 +271,58 @@ def target(target_iqn=None):
     gateways = [key for key in config.config['gateways']
                 if isinstance(config.config['gateways'][key], dict)]
     logger.debug("other gateways - {}".format(gateways))
+    # We perform the reconfigure locally here to make sure the values are valid
+    # and simplify error cleanup
     gateways.remove(local_gw)
-    gateways.append(local_gw)
+
+    resp_text = local_target_reconfigure(target_iqn, tpg_controls,
+                                         client_controls)
+    if "ok" != resp_text:
+        reset_resp = local_target_reconfigure(target_iqn, orig_tpg_controls,
+                                              orig_client_controls)
+        if "ok" != reset_resp:
+            logger.error("Failed to reset target controls - "
+                         "{}".format(reset_resp))
+
+        return jsonify(message="{}".format(resp_text)), 500
 
     resp_text, resp_code = call_api(gateways, '_target', target_iqn,
                                     http_method='put',
                                     api_vars=request.form)
-    return jsonify(message="Target reconfigure {}".format(resp_text)), resp_code
+    if resp_code != 200:
+        return jsonify(message="{}".format(resp_text)), resp_code
+
+    try:
+        target.commit_controls()
+    except CephiSCSIError as err:
+        logger.error("Control commit failed during gateway 'reconfigure'")
+        return jsonify(message="Could not commit controls - {}".format(err)), 500
+    config.refresh()
+    return jsonify(message="Target reconfigured."), 200
 
 
-@app.route('/api/_target/<target_iqn>', methods=['PUT'])
-@requires_restricted_auth
-def _target(target_iqn=None):
-    mode = request.form.get('mode', None)
-    if mode not in ['reconfigure']:
-        logger.error("Unexpected mode provided")
-        return jsonify(message="Unexpected mode provided for {} - "
-                               "{}".format(target_iqn, mode)), 500
-
-    # The caller has already committed the new controls so we do not need
-    # to parse and set them here. The refresh and GWTarget calls will give
-    # us the updated values.
+def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
     config.refresh()
 
     target = GWTarget(logger, str(target_iqn), [])
     if target.error:
         logger.error("Unable to create an instance of the GWTarget class")
-        return jsonify(message="GWTarget problem - "
-                               "{}".format(target.error_msg)), 500
+        return target.error_msg
+
+    for k, v in tpg_controls.iteritems():
+        setattr(target, k, v)
 
     if target.exists():
         target.load_config()
         if target.error:
             logger.error("Unable to refresh tpg state")
-            return jsonify(message="Unable to refresh tpg state - "
-                                   "{}".format(target.error_msg)), 500
+            return target.error_msg
 
     try:
         target.update_tpg_controls()
     except RTSLibError as err:
         logger.error("Unable to update tpg control overrides")
-        return jsonify(message="Unable to update tpg control overrides - "
-                               "{}".format(err)), 500
+        return "Unable to update tpg control overrides - {}".format(err)
 
     # re-apply client control overrides
     client_errors = False
@@ -308,21 +334,51 @@ def _target(target_iqn=None):
         if client_chap.error:
             logger.debug("Password decode issue : "
                          "{}".format(client_chap.error_msg))
-            halt("Unable to decode password for "
-                 "{}".format(client_iqn))
+            halt("Unable to decode password for {}".format(client_iqn))
 
-        client = GWClient(logger,
-                          client_iqn,
-                          image_list,
-                          chap_str)
+        client = GWClient(logger, client_iqn, image_list, chap_str)
+        if client.error:
+            logger.error("Could not create client. Control override failed "
+                         "{} - {}".format(client_iqn, client.error_msg))
+            client_errors = True
+            continue
+
+        for k, v in client_controls.iteritems():
+            setattr(client, k, v)
+
         client.manage('reconfigure')
         if client.error:
             logger.error("Client control override failed "
-                         "{} - {}".format(client_iqn,
-                                          client.error_msg))
+                         "{} - {}".format(client_iqn, client.error_msg))
             client_errors = True
+            if "Invalid argument" in client.error_msg:
+                # Kernel/rtslib reported EINVAL so immediately fail
+                return client.error_msg
     if client_errors:
-        return jsonify(message="Client control override failed"), 500
+        return "Client control override failed."
+
+    return "ok"
+
+
+@app.route('/api/_target/<target_iqn>', methods=['PUT'])
+@requires_restricted_auth
+def _target(target_iqn=None):
+    mode = request.form.get('mode', None)
+    if mode not in ['reconfigure']:
+        logger.error("Unexpected mode provided")
+        return jsonify(message="Unexpected mode provided for {} - "
+                               "{}".format(target_iqn, mode)), 500
+    try:
+        tpg_controls, client_controls = parse_target_controls(request)
+    except ValueError as err:
+        logger.error("Unexpected or invalid controls")
+        return jsonify(message="Unexpected or invalid controls - "
+                               "{}".format(err)), 500
+
+    resp_text = local_target_reconfigure(target_iqn, tpg_controls,
+                                         client_controls)
+    if "ok" != resp_text:
+        return jsonify(message="{}".format(resp_text)), 500
 
     return jsonify(message="Target reconfigured successfully"), 200
 
@@ -818,7 +874,7 @@ def _disk(image_id):
 
                 return jsonify(message="LUN activated"), 200
         elif mode == 'reconfigure':
-            resp_text, resp_code = _reconfigure(image_id, controls)
+            resp_text, resp_code = lun_reconfigure(image_id, controls)
             if resp_code == 200:
                 return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
             else:
@@ -861,7 +917,7 @@ def _disk(image_id):
         return jsonify(message="LUN removed"), 200
 
 
-def _reconfigure(image_id, controls):
+def lun_reconfigure(image_id, controls):
     logger.debug("lun reconfigure request")
 
     config.refresh()
