@@ -745,7 +745,7 @@ class LUN(GWObject):
                                               config=cfgstring,
                                               size=self.size_bytes,
                                               wwn=in_wwn, control=control_string)
-        except RTSLibError as err:
+        except (RTSLibError, IOError) as err:
             self.error = True
             self.error_msg = ("failed to add {} to LIO - "
                               "error({})".format(self.config_key,
