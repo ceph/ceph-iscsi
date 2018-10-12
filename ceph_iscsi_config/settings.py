@@ -16,23 +16,44 @@ def init():
 
 
 class Settings(object):
-    GATEWAY_SETTINGS = [
-        "dataout_timeout",
-        "nopin_response_timeout",
-        "nopin_timeout",
-        "cmdsn_depth",
-        "immediate_data",
-        "initial_r2t",
-        "max_outstanding_r2t",
-        "first_burst_length",
-        "max_burst_length",
-        "max_recv_data_segment_length",
-        "max_xmit_data_segment_length"]
-
     LIO_YES_NO_SETTINGS = ["immediate_data", "initial_r2t"]
 
     _float_regex = re.compile("^[0-9]*\.{1}[0-9]$")
     _int_regex = re.compile("^[0-9]+$")
+
+    @staticmethod
+    def normalize_controls(raw_controls, settings_list):
+        """
+        Convert a controls dictionary from a json converted or a user input
+        dictionary where the values are strings.
+        """
+        controls = {}
+
+        for key, raw_value in raw_controls.iteritems():
+            if key not in settings_list:
+                raise ValueError("Supported controls: {}".format(",".join(settings_list)))
+
+            if not raw_value:
+                # Use the default/reset.
+                controls[key] = None
+                continue
+
+            # Do not use normalize() because if the user inputs invalid
+            # values we want to pass up more detailed errors.
+            if key in Settings.LIO_YES_NO_SETTINGS:
+                try:
+                    value = Settings.convert_lio_yes_no(raw_value)
+                except ValueError:
+                    raise ValueError("expected yes or no for {}".format(key))
+            else:
+                try:
+                    value = int(raw_value)
+                except ValueError:
+                    raise ValueError("expected integer for {}".format(key))
+
+            controls[key] = value
+
+        return controls
 
     @staticmethod
     def convert_lio_yes_no(value):
@@ -104,7 +125,8 @@ class Settings(object):
                        "max_recv_data_segment_length": 262144,
                        "max_xmit_data_segment_length": 262144,
                        "max_data_area_mb": 8,
-                       "alua_failover_type": "implicit"
+                       "alua_failover_type": "implicit",
+                       "hw_max_sectors": "1024"
                        }
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):

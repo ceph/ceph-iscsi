@@ -12,11 +12,14 @@ from rtslib_fb.utils import RTSLibError
 
 import ceph_iscsi_config.settings as settings
 
-from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      valid_size, get_pool_id, ipv4_addresses,
                                      get_pools, get_rbd_size, this_host,
                                      human_size, CephiSCSIError)
+from ceph_iscsi_config.gateway_object import GWObject
+from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.client import GWClient, CHAP
+from ceph_iscsi_config.group import Group
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -219,7 +222,12 @@ class RBDDev(object):
                          " (boolean)")
 
 
-class LUN(object):
+class LUN(GWObject):
+    SETTINGS = [
+        "max_data_area_mb",
+        "qfull_timeout",
+        "osd_op_timeout",
+        "hw_max_sectors"]
 
     def __init__(self, logger, pool, image, size, allocating_host):
         self.logger = logger
@@ -228,7 +236,6 @@ class LUN(object):
         self.pool_id = 0
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}.{}'.format(self.pool, self.image)
-        self.controls = {}
 
         # the allocating host could be fqdn or shortname - but the config
         # only uses shortname so it needs to be converted to shortname format
@@ -239,30 +246,14 @@ class LUN(object):
         self.error_msg = ''
         self.num_changes = 0
 
-        self.config = Config(logger)
-        if self.config.error:
-            self.error = self.config.error
-            self.error_msg = self.config.error_msg
-            return
+        try:
+            super(LUN, self).__init__('disks', self.config_key, logger,
+                                      LUN.SETTINGS)
+        except CephiSCSIError as err:
+            self.error = True
+            self.error_msg = err
 
         self._validate_request()
-        if self.config_key in self.config.config['disks']:
-            self.controls = self.config.config['disks'][self.config_key].get('controls', {}).copy()
-
-    def _get_max_data_area_mb(self):
-        max_data_area_mb = self.controls.get('max_data_area_mb', None)
-        if max_data_area_mb is None:
-            return settings.config.max_data_area_mb
-        return max_data_area_mb
-
-    def _set_max_data_area_mb(self, value):
-        if value is None or str(value) == str(settings.config.max_data_area_mb):
-            self.controls.pop('max_data_area_mb', None)
-        else:
-            self.controls['max_data_area_mb'] = value
-
-    max_data_area_mb = property(_get_max_data_area_mb, _set_max_data_area_mb,
-                                doc="get/set kernel data area (MiB)")
 
     def _validate_request(self):
 
@@ -364,18 +355,94 @@ class LUN(object):
 
             self.remove_lun()
 
-    def update_config(self, commit=False):
-        self.logger.debug("LUN.update_config starting")
+    def deactivate(self):
+        so = self.lio_stg_object()
+        if not so:
+            # Could be due to a restart after failure. Just log and ignore.
+            self.logger.warning("LUN {} already deactivated".format(self.image))
+            return
 
-        # delete/update on-disk attributes
-        disk_attr = self.config.config['disks'][self.config_key]
-        if self.controls != disk_attr.get('controls', {}):
-            disk_attr['controls'] = self.controls
-            self.config.update_item('disks', self.config_key, disk_attr)
-        if commit and self.config.changed:
-            self.config.commit()
-            self.error = self.config.error
-            self.error_msg = self.config.error_msg
+        for alun in so.attached_luns:
+            for mlun in alun.mapped_luns:
+                node_acl = mlun.parent_nodeacl
+
+        for attached_lun in so.attached_luns:
+            for node_acl in attached_lun.parent_tpg.node_acls:
+                if node_acl.session and \
+                        node_acl.session.get('state', '').upper() == 'LOGGED_IN':
+                    raise CephiSCSIError("LUN {} in-use".format(self.image))
+
+        self.remove_dev_from_lio()
+        if self.error:
+            raise CephiSCSIError("LUN deactivate failure - {}".format(self.error_msg))
+
+    def activate(self):
+        disk = self.config.config['disks'].get(self.config_key, None)
+        if not disk:
+            raise CephiSCSIError("Image {} not found.".format(self.image))
+
+        wwn = disk.get('wwn', None)
+        if not wwn:
+            raise CephiSCSIError("LUN {} missing wwn".format(self.image))
+
+        # re-add backend storage object
+        so = self.lio_stg_object()
+        if not so:
+            self.add_dev_to_lio(wwn)
+            if self.error:
+                raise CephiSCSIError("LUN activate failure - {}".format(self.error_msg))
+
+        # re-add LUN to target
+        iqn = self.config.config['gateways']['iqn']
+        ip_list = self.config.config['gateways']['ip_list']
+
+        # Add the mapping for the lun to ensure the block device is
+        # present on all TPG's
+        gateway = GWTarget(self.logger, iqn, ip_list)
+
+        gateway.manage('map')
+        if gateway.error:
+            raise CephiSCSIError("LUN mapping failed - {}".format(gateway.error_msg))
+
+        # re-map LUN to hosts
+        client_err = ''
+        for client_iqn in self.config.config['clients']:
+            client_metadata = self.config.config['clients'][client_iqn]
+            if client_metadata.get('group_name', ''):
+                continue
+
+            image_list = client_metadata['luns'].keys()
+            if self.config_key not in image_list:
+                continue
+
+            client_chap = CHAP(client_metadata['auth']['chap'])
+            chap_str = client_chap.chap_str
+            if client_chap.error:
+                raise CephiSCSIError("Password decode issue : "
+                                     "{}".format(client_chap.error_msg))
+
+            client = GWClient(self.logger, client_iqn, image_list, chap_str)
+            client.manage('present')
+            if client.error:
+                client_err = "LUN mapping failed {} - {}".format(client_iqn,
+                                                                 client.error_msg)
+
+        # re-map LUN to host groups
+        for group_name in self.config.config['groups']:
+            host_group = self.config.config['groups'][group_name]
+            members = host_group.get('members')
+            disks = host_group.get('disks').keys()
+            if self.config_key not in disks:
+                continue
+
+            group = Group(self.logger, group_name, members, disks)
+            group.apply()
+            if group.error:
+                client_err = "LUN mapping failed {} - {}".format(group_name,
+                                                                 group.error_msg)
+
+        if client_err:
+            raise CephiSCSIError(client_err)
 
     def allocate(self):
         self.logger.debug("LUN.allocate starting, listing rbd devices")
@@ -525,7 +592,7 @@ class LUN(object):
                     if self.error:
                         return
 
-                    self.update_config()
+                    self.commit_controls()
                     self.logger.debug("(LUN.allocate) registered '{}' to LIO "
                                       "with wwn '{}' from the config "
                                       "object".format(self.image,
@@ -656,10 +723,9 @@ class LUN(object):
                          "'{}' to LIO".format(self.config_key))
 
         # extract control parameter overrides (if any) or use default
-        controls = self.controls.copy()
-        for k in ['max_data_area_mb']:
-            if controls.get(k, None) is None:
-                controls[k] = getattr(settings.config, k, None)
+        controls = {}
+        for k in ['max_data_area_mb', 'hw_max_sectors']:
+            controls[k] = getattr(self, k)
 
         control_string = gen_control_string(controls)
         if control_string:
@@ -671,7 +737,7 @@ class LUN(object):
             # optional osd timeout
             cfgstring = "rbd/{}/{};osd_op_timeout={}".format(self.pool,
                                                              self.image,
-                                                             settings.config.osd_op_timeout)
+                                                             self.osd_op_timeout)
             if (settings.config.cephconf != '/etc/ceph/ceph.conf'):
                 cfgstring += ";conf={}".format(settings.config.cephconf)
 
@@ -679,7 +745,7 @@ class LUN(object):
                                               config=cfgstring,
                                               size=self.size_bytes,
                                               wwn=in_wwn, control=control_string)
-        except RTSLibError as err:
+        except (RTSLibError, IOError) as err:
             self.error = True
             self.error_msg = ("failed to add {} to LIO - "
                               "error({})".format(self.config_key,
@@ -689,8 +755,7 @@ class LUN(object):
 
         try:
             new_lun.set_attribute("cmd_time_out", 0)
-            new_lun.set_attribute("qfull_time_out",
-                                  settings.config.qfull_timeout)
+            new_lun.set_attribute("qfull_time_out", self.qfull_timeout)
         except RTSLibError as err:
             self.error = True
             self.error_msg = ("Could not set LIO device attribute "
@@ -746,9 +811,10 @@ class LUN(object):
         :return: (str) either 'ok' or an error description
         """
 
+        # create can also pass optional controls dict
         mode_vars = {"create": ['pool', 'image', 'size', 'count'],
                      "resize": ['pool', 'image', 'size'],
-                     "reconfigure": ['pool', 'image', 'max_data_area_mb'],
+                     "reconfigure": ['pool', 'image', 'controls'],
                      "delete": ['pool', 'image']}
 
         if 'mode' in kwargs.keys():
@@ -821,11 +887,13 @@ class LUN(object):
                         "current size ({}/{})".format(human_size(current_size),
                                                       current_size))
 
-        if mode == 'reconfigure':
+        if mode in ['create', 'reconfigure']:
 
-            max_data_area_mb = kwargs['max_data_area_mb']
-            if max_data_area_mb and not str(max_data_area_mb).isdigit():
-                return ("max_data_area_mb must be an integer in MiB")
+            try:
+                settings.Settings.normalize_controls(kwargs['controls'],
+                                                     LUN.SETTINGS)
+            except ValueError as err:
+                return(err)
 
         if mode == 'delete':
 

@@ -15,14 +15,17 @@ import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config, ansible_control
 from ceph_iscsi_config.utils import encryption_available, CephiSCSIError
+from ceph_iscsi_config.gateway_object import GWObject
 
-import gateway
 
-
-class GWClient(object):
+class GWClient(GWObject):
     """
     This class holds a representation of a client connecting to LIO
     """
+    SETTINGS = ["dataout_timeout",
+                "nopin_response_timeout",
+                "nopin_timeout",
+                "cmdsn_depth"]
 
     seed_metadata = {"auth": {"chap": ''},
                      "luns": {},
@@ -92,6 +95,14 @@ class GWClient(object):
             self.error_msg = ("Client's image list contains duplicate rbd's"
                               ": {}".format(dup_string))
 
+        try:
+            # We only support global client controls.
+            super(GWClient, self).__init__('controls', '', logger,
+                                           GWClient.SETTINGS)
+        except CephiSCSIError as err:
+            self.error = True
+            self.error_msg = err
+
     def setup_luns(self):
         """
         Add the requested LUNs to the node ACL definition. The image list
@@ -142,21 +153,21 @@ class GWClient(object):
                     return
 
     def update_acl_controls(self):
+        self.logger.debug("(update_acl_controls) controls: {}".format(self.controls))
+        self.acl.set_attribute('dataout_timeout', str(self.dataout_timeout))
+
         # Try to detect network problems so we can kill connections
         # and cleanup before the initiator has begun recovery and
         # failed over.
 
-        # LIO default 3
-        self.acl.set_attribute('dataout_timeout', '{}'.format(
-                               self.controls['dataout_timeout']))
         # LIO default 30
-        self.acl.set_attribute('nopin_response_timeout', '{}'.format(
-                               self.controls['nopin_response_timeout']))
+        self.acl.set_attribute('nopin_response_timeout',
+                               str(self.nopin_response_timeout))
         # LIO default 15
-        self.acl.set_attribute('nopin_timeout', '{}'.format(
-                               self.controls['nopin_timeout']))
+        self.acl.set_attribute('nopin_timeout', str(self.nopin_timeout))
+
         # LIO default 64
-        self.acl.tcq_depth = self.controls['cmdsn_depth']
+        self.acl.tcq_depth = self.cmdsn_depth
 
     def define_client(self):
         """
@@ -444,10 +455,6 @@ class GWClient(object):
         # use current config to hold a copy of the current rados config
         # object (dict)
         self.current_config = config_object.config
-
-        # Build our set of control overrides
-        self.controls = gateway.GWTarget.get_controls(self.current_config)
-        self.logger.debug("(GWClient.manage) controls: {}".format(self.controls))
 
         running_under_ansible = ansible_control()
         self.logger.debug("(GWClient.manage) running under ansible?"
