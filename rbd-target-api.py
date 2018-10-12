@@ -1165,7 +1165,7 @@ def _update_client(**kwargs):
         logger.error("client update failed on {} : "
                      "{}".format(kwargs['client_iqn'],
                                  client.error_msg))
-        return 500, "Client update failed"
+        return 500, "Client update failed - {}".format(client.error_msg)
     else:
         config.refresh()
         return 200, "Client configured successfully"
