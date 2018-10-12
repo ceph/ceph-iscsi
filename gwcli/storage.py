@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import json
 import time
 import Queue
 import threading
@@ -14,6 +15,7 @@ from gwcli.utils import (console_message, response_message, GatewayAPIError,
                          this_host, APIRequest, valid_snapshot_name, get_config)
 
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes, human_size
+from ceph_iscsi_config.lun import LUN
 
 import ceph_iscsi_config.settings as settings
 
@@ -140,13 +142,15 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_create(self, pool=None, image=None, size=None, count=1, max_data_area_mb=None):
+    def ui_command_create(self, pool=None, image=None, size=None, count=1,
+                          **attributes):
         """
         Create a LUN and assign to the gateway(s).
 
         The create command supports two request formats;
 
-        Long format  : create pool=<name> image=<name> size=<size> [max_data_area_mb=<buffer_size>]
+        Long format  : create pool=<name> image=<name> size=<size> [attributes:
+                       max_data_area_mb=<buffer_size> osd_op_timeout=<seconds> ...]
         Short format : create pool.image <size>
 
         e.g.
@@ -165,7 +169,15 @@ class Disks(UIGroup):
                 create rbd.test 1g count=5
                 -> create 5 LUNs called test1..test5 each of 1GB in size
                    from the rbd pool
+        attributes :
         max_data_area_mb : integer, optional size of kernel data ring buffer (MiB).
+                           Default 8.
+        qfull_timeout: integer, optional time in seconds to wait for ring space.
+                       Default 5.
+        osd_op_timeout: integer, optional time in seconds to wait for a Ceph op.
+                        Default 30.
+        hw_max_sectors: integer, optional in units of 512 byte sectors reported to
+                        initiators as max IO size. Default 1024.
 
         Notes.
         1) size does not support decimal representations
@@ -209,18 +221,25 @@ class Disks(UIGroup):
             if not str(count).isdigit():
                 self.logger.error("invalid count format, must be an integer")
                 return
-        if max_data_area_mb:
-            if not str(max_data_area_mb).isdigit():
-                self.logger.error("invalid max data area format, must be an integer in MiB")
+
+        try:
+            controls = settings.Settings.normalize_controls(attributes,
+                                                            LUN.SETTINGS)
+        except ValueError as err:
+            self.logger.error(err)
+            return
+
+        for k, v in controls.iteritems():
+            if not v:
+                self.logger.error("Missing value for {}.".format(k))
                 return
 
         self.logger.debug("CMD: /disks/ create pool={} "
                           "image={} size={} count={} "
-                          "max_data_area_mb={}".format(pool, image, size, count,
-                                                       max_data_area_mb))
-
-        self.create_disk(pool=pool, image=image, size=size,
-                         count=count, max_data_area_mb=max_data_area_mb)
+                          "controls={}".format(pool, image, size, count,
+                                               attributes))
+        self.create_disk(pool=pool, image=image, size=size, count=count,
+                         controls=attributes)
 
     def _valid_pool(self, pool=None):
         """
@@ -248,7 +267,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    max_data_area_mb=None, parent=None):
+                    controls={}, parent=None):
 
         rc = 0
 
@@ -270,9 +289,10 @@ class Disks(UIGroup):
                                                           settings.config.api_port,
                                                           disk_key)
 
+        controls_json = json.dumps(controls)
+
         api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
-                    'count': count, 'max_data_area_mb': max_data_area_mb,
-                    'mode': 'create'}
+                    'count': count, 'controls': controls_json, 'mode': 'create'}
 
         self.logger.debug("Issuing disk create request")
 
@@ -384,8 +404,10 @@ class Disks(UIGroup):
 
         image_id  : disk name (pool.image format)
         attribute : attribute to reconfigure. supported attributes:
-            - max_data_area_mb : integer, size of kernel data ring buffer (MiB).
         value     : value of the attribute to reconfigure
+
+        See the create command help for a list of attributes that can be
+        reconfigured.
 
         e.g.
         set max_data_area_mb
@@ -572,7 +594,7 @@ class Disk(UINode):
         for k, v in image_config.iteritems():
             disk_map[self.image_id][k] = v
             self.__setattr__(k, v)
-        for k in ['max_data_area_mb']:
+        for k in LUN.SETTINGS:
             val = self.controls.get(k)
             default_val = getattr(settings.config, k, None)
             if val is None or str(val) == str(default_val):
@@ -672,10 +694,8 @@ class Disk(UINode):
     #         disk_map[self.image_id]['size_h'] = self.size_h
 
     def reconfigure(self, attribute, value):
-        allowed_attributes = ['max_data_area_mb']
-        if attribute not in allowed_attributes:
-            self.logger.error("supported attributes: {}".format(",".join(allowed_attributes)))
-            return
+        controls = {attribute: value}
+        controls_json = json.dumps(controls)
 
         local_gw = this_host()
 
@@ -686,7 +706,7 @@ class Disk(UINode):
                                      self.image_id))
 
         api_vars = {'pool': self.pool, 'owner': local_gw,
-                    attribute: value, 'mode': 'reconfigure'}
+                    'controls': controls_json, 'mode': 'reconfigure'}
 
         self.logger.debug("Issuing reconfigure request: attribute={}, "
                           "value={}".format(attribute, value))
@@ -830,8 +850,10 @@ class Disk(UINode):
         default.
 
         attribute : attribute to reconfigure. supported attributes:
-            - max_data_area_mb : integer, size of kernel data ring buffer (MiB).
         value     : value of the attribute to reconfigure
+
+        See the create command help for a list of attributes that can be
+        reconfigured.
 
         e.g.
         set max_data_area_mb

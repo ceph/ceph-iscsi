@@ -176,27 +176,27 @@ def get_sys_info(query_type=None):
         return jsonify(message="Unknown /sysinfo query"), 404
 
 
-def _parse_target_controls(controls_json):
-    controls = {}
-    raw_controls = json.loads(controls_json)
-    for k in settings.Settings.GATEWAY_SETTINGS:
-        if k in raw_controls:
-            value = raw_controls.get(k, '')
-            if value:
-                if k in settings.Settings.LIO_YES_NO_SETTINGS:
-                    try:
-                        value = settings.Settings.convert_lio_yes_no(value)
-                    except ValueError:
-                        raise ValueError("expected yes or no for {}".format(k))
-                else:
-                    try:
-                        value = str(int(value))
-                    except ValueError:
-                        raise ValueError("expected integer for {}".format(k))
-                controls[k] = value
-            else:
-                controls[k] = None
-    return controls
+def _parse_controls(controls_json, settings_list):
+    return settings.Settings.normalize_controls(json.loads(controls_json),
+                                                settings_list)
+
+
+def parse_target_controls(request):
+    tpg_controls = {}
+    client_controls = {}
+
+    if 'controls' not in request.form:
+        return tpg_controls, client_controls
+
+    controls = _parse_controls(request.form['controls'], GWTarget.SETTINGS)
+    for k, v in controls.iteritems():
+        if k in GWClient.SETTINGS:
+            client_controls[k] = v
+        else:
+            tpg_controls[k] = v
+
+    logger.debug("controls tpg {} acl {}".format(tpg_controls, client_controls))
+    return tpg_controls, client_controls
 
 
 @app.route('/api/target/<target_iqn>', methods=['PUT'])
@@ -223,15 +223,12 @@ def target(target_iqn=None):
         return jsonify(message="Unexpected mode provided for {} - "
                                "{}".format(target_iqn, mode)), 500
 
-    controls = {}
-    if 'controls' in request.form:
-        try:
-            controls = _parse_target_controls(request.form['controls'])
-        except ValueError as err:
-            logger.error("Unexpected or invalid controls")
-            return jsonify(message="Unexpected or invalid controls - "
-                                   "{}".format(err)), 500
-        logger.debug("controls {}".format(controls))
+    try:
+        tpg_controls, client_controls = parse_target_controls(request)
+    except ValueError as err:
+        logger.error("Unexpected or invalid controls")
+        return jsonify(message="Unexpected or invalid controls - "
+                               "{}".format(err)), 500
 
     gateway_ip_list = []
     target = GWTarget(logger,
@@ -243,7 +240,14 @@ def target(target_iqn=None):
         return jsonify(message="GWTarget problem - "
                                "{}".format(target.error_msg)), 500
 
-    for k, v in controls.iteritems():
+    orig_tpg_controls = {}
+    orig_client_controls = {}
+    for k, v in tpg_controls.iteritems():
+        orig_tpg_controls[k] = getattr(target, k)
+        setattr(target, k, v)
+
+    for k, v in client_controls.iteritems():
+        orig_client_controls[k] = getattr(target, k)
         setattr(target, k, v)
 
     target.manage('init')
@@ -257,13 +261,8 @@ def target(target_iqn=None):
         config.refresh()
         return jsonify(message="Target defined successfully"), 200
 
-    target.manage('reconfigure')
-    if target.error:
-        logger.error("Failure during gateway 'reconfigure' processing")
-        return jsonify(message="iscsi target 'reconfigure' process failed "
-                               "for {} - {}".format(target_iqn,
-                                                    target.error_msg)), 500
-    config.refresh()
+    if not tpg_controls and not client_controls:
+        return jsonify(message="Target reconfigured."), 200
 
     # This is a reconfigure operation, so first confirm the gateways
     # are in place (we need defined gateways)
@@ -272,57 +271,58 @@ def target(target_iqn=None):
     gateways = [key for key in config.config['gateways']
                 if isinstance(config.config['gateways'][key], dict)]
     logger.debug("other gateways - {}".format(gateways))
+    # We perform the reconfigure locally here to make sure the values are valid
+    # and simplify error cleanup
     gateways.remove(local_gw)
-    gateways.append(local_gw)
+
+    resp_text = local_target_reconfigure(target_iqn, tpg_controls,
+                                         client_controls)
+    if "ok" != resp_text:
+        reset_resp = local_target_reconfigure(target_iqn, orig_tpg_controls,
+                                              orig_client_controls)
+        if "ok" != reset_resp:
+            logger.error("Failed to reset target controls - "
+                         "{}".format(reset_resp))
+
+        return jsonify(message="{}".format(resp_text)), 500
 
     resp_text, resp_code = call_api(gateways, '_target', target_iqn,
                                     http_method='put',
                                     api_vars=request.form)
-    return jsonify(message="Target reconfigure {}".format(resp_text)), resp_code
+    if resp_code != 200:
+        return jsonify(message="{}".format(resp_text)), resp_code
+
+    try:
+        target.commit_controls()
+    except CephiSCSIError as err:
+        logger.error("Control commit failed during gateway 'reconfigure'")
+        return jsonify(message="Could not commit controls - {}".format(err)), 500
+    config.refresh()
+    return jsonify(message="Target reconfigured."), 200
 
 
-@app.route('/api/_target/<target_iqn>', methods=['PUT'])
-@requires_restricted_auth
-def _target(target_iqn=None):
-    mode = request.form.get('mode', None)
-    if mode not in ['reconfigure']:
-        logger.error("Unexpected mode provided")
-        return jsonify(message="Unexpected mode provided for {} - "
-                               "{}".format(target_iqn, mode)), 500
-
-    controls = {}
-    if 'controls' in request.form:
-        try:
-            controls = _parse_target_controls(request.form['controls'])
-        except ValueError as err:
-            logger.error("Unexpected or invalid controls")
-            return jsonify(message="Unexpected or invalid controls - "
-                                   "{}".format(err)), 500
-        logger.debug("controls {}".format(controls))
-
+def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
     config.refresh()
 
     target = GWTarget(logger, str(target_iqn), [])
     if target.error:
         logger.error("Unable to create an instance of the GWTarget class")
-        return jsonify(message="GWTarget problem - "
-                               "{}".format(target.error_msg)), 500
+        return target.error_msg
 
-    for k, v in controls.iteritems():
+    for k, v in tpg_controls.iteritems():
         setattr(target, k, v)
 
     if target.exists():
         target.load_config()
         if target.error:
             logger.error("Unable to refresh tpg state")
-            return jsonify(message="Unable to refresh tpg state - "
-                                   "{}".format(target.error_msg)), 500
+            return target.error_msg
 
-    target.update_tpg_controls()
-    if target.error:
+    try:
+        target.update_tpg_controls()
+    except RTSLibError as err:
         logger.error("Unable to update tpg control overrides")
-        return jsonify(message="Unable to update tpg control overrides - "
-                               "{}".format(target.error_msg)), 500
+        return "Unable to update tpg control overrides - {}".format(err)
 
     # re-apply client control overrides
     client_errors = False
@@ -334,21 +334,51 @@ def _target(target_iqn=None):
         if client_chap.error:
             logger.debug("Password decode issue : "
                          "{}".format(client_chap.error_msg))
-            halt("Unable to decode password for "
-                 "{}".format(client_iqn))
+            halt("Unable to decode password for {}".format(client_iqn))
 
-        client = GWClient(logger,
-                          client_iqn,
-                          image_list,
-                          chap_str)
+        client = GWClient(logger, client_iqn, image_list, chap_str)
+        if client.error:
+            logger.error("Could not create client. Control override failed "
+                         "{} - {}".format(client_iqn, client.error_msg))
+            client_errors = True
+            continue
+
+        for k, v in client_controls.iteritems():
+            setattr(client, k, v)
+
         client.manage('reconfigure')
         if client.error:
             logger.error("Client control override failed "
-                         "{} - {}".format(client_iqn,
-                                          client.error_msg))
+                         "{} - {}".format(client_iqn, client.error_msg))
             client_errors = True
+            if "Invalid argument" in client.error_msg:
+                # Kernel/rtslib reported EINVAL so immediately fail
+                return client.error_msg
     if client_errors:
-        return jsonify(message="Client control override failed"), 500
+        return "Client control override failed."
+
+    return "ok"
+
+
+@app.route('/api/_target/<target_iqn>', methods=['PUT'])
+@requires_restricted_auth
+def _target(target_iqn=None):
+    mode = request.form.get('mode', None)
+    if mode not in ['reconfigure']:
+        logger.error("Unexpected mode provided")
+        return jsonify(message="Unexpected mode provided for {} - "
+                               "{}".format(target_iqn, mode)), 500
+    try:
+        tpg_controls, client_controls = parse_target_controls(request)
+    except ValueError as err:
+        logger.error("Unexpected or invalid controls")
+        return jsonify(message="Unexpected or invalid controls - "
+                               "{}".format(err)), 500
+
+    resp_text = local_target_reconfigure(target_iqn, tpg_controls,
+                                         client_controls)
+    if "ok" != resp_text:
+        return jsonify(message="{}".format(resp_text)), 500
 
     return jsonify(message="Target reconfigured successfully"), 200
 
@@ -607,14 +637,13 @@ def disk(image_id):
     :param pool: (str) the pool name the rbd image will be in
     :param count: (str) the number of images will be created
     :param owner: (str) the owner of the rbd image
-    :param max_data_area_mb: (str) size of the kernel ring buffer that holds
-                              SCSI command's data.
+    :param controls: (JSON dict) valid control overrides
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
         -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
-    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd -dmax_data_area_mb=32
-        -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
+    curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd
+        -d controls='{max_data_area_mb=32}' -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
@@ -655,15 +684,32 @@ def disk(image_id):
         size = request.form.get('size')
         mode = request.form.get('mode')
         count = request.form.get('count', '1')
-        max_data_area_mb = request.form.get('max_data_area_mb', None)
+
+        controls = {}
+        if 'controls' in request.form:
+            try:
+                controls = _parse_controls(request.form['controls'],
+                                           LUN.SETTINGS)
+            except ValueError as err:
+                logger.error("Unexpected or invalid {} controls".format(mode))
+                return jsonify(message="Unexpected or invalid controls - "
+                                       "{}".format(err)), 500
+            logger.debug("{} controls {}".format(mode, controls))
 
         pool, image_name = image_id.split('.')
 
         disk_usable = LUN.valid_disk(config, logger, pool=pool,
                                      image=image_name, size=size, mode=mode,
-                                     count=count, max_data_area_mb=max_data_area_mb)
+                                     count=count, controls=controls)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
+
+        if mode == 'reconfigure':
+            resp_text, resp_code = lun_reconfigure(image_id, controls)
+            if resp_code == 200:
+                return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
+            else:
+                return jsonify(message=resp_text), resp_code
 
         suffixes = [n for n in range(1, int(count) + 1)]
         # make call to local api server first!
@@ -675,7 +721,7 @@ def disk(image_id):
                                                                      sfx)
 
             api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
-                        'mode': mode, 'max_data_area_mb': max_data_area_mb}
+                        'mode': mode, 'controls': request.form['controls']}
 
             resp_text, resp_code = call_api(gateways, '_disk',
                                             image_name,
@@ -740,6 +786,18 @@ def _disk(image_id):
 
         pool_name, image_name = image_id.split('.', 1)
         mode = request.form['mode']
+
+        controls = {}
+        if 'controls' in request.form:
+            try:
+                controls = _parse_controls(request.form['controls'],
+                                           LUN.SETTINGS)
+            except ValueError as err:
+                logger.error("Unexpected or invalid {} controls".format(mode))
+                return jsonify(message="Unexpected or invalid controls - "
+                                       "{}".format(err)), 500
+            logger.debug("{} controls {}".format(mode, controls))
+
         if mode in ['create', 'resize']:
             rqst_fields = set(request.form.keys())
             if not rqst_fields.issuperset(("pool", "size", "owner", "mode")):
@@ -757,7 +815,8 @@ def _disk(image_id):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            lun.max_data_area_mb = request.form.get('max_data_area_mb', None)
+            for k, v in controls.iteritems():
+                setattr(lun, k, v)
 
             if mode == 'create' and len(config.config['disks']) >= 256:
                 logger.error("LUN alloc problem - too many LUNs")
@@ -808,119 +867,22 @@ def _disk(image_id):
 
             lun = LUN(logger, pool_name, image_name, size, disk['owner'])
             if mode == 'deactivate':
-                so = lun.lio_stg_object()
-                if not so:
-                    logger.error("LUN {} already deactivated".format(image_id))
-                    return jsonify(message="LUN already deactivated"), 200
-
-                for alun in so.attached_luns:
-                    for mlun in alun.mapped_luns:
-                        node_acl = mlun.parent_nodeacl
-
-                for attached_lun in so.attached_luns:
-                    for node_acl in attached_lun.parent_tpg.node_acls:
-                        if node_acl.session and \
-                                node_acl.session.get('state', '').upper() == 'LOGGED_IN':
-                            logger.error("LUN {} in-use".format(image_id))
-                            return jsonify(message="LUN deactivate failure - in-use"), 500
-
-                lun.remove_dev_from_lio()
-                if lun.error:
-                    logger.error("LUN deactivate problem - "
-                                 "{}".format(lun.error_msg))
-                    return jsonify(message="LUN deactivate failure"), 500
+                try:
+                    lun.deactivate()
+                except CephiSCSIError as err:
+                    return jsonify(message="deactivate failed - {}".format(err)), 500
 
                 return jsonify(message="LUN deactivated"), 200
-
             elif mode == 'activate':
-                wwn = disk.get('wwn', None)
-                if not wwn:
-                    logger.error("LUN {} missing wwn".format(image_id))
-                    return jsonify(message="LUN activate failure"), 500
+                for k, v in controls.iteritems():
+                    setattr(lun, k, v)
 
-                # re-add backend storage object
-                so = lun.lio_stg_object()
-                if not so:
-                    lun.add_dev_to_lio(wwn)
-                    if lun.error:
-                        logger.error("LUN activate problem - "
-                                     "{}".format(lun.error_msg))
-                        return jsonify(message="LUN activate failure"), 500
-
-                # re-add LUN to target
-                iqn = config.config['gateways']['iqn']
-                ip_list = config.config['gateways']['ip_list']
-
-                # Add the mapping for the lun to ensure the block device is
-                # present on all TPG's
-                gateway = GWTarget(logger, iqn, ip_list)
-
-                gateway.manage('map')
-                if gateway.error:
-                    logger.error("LUN mapping failed : "
-                                 "{}".format(gateway.error_msg))
-                    return jsonify(message="LUN map failed"), 500
-
-                # re-map LUN to hosts
-                client_errors = False
-                for client_iqn in config.config['clients']:
-                    client_metadata = config.config['clients'][client_iqn]
-                    if client_metadata.get('group_name', ''):
-                        continue
-
-                    image_list = client_metadata['luns'].keys()
-                    if image_id not in image_list:
-                        continue
-
-                    client_chap = CHAP(client_metadata['auth']['chap'])
-                    chap_str = client_chap.chap_str
-                    if client_chap.error:
-                        logger.debug("Password decode issue : "
-                                     "{}".format(client_chap.error_msg))
-                        halt("Unable to decode password for "
-                             "{}".format(client_iqn))
-
-                    client = GWClient(logger,
-                                      client_iqn,
-                                      image_list,
-                                      chap_str)
-                    client.manage('present')
-                    if client.error:
-                        logger.error("LUN mapping failed "
-                                     "{} - {}".format(client_iqn,
-                                                      client.error_msg))
-                        client_errors = True
-
-                # re-map LUN to host groups
-                for group_name in config.config['groups']:
-                    host_group = config.config['groups'][group_name]
-                    members = host_group.get('members')
-                    disks = host_group.get('disks').keys()
-                    if image_id not in disks:
-                        continue
-
-                    group = Group(logger, group_name, members, disks)
-                    group.apply()
-                    if group.error:
-                        logger.error("LUN mapping failed "
-                                     "{} - {}".format(group_name,
-                                                      group.error_msg))
-                        client_errors = True
-
-                if client_errors:
-                    return jsonify(message="LUN map failed"), 500
+                try:
+                    lun.activate()
+                except CephiSCSIError as err:
+                    return jsonify(message="activate failed - {}".format(err)), 500
 
                 return jsonify(message="LUN activated"), 200
-
-        elif mode == 'reconfigure':
-            max_data_area_mb = request.form.get('max_data_area_mb', None)
-            resp_text, resp_code = _reconfigure(image_id,
-                                                max_data_area_mb=max_data_area_mb)
-            if resp_code == 200:
-                return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
-            else:
-                return jsonify(message=resp_text), resp_code
-
     else:
         # DELETE request
         # let's assume that the request has been validated by the caller
@@ -958,7 +920,7 @@ def _disk(image_id):
         return jsonify(message="LUN removed"), 200
 
 
-def _reconfigure(image_id, **kwargs):
+def lun_reconfigure(image_id, controls):
     logger.debug("lun reconfigure request")
 
     config.refresh()
@@ -985,23 +947,25 @@ def _reconfigure(image_id, **kwargs):
         return "failed to deactivate disk: {}".format(resp_text), resp_code
 
     pool_name, image_name = image_id.split('.', 1)
-    lun = LUN(logger, pool_name, image_name, 0, disk['owner'])
 
-    for k, v in kwargs.items():
-        # exclude attributes which are unset and reset to defaults
-        # if empty
-        if v is not None:
-            lun.__setattr__(k, v if v != '' else None)
-            if lun.error:
-                resp_text = "Unable to create LUN instance: {}".format(lun.error_msg)
-                resp_code = 500
-                break
+    rbd_image = RBDDev(image_name, 0, pool_name)
+    size = rbd_image.current_size
 
-    if not lun.error:
-        lun.update_config(True)
-        if lun.error:
-            resp_text = "LUN reconfigure failure: {}".format(lun.error_msg)
-            resp_code = 500
+    lun = LUN(logger, pool_name, image_name, size, disk['owner'])
+
+    for k, v in controls.iteritems():
+        setattr(lun, k, v)
+
+    try:
+        lun.activate()
+    except CephiSCSIError as err:
+        logger.error("local LUN activation failed - {}".format(err))
+        resp_code = 500
+        resp_text = "{}".format(err)
+    else:
+        # We already activated this local node, so skip it
+        gateways.remove('127.0.0.1')
+        api_vars['controls'] = json.dumps(controls)
 
     # activate disk
     api_vars['mode'] = 'activate'
@@ -1013,6 +977,15 @@ def _reconfigure(image_id, **kwargs):
     if resp_code == 200 and activate_resp_code != 200:
         resp_text = activate_resp_text
         resp_code = activate_resp_code
+
+    if resp_code == 200:
+        try:
+            lun.commit_controls()
+        except CephiSCSIError as err:
+            resp_text = "Could not commit controls: {}".format(err)
+            resp_code = 500
+        else:
+            config.refresh()
 
     return resp_text, resp_code
 
@@ -1214,7 +1187,7 @@ def _update_client(**kwargs):
         logger.error("client update failed on {} : "
                      "{}".format(kwargs['client_iqn'],
                                  client.error_msg))
-        return 500, "Client update failed"
+        return 500, "Client update failed - {}".format(client.error_msg)
     else:
         config.refresh()
         return 200, "Client configured successfully"

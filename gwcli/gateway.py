@@ -12,6 +12,7 @@ from gwcli.utils import (this_host, response_message, GatewayAPIError,
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import format_lio_yes_no
+from ceph_iscsi_config.gateway import GWTarget
 
 import rtslib_fb.root as root
 
@@ -437,9 +438,10 @@ class Target(UINode):
         reset cmdsn_depth
           - reconfigure attribute=cmdsn_depth value=
         """
-        if attribute not in settings.Settings.GATEWAY_SETTINGS:
+        settings_list = GWTarget.SETTINGS
+        if attribute not in settings_list:
             self.logger.error("supported attributes: {}".format(",".join(
-                sorted(settings.Settings.GATEWAY_SETTINGS))))
+                sorted(settings_list))))
             return
 
         # Issue the api request for the reconfigure
@@ -471,7 +473,8 @@ class Target(UINode):
 
     def _refresh_control_values(self):
         self.control_values = {}
-        for k in settings.Settings.GATEWAY_SETTINGS:
+        settings_list = GWTarget.SETTINGS
+        for k in settings_list:
             val = self._controls.get(k)
             default_val = getattr(settings.config, k, None)
             if k in settings.Settings.LIO_YES_NO_SETTINGS:
