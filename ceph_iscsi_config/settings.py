@@ -16,19 +16,6 @@ def init():
 
 
 class Settings(object):
-    GATEWAY_SETTINGS = [
-        "dataout_timeout",
-        "nopin_response_timeout",
-        "nopin_timeout",
-        "cmdsn_depth",
-        "immediate_data",
-        "initial_r2t",
-        "max_outstanding_r2t",
-        "first_burst_length",
-        "max_burst_length",
-        "max_recv_data_segment_length",
-        "max_xmit_data_segment_length"]
-
     LIO_YES_NO_SETTINGS = ["immediate_data", "initial_r2t"]
 
     _float_regex = re.compile("^[0-9]*\.{1}[0-9]$")

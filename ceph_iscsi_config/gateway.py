@@ -11,30 +11,34 @@ from rtslib_fb.alua import ALUATargetPortGroup
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.utils import (ipv4_addresses, this_host,
-                                     format_lio_yes_no, CephiSCSIInval)
+                                     format_lio_yes_no, CephiSCSIError,
+                                     CephiSCSIInval)
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
+from ceph_iscsi_config.client import GWClient
+from ceph_iscsi_config.gateway_object import GWObject
 
 __author__ = 'pcuzner@redhat.com'
 
 
-class GWTarget(object):
+class GWTarget(GWObject):
     """
     Class representing the state of the local LIO environment
     """
+    # iscsi tpg specific settings.
+    TPG_SETTINGS = [
+        "dataout_timeout",
+        "immediate_data",
+        "initial_r2t",
+        "max_outstanding_r2t",
+        "first_burst_length",
+        "max_burst_length",
+        "max_recv_data_segment_length",
+        "max_xmit_data_segment_length"]
 
-    @staticmethod
-    def get_controls(config):
-        all_controls = {}
-        controls = config.get('controls', {})
-        for k in settings.Settings.GATEWAY_SETTINGS:
-            v = controls.get(k, None)
-            if v is not None:
-                v = settings.Settings.normalize(k, v)
-            if v is None:
-                v = getattr(settings.config, k)
-            all_controls[k] = v
-        return all_controls
+    # Settings for all transport/fabric objects. Using this allows apps like
+    # gwcli to get/set all tpgs/clients under the target instead of per obj.
+    SETTINGS = TPG_SETTINGS + GWClient.SETTINGS
 
     def __init__(self, logger, iqn, gateway_ip_list, enable_portal=True):
         """
@@ -87,33 +91,13 @@ class GWTarget(object):
         self.tpg = None
         self.tpg_list = []
 
-        self.config = Config(self.logger)
-        if self.config.error:
-            self.error = self.config.error
-            self.error_msg = self.config.error_msg
-
-        self.controls = self.config.config.get('controls', {}).copy()
-        self._add_properies()
-
-    def _get_control(self, key):
-        value = self.controls.get(key, None)
-        if value is not None:
-            value = settings.Settings.normalize(key, value)
-        if value is None:
-            return getattr(settings.config, key)
-        return value
-
-    def _set_control(self, key, value):
-        if value is None or \
-                settings.Settings.normalize(key, value) == getattr(settings.config, key):
-            self.controls.pop(key, None)
-        else:
-            self.controls[key] = value
-
-    def _add_properies(self):
-        for k in settings.Settings.GATEWAY_SETTINGS:
-            setattr(GWTarget, k, property(lambda self, k=k: self._get_control(k),
-                                          lambda self, v, k=k: self._set_control(k, v)))
+        try:
+            # We only support global target/tpg controls.
+            super(GWTarget, self).__init__('controls', '', logger,
+                                           GWTarget.SETTINGS)
+        except CephiSCSIError as err:
+            self.error = True
+            self.error_msg = err
 
     def exists(self):
         """
@@ -156,30 +140,28 @@ class GWTarget(object):
 
             for ip in requested_tpg_ips:
                 self.create_tpg(ip)
-        self.update_tpg_controls()
-
-    def update_tpg_controls(self):
-        # Build our set of control overrides
-        controls = {}
-        for k in settings.Settings.GATEWAY_SETTINGS:
-            controls[k] = getattr(self, k)
-
-        self.logger.debug("(GWGateway.update_tpg_controls) {}".format(controls))
 
         try:
-            for tpg in self.tpg_list:
-                tpg.set_parameter('ImmediateData', format_lio_yes_no(controls['immediate_data']))
-                tpg.set_parameter('InitialR2T', format_lio_yes_no(controls['initial_r2t']))
-                tpg.set_parameter('MaxOutstandingR2T', str(controls['max_outstanding_r2t']))
-                tpg.set_parameter('FirstBurstLength', str(controls['first_burst_length']))
-                tpg.set_parameter('MaxBurstLength', str(controls['max_burst_length']))
-                tpg.set_parameter('MaxRecvDataSegmentLength',
-                                  str(controls['max_recv_data_segment_length']))
-                tpg.set_parameter('MaxXmitDataSegmentLength',
-                                  str(controls['max_xmit_data_segment_length']))
+            self.update_tpg_controls()
         except RTSLibError as err:
             self.error = True
             self.error_msg = "Failed to update TPG control parameters - {}".format(err)
+
+    def update_tpg_controls(self):
+        self.logger.debug("(GWGateway.update_tpg_controls) {}".format(self.controls))
+        for tpg in self.tpg_list:
+            tpg.set_parameter('ImmediateData',
+                              format_lio_yes_no(self.immediate_data))
+            tpg.set_parameter('InitialR2T',
+                              format_lio_yes_no(self.initial_r2t))
+            tpg.set_parameter('MaxOutstandingR2T',
+                              str(self.max_outstanding_r2t))
+            tpg.set_parameter('FirstBurstLength', str(self.first_burst_length))
+            tpg.set_parameter('MaxBurstLength', str(self.max_burst_length))
+            tpg.set_parameter('MaxRecvDataSegmentLength',
+                              str(self.max_recv_data_segment_length))
+            tpg.set_parameter('MaxXmitDataSegmentLength',
+                              str(self.max_xmit_data_segment_length))
 
     def enable_active_tpg(self, config):
         """
@@ -579,11 +561,6 @@ class GWTarget(object):
 
                     config.add_item("gateways", "iqn", initial_value=self.iqn)
                     config.commit()
-
-        elif mode == 'reconfigure':
-            if self.controls != config.config.get('controls', {}):
-                config.set_item('controls', '', self.controls.copy())
-                config.commit()
 
         elif mode == 'clearconfig':
             # Called by API from CLI clearconfig command

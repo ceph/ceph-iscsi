@@ -12,11 +12,11 @@ from rtslib_fb.utils import RTSLibError
 
 import ceph_iscsi_config.settings as settings
 
-from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      valid_size, get_pool_id, ipv4_addresses,
                                      get_pools, get_rbd_size, this_host,
                                      human_size, CephiSCSIError)
+from ceph_iscsi_config.gateway_object import GWObject
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -219,7 +219,11 @@ class RBDDev(object):
                          " (boolean)")
 
 
-class LUN(object):
+class LUN(GWObject):
+    SETTINGS = [
+        "max_data_area_mb",
+        "qfull_timeout",
+        "osd_op_timeout"]
 
     def __init__(self, logger, pool, image, size, allocating_host):
         self.logger = logger
@@ -228,7 +232,6 @@ class LUN(object):
         self.pool_id = 0
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}.{}'.format(self.pool, self.image)
-        self.controls = {}
 
         # the allocating host could be fqdn or shortname - but the config
         # only uses shortname so it needs to be converted to shortname format
@@ -239,30 +242,14 @@ class LUN(object):
         self.error_msg = ''
         self.num_changes = 0
 
-        self.config = Config(logger)
-        if self.config.error:
-            self.error = self.config.error
-            self.error_msg = self.config.error_msg
-            return
+        try:
+            super(LUN, self).__init__('disks', self.config_key, logger,
+                                      LUN.SETTINGS)
+        except CephiSCSIError as err:
+            self.error = True
+            self.error_msg = err
 
         self._validate_request()
-        if self.config_key in self.config.config['disks']:
-            self.controls = self.config.config['disks'][self.config_key].get('controls', {}).copy()
-
-    def _get_max_data_area_mb(self):
-        max_data_area_mb = self.controls.get('max_data_area_mb', None)
-        if max_data_area_mb is None:
-            return settings.config.max_data_area_mb
-        return max_data_area_mb
-
-    def _set_max_data_area_mb(self, value):
-        if value is None or str(value) == str(settings.config.max_data_area_mb):
-            self.controls.pop('max_data_area_mb', None)
-        else:
-            self.controls['max_data_area_mb'] = value
-
-    max_data_area_mb = property(_get_max_data_area_mb, _set_max_data_area_mb,
-                                doc="get/set kernel data area (MiB)")
 
     def _validate_request(self):
 
@@ -363,19 +350,6 @@ class LUN(object):
         elif desired_state == 'absent':
 
             self.remove_lun()
-
-    def update_config(self, commit=False):
-        self.logger.debug("LUN.update_config starting")
-
-        # delete/update on-disk attributes
-        disk_attr = self.config.config['disks'][self.config_key]
-        if self.controls != disk_attr.get('controls', {}):
-            disk_attr['controls'] = self.controls
-            self.config.update_item('disks', self.config_key, disk_attr)
-        if commit and self.config.changed:
-            self.config.commit()
-            self.error = self.config.error
-            self.error_msg = self.config.error_msg
 
     def allocate(self):
         self.logger.debug("LUN.allocate starting, listing rbd devices")
@@ -525,7 +499,7 @@ class LUN(object):
                     if self.error:
                         return
 
-                    self.update_config()
+                    self.commit_controls()
                     self.logger.debug("(LUN.allocate) registered '{}' to LIO "
                                       "with wwn '{}' from the config "
                                       "object".format(self.image,
@@ -656,10 +630,9 @@ class LUN(object):
                          "'{}' to LIO".format(self.config_key))
 
         # extract control parameter overrides (if any) or use default
-        controls = self.controls.copy()
+        controls = {}
         for k in ['max_data_area_mb']:
-            if controls.get(k, None) is None:
-                controls[k] = getattr(settings.config, k, None)
+            controls[k] = getattr(self, k)
 
         control_string = gen_control_string(controls)
         if control_string:
@@ -671,7 +644,7 @@ class LUN(object):
             # optional osd timeout
             cfgstring = "rbd/{}/{};osd_op_timeout={}".format(self.pool,
                                                              self.image,
-                                                             settings.config.osd_op_timeout)
+                                                             self.osd_op_timeout)
             if (settings.config.cephconf != '/etc/ceph/ceph.conf'):
                 cfgstring += ";conf={}".format(settings.config.cephconf)
 
@@ -689,8 +662,7 @@ class LUN(object):
 
         try:
             new_lun.set_attribute("cmd_time_out", 0)
-            new_lun.set_attribute("qfull_time_out",
-                                  settings.config.qfull_timeout)
+            new_lun.set_attribute("qfull_time_out", self.qfull_timeout)
         except RTSLibError as err:
             self.error = True
             self.error_msg = ("Could not set LIO device attribute "
