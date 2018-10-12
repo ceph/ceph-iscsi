@@ -17,6 +17,9 @@ from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      get_pools, get_rbd_size, this_host,
                                      human_size, CephiSCSIError)
 from ceph_iscsi_config.gateway_object import GWObject
+from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.client import GWClient, CHAP
+from ceph_iscsi_config.group import Group
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -351,6 +354,95 @@ class LUN(GWObject):
         elif desired_state == 'absent':
 
             self.remove_lun()
+
+    def deactivate(self):
+        so = self.lio_stg_object()
+        if not so:
+            # Could be due to a restart after failure. Just log and ignore.
+            self.logger.warning("LUN {} already deactivated".format(self.image))
+            return
+
+        for alun in so.attached_luns:
+            for mlun in alun.mapped_luns:
+                node_acl = mlun.parent_nodeacl
+
+        for attached_lun in so.attached_luns:
+            for node_acl in attached_lun.parent_tpg.node_acls:
+                if node_acl.session and \
+                        node_acl.session.get('state', '').upper() == 'LOGGED_IN':
+                    raise CephiSCSIError("LUN {} in-use".format(self.image))
+
+        self.remove_dev_from_lio()
+        if self.error:
+            raise CephiSCSIError("LUN deactivate failure - {}".format(self.error_msg))
+
+    def activate(self):
+        disk = self.config.config['disks'].get(self.config_key, None)
+        if not disk:
+            raise CephiSCSIError("Image {} not found.".format(self.image))
+
+        wwn = disk.get('wwn', None)
+        if not wwn:
+            raise CephiSCSIError("LUN {} missing wwn".format(self.image))
+
+        # re-add backend storage object
+        so = self.lio_stg_object()
+        if not so:
+            self.add_dev_to_lio(wwn)
+            if self.error:
+                raise CephiSCSIError("LUN activate failure - {}".format(self.error_msg))
+
+        # re-add LUN to target
+        iqn = self.config.config['gateways']['iqn']
+        ip_list = self.config.config['gateways']['ip_list']
+
+        # Add the mapping for the lun to ensure the block device is
+        # present on all TPG's
+        gateway = GWTarget(self.logger, iqn, ip_list)
+
+        gateway.manage('map')
+        if gateway.error:
+            raise CephiSCSIError("LUN mapping failed - {}".format(gateway.error_msg))
+
+        # re-map LUN to hosts
+        client_err = ''
+        for client_iqn in self.config.config['clients']:
+            client_metadata = self.config.config['clients'][client_iqn]
+            if client_metadata.get('group_name', ''):
+                continue
+
+            image_list = client_metadata['luns'].keys()
+            if self.config_key not in image_list:
+                continue
+
+            client_chap = CHAP(client_metadata['auth']['chap'])
+            chap_str = client_chap.chap_str
+            if client_chap.error:
+                raise CephiSCSIError("Password decode issue : "
+                                     "{}".format(client_chap.error_msg))
+
+            client = GWClient(self.logger, client_iqn, image_list, chap_str)
+            client.manage('present')
+            if client.error:
+                client_err = "LUN mapping failed {} - {}".format(client_iqn,
+                                                                 client.error_msg)
+
+        # re-map LUN to host groups
+        for group_name in self.config.config['groups']:
+            host_group = self.config.config['groups'][group_name]
+            members = host_group.get('members')
+            disks = host_group.get('disks').keys()
+            if self.config_key not in disks:
+                continue
+
+            group = Group(self.logger, group_name, members, disks)
+            group.apply()
+            if group.error:
+                client_err = "LUN mapping failed {} - {}".format(group_name,
+                                                                 group.error_msg)
+
+        if client_err:
+            raise CephiSCSIError(client_err)
 
     def allocate(self):
         self.logger.debug("LUN.allocate starting, listing rbd devices")
