@@ -223,7 +223,8 @@ class LUN(GWObject):
     SETTINGS = [
         "max_data_area_mb",
         "qfull_timeout",
-        "osd_op_timeout"]
+        "osd_op_timeout",
+        "hw_max_sectors"]
 
     def __init__(self, logger, pool, image, size, allocating_host):
         self.logger = logger
@@ -631,7 +632,7 @@ class LUN(GWObject):
 
         # extract control parameter overrides (if any) or use default
         controls = {}
-        for k in ['max_data_area_mb']:
+        for k in ['max_data_area_mb', 'hw_max_sectors']:
             controls[k] = getattr(self, k)
 
         control_string = gen_control_string(controls)
