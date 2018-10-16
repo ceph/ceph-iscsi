@@ -158,8 +158,8 @@ class Disks(UIGroup):
         create rbd.testimage 100g
 
         The syntax of each parameter is as follows;
-        pool  : Pool and image name may contain a-z, A-Z, 0-9 or '-' chars
-        image
+        pool  : Pool and image name may contain a-z, A-Z, 0-9, '_', or '-'
+        image   characters.
         size  : integer, suffixed by the allocation unit - either m/M, g/G or
                 t/T representing the MB/GB/TB [1]
         count : integer (default is 1)[2]. If the request provides a count=<n>
