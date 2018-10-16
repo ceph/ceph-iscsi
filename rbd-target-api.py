@@ -97,6 +97,12 @@ def requires_restricted_auth(f):
     return decorated
 
 
+@app.errorhandler(Exception)
+def unhandled_exception(e):
+    app.logger.exception("Unhandled Exception")
+    return jsonify(message="Unhandled exception: {}".format(e)), 500
+
+
 @app.route('/api', methods=['GET'])
 def get_api_info():
     """
@@ -1796,7 +1802,12 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
 
             else:
                 fail_msg = "failed on {}. ".format(gw)
-            fail_msg += api.response.json()['message']
+            try:
+                fail_msg += api.response.json()['message']
+            except Exception:
+                logger.debug(api.response.text)
+                fail_msg += "unknown failure"
+
             logger.debug(fail_msg)
 
             return fail_msg, api.response.status_code
