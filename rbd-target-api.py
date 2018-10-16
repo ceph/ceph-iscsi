@@ -97,6 +97,12 @@ def requires_restricted_auth(f):
     return decorated
 
 
+@app.errorhandler(Exception)
+def unhandled_exception(e):
+    app.logger.exception("Unhandled Exception")
+    return jsonify(message="Unhandled exception: {}".format(e)), 500
+
+
 @app.route('/api', methods=['GET'])
 def get_api_info():
     """
