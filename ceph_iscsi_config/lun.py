@@ -843,9 +843,11 @@ class LUN(GWObject):
                 return "pool name is invalid"
 
         if mode == 'create':
-            disk_regex = re.compile("^[a-zA-Z0-9\-]+$")
+            disk_regex = re.compile("^[a-zA-Z0-9\-_]+$")
+            if not disk_regex.search(kwargs['pool']):
+                return "Invalid pool name (use alphanumeric, '_', or '-' characters)"
             if not disk_regex.search(kwargs['image']):
-                return "Invalid image name"
+                return "Invalid image name (use alphanumeric, '_', or '-' characters)"
 
             if kwargs['count'].isdigit():
                 if not 1 <= int(kwargs['count']) <= 10:
