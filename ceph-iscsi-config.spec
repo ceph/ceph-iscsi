@@ -1,9 +1,26 @@
+#
+# spec file for package ceph-iscsi-config
+#
+# Copyright (C) 2017-2018 The Ceph iSCSI Config Project Developers. See
+# COPYING file at the top-level directory of this distribution and at
+# https://github.com/ceph-iscsi-config/ceph/blob/master/COPYING
+#
+# All modifications and additions to the file contributed by third parties
+# remain the property of their copyright owners, unless otherwise agreed
+# upon.
+#
+# This file is under the GNU General Public License, version 3 or any 
+# later version.
+#
+# Please submit bugfixes or comments via http://tracker.ceph.com/
+#
+
 Name:           ceph-iscsi-config
 Version:        2.7
 Release:        1%{?dist}
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
-License:        GPLv3
+License:        GPL-3.0-or-later
 URL:            https://github.com/ceph/ceph-iscsi-config
 Source0:        https://github.com/ceph/ceph-iscsi-config/archive/%{version}/%{name}-%{version}.tar.gz
 
