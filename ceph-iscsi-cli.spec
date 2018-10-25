@@ -1,9 +1,26 @@
+#
+# spec file for package ceph-iscsi-cli
+#
+# Copyright (C) 2017-2018 The Ceph iSCSI CLI Project Developers. See
+# COPYING file at the top-level directory of this distribution and at
+# https://github.com/ceph-iscsi-cli/ceph/blob/master/COPYING
+#
+# All modifications and additions to the file contributed by third parties
+# remain the property of their copyright owners, unless otherwise agreed
+# upon.
+#
+# This file is under the GNU General Public License, version 3 or any
+# later version.
+#
+# Please submit bugfixes or comments via http://tracker.ceph.com/
+#
+
 Name:		ceph-iscsi-cli
 Version:	2.8
 Release:	1%{?dist}
 Summary:	CLI configuration tool to manage multiple iSCSI gateways
 Group:		Applications/System
-License:	GPLv3
+License:	GPL-3.0-or-later
 
 URL:		https://github.com/ceph/ceph-iscsi-cli
 Source0:	https://github.com/ceph/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
@@ -58,7 +75,13 @@ install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependenc
 
 %files
 %doc README
+%if 0%{?suse_version}
+%license LICENSE
+%license COPYING
+%else
 %doc LICENSE
+%doc COPYING
+%endif
 %{_bindir}/gwcli
 %{_bindir}/rbd-target-api
 %{_unitdir}/rbd-target-api.service

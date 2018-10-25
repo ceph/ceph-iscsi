@@ -1,0 +1,7 @@
+Format-Specification: http://anonscm.debian.org/viewvc/dep/web/deps/dep5/copyright-format.xml?revision=279&view=markup
+Name: ceph-iscsi-cli
+Maintainer: Jason Dillaman <dillaman@redhat.com>
+Source: http://github.com/ceph/ceph-iscsi-cli
+
+Files: *
+License: GPL-3.0-or-later (see LICENSE)
