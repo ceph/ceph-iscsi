@@ -315,8 +315,8 @@ def gen_file_hash(filename, hash_type='sha256'):
     :return: checkum (str)
     """
 
-    if (hash_type not in ['sha1', 'sha256', 'sha512', 'md5'] or
-            not os.path.exists(filename)):
+    if (hash_type not in ['sha1', 'sha256', 'sha512', 'md5'] or not
+            os.path.exists(filename)):
         return ''
 
     hash_function = getattr(hashlib, hash_type)

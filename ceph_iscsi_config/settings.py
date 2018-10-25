@@ -18,8 +18,8 @@ def init():
 class Settings(object):
     LIO_YES_NO_SETTINGS = ["immediate_data", "initial_r2t"]
 
-    _float_regex = re.compile("^[0-9]*\.{1}[0-9]$")
-    _int_regex = re.compile("^[0-9]+$")
+    _float_regex = re.compile(r"^[0-9]*\.{1}[0-9]$")
+    _int_regex = re.compile(r"^[0-9]+$")
 
     @staticmethod
     def normalize_controls(raw_controls, settings_list):
