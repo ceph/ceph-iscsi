@@ -20,7 +20,7 @@ Version:	2.8
 Release:	1%{?dist}
 Summary:	CLI configuration tool to manage multiple iSCSI gateways
 Group:		Applications/System
-License:	GPLv3
+License:	GPL-3.0-or-later
 
 URL:		https://github.com/ceph/ceph-iscsi-cli
 Source0:	https://github.com/ceph/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
