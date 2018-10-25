@@ -69,7 +69,13 @@ install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 /bin/systemctl --system enable rbd-target-gw &> /dev/null || :
 
 %files
+%if 0%{?suse_version}
+%license LICENSE
+%license COPYING
+%else
 %doc LICENSE
+%doc COPYING
+%endif
 %doc README
 %doc iscsi-gateway.cfg_sample
 %{python2_sitelib}/*
