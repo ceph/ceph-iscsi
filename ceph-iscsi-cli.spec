@@ -75,13 +75,8 @@ install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependenc
 
 %files
 %doc README
-%if 0%{?suse_version}
 %license LICENSE
 %license COPYING
-%else
-%doc LICENSE
-%doc COPYING
-%endif
 %{_bindir}/gwcli
 %{_bindir}/rbd-target-api
 %{_unitdir}/rbd-target-api.service
