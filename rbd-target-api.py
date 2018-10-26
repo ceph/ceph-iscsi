@@ -52,8 +52,8 @@ def requires_basic_auth(f):
         if not auth:
             return jsonify(message="Missing credentials"), 401
 
-        if (auth.username != settings.config.api_user or
-           auth.password != settings.config.api_password):
+        if auth.username != settings.config.api_user or \
+           auth.password != settings.config.api_password:
             return jsonify(message="username/password mismatch with the "
                                    "configuration file"), 401
 
@@ -87,8 +87,8 @@ def requires_restricted_auth(f):
         if not auth:
             return jsonify(message="Missing credentials"), 401
 
-        if (auth.username != settings.config.api_user or
-                auth.password != settings.config.api_password):
+        if auth.username != settings.config.api_user or \
+           auth.password != settings.config.api_password:
             return jsonify(message="username/password mismatch with the "
                                    "configuration file"), 401
 
@@ -468,8 +468,7 @@ def gateway(gateway_name=None):
     current_clients = config.config['clients']
     target_iqn = config.config['gateways'].get('iqn')
 
-    total_objects = (len(current_disks.keys()) +
-                     len(current_clients.keys()))
+    total_objects = len(current_disks.keys()) + len(current_clients.keys())
 
     # if the config is empty, it doesn't matter what nosync is set to
     if total_objects == 0:
@@ -1016,7 +1015,7 @@ def disksnap(image_id, name):
         -X DELETE https://192.168.122.69:5000/api/disksnap/rbd.image/new1
     """
 
-    disk_regex = re.compile("[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
+    disk_regex = re.compile(r"[a-zA-Z0-9\-]+(\.)[a-zA-Z0-9\-]+")
     if not disk_regex.search(image_id):
         logger.debug("snapshot request rejected due to invalid image name")
         return jsonify(message="image id format is invalid - must be "
