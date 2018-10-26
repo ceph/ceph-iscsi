@@ -15,27 +15,27 @@
 # Please submit bugfixes or comments via http://tracker.ceph.com/
 #
 
-Name:		ceph-iscsi-cli
-Version:	2.8
-Release:	1%{?dist}
-Summary:	CLI configuration tool to manage multiple iSCSI gateways
-Group:		Applications/System
-License:	GPL-3.0-or-later
+Name:           ceph-iscsi-cli
+Version:        2.8
+Release:        1%{?dist}
+Summary:        CLI configuration tool to manage multiple iSCSI gateways
+Group:          System/Filesystems
+License:        GPL-3.0-or-later
 
-URL:		https://github.com/ceph/ceph-iscsi-cli
-Source0:	https://github.com/ceph/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
-BuildArch:  noarch
+URL:            https://github.com/ceph/ceph-iscsi-cli
+Source0:        https://github.com/ceph/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
+BuildArch:      noarch
 
-BuildRequires: python2-devel
-BuildRequires: python-setuptools
-BuildRequires: systemd
+BuildRequires:  python2-devel
+BuildRequires:  python-setuptools
+BuildRequires:  systemd
 
-Requires: python-rtslib >= 2.1.fb67
-Requires: ceph-iscsi-config >= 2.6
-Requires: python-requests >= 2.6
-Requires: python-configshell >= 1.1
-Requires: python-flask >= 0.10.1
-Requires: pyOpenSSL >= 0.13
+Requires:       python-rtslib >= 2.1.fb67
+Requires:       ceph-iscsi-config >= 2.6
+Requires:       python-requests >= 2.6
+Requires:       python-configshell >= 1.1
+Requires:       python-flask >= 0.10.1
+Requires:       pyOpenSSL >= 0.13
 
 %description
 This package provides a CLI interface similar to the targetcli tool used to
