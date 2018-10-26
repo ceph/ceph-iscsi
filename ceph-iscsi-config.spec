@@ -18,6 +18,7 @@
 Name:           ceph-iscsi-config
 Version:        2.7
 Release:        1%{?dist}
+Group:          System/Filesystems
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
 License:        GPL-3.0-or-later
