@@ -76,7 +76,7 @@ class HostGroups(UIGroup):
             return
 
         grp_regex = re.compile(
-            "^[\w\@\-\_]{{1,{}}}$".format(HostGroups.group_name_length))
+            r"^[\w\@\-\_]{{1,{}}}$".format(HostGroups.group_name_length))
         if not grp_regex.search(group_name):
             self.logger.error("Invalid group name - max of {} chars of "
                               "alphanumeric and -,_,@ "

@@ -210,8 +210,8 @@ def valid_credentials(credentials_str, auth_type='chap'):
         # [0-9a-zA-Z] and '.' ':' '@' '_' '-'
         # password is 12-16 chars long containing any alphanumeric in
         # [0-9a-zA-Z] and '@' '-' '_' or !,_,& symbol
-        usr_regex = re.compile("^[\w\\.\:\@\_\-]{8,64}$")
-        pw_regex = re.compile("^[\w\@\-\_]{12,16}$")
+        usr_regex = re.compile(r"^[\w\\.\:\@\_\-]{8,64}$")
+        pw_regex = re.compile(r"^[\w\@\-\_]{12,16}$")
         if not usr_regex.search(user_name) or not pw_regex.search(password):
             return False
 

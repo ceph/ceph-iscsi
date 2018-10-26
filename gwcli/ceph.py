@@ -333,8 +333,7 @@ class RadosPool(UINode):
         pool_type = {1: ("x{}".format(self.pool_md['size']),
                          'replicated'),
                      3: ("{}+{}".format(self.pool_md['min_size'],
-                                        (self.pool_md['size'] -
-                                         self.pool_md['min_size'])),
+                                        self.pool_md['size'] - self.pool_md['min_size']),
                          "erasure")}
         self.desc, self.type = pool_type[self.pool_md['type']]
 
