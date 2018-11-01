@@ -13,7 +13,7 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (get_ip, gen_file_hash)
+from ceph_iscsi_config.utils import (resolve_ip_addresses, gen_file_hash)
 
 
 __author__ = 'Paul Cuzner'
@@ -47,7 +47,7 @@ def get_config():
     """
 
     http_mode = "https" if settings.config.api_secure else "http"
-    api_rqst = "{}://127.0.0.1:{}/api/config".format(http_mode,
+    api_rqst = "{}://localhost:{}/api/config".format(http_mode,
                                                      settings.config.api_port)
     api = APIRequest(api_rqst)
     api.get()
@@ -80,7 +80,7 @@ def valid_gateway(gw_name, gw_ip, config):
     """
     validate the request for a new gateway
     :param gw_name: (str) host (shortname) of the gateway
-    :param gw_ip: (str) ipv4 address on the gw that will be used for iSCSI
+    :param gw_ip: (str) ip address on the gw that will be used for iSCSI
     :param config: (dict) current config
     :return: (str) "ok" or error description
     """
@@ -95,14 +95,13 @@ def valid_gateway(gw_name, gw_ip, config):
         return "IP address already defined to the configuration"
 
     # validate the gateway name is resolvable
-    if get_ip(gw_name) == '0.0.0.0':
-        return ("Gateway '{}' is not resolvable to an ipv4"
-                " address".format(gw_name))
+    if not resolve_ip_addresses(gw_name):
+        return ("Gateway '{}' is not resolvable to an IP address".format(gw_name))
 
-    # validate the ip_address is valid ipv4
-    if get_ip(gw_ip) == '0.0.0.0':
+    # validate the ip_address is valid ip
+    if not resolve_ip_addresses(gw_ip):
         return ("IP address provided is not usable (name doesn't"
-                " resolve, or not a valid ipv4 address)")
+                " resolve, or not a valid IPv4/IPv6 address)")
 
     # At this point the request seems reasonable, so lets check a bit deeper
 
@@ -111,11 +110,11 @@ def valid_gateway(gw_name, gw_ip, config):
                                      settings.config.api_port)
 
     # check the intended host actually has the requested IP available
-    api = APIRequest(gw_api + '/sysinfo/ipv4_addresses')
+    api = APIRequest(gw_api + '/sysinfo/ip_addresses')
     api.get()
 
     if api.response.status_code != 200:
-        return ("ipv4_addresses query to {} failed - check "
+        return ("ip_addresses query to {} failed - check "
                 "rbd-target-api log. Is the API server "
                 "running and in the right mode (http/https)?".format(gw_name))
 
@@ -440,26 +439,6 @@ def console_message(text, color='green'):
                               '\x1b[0m'))
     else:
         print(text)
-
-
-def get_port_state(ip_address, port):
-    """
-    Determine port state
-    :param ip_address: ipv4 address dotted quad string
-    :param port: port number
-    :return: 0 = port open, !=0 port closed/inaccessible
-    """
-
-    socket.setdefaulttimeout(1)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        result = sock.connect_ex((ip_address, port))
-        sock.shutdown(socket.SHUT_RDWR)
-        sock.close()
-    except socket.error:
-        result = 16
-
-    return result
 
 
 def cmd_exists(command):

@@ -70,7 +70,7 @@ class Clients(UIGroup):
             return
 
         # Issue the API call to create the client
-        client_api = ('{}://127.0.0.1:{}/api/'
+        client_api = ('{}://localhost:{}/api/'
                       'client/{}'.format(self.http_mode,
                                          settings.config.api_port,
                                          client_iqn))
@@ -116,7 +116,7 @@ class Clients(UIGroup):
 
         client_api = ('{}://{}:{}/api/'
                       'client/{}'.format(self.http_mode,
-                                         "127.0.0.1",
+                                         "localhost",
                                          settings.config.api_port,
                                          client_iqn))
         api = APIRequest(client_api)
@@ -339,7 +339,7 @@ class Client(UINode):
 
         api_vars = {"chap": chap}
 
-        clientauth_api = ('{}://127.0.0.1:{}/api/'
+        clientauth_api = ('{}://localhost:{}/api/'
                           'clientauth/{}'.format(self.http_mode,
                                                  settings.config.api_port,
                                                  self.client_iqn))
@@ -505,7 +505,7 @@ class Client(UINode):
 
         api_vars = {"disk": disk}
 
-        clientlun_api = ('{}://127.0.0.1:{}/api/'
+        clientlun_api = ('{}://localhost:{}/api/'
                          'clientlun/{}'.format(self.http_mode,
                                                settings.config.api_port,
                                                self.client_iqn))
