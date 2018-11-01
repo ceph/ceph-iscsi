@@ -1,0 +1,27 @@
+[Unit]
+Description=Ceph iscsi target configuration API
+
+Requires=sys-kernel-config.mount
+After=sys-kernel-config.mount network-online.target rbd-target-gw.service
+BindsTo=rbd-target-gw.service
+Wants=network-online.target
+
+[Service]
+LimitNOFILE=1048576
+LimitNPROC=1048576
+EnvironmentFile=-/etc/sysconfig/ceph
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/rbd-target-api
+ExecReload=/usr/bin/kill -HUP $MAINPID
+PrivateDevices=yes
+ProtectHome=true
+ProtectSystem=full
+PrivateTmp=true
+Restart=on-failure
+StartLimitInterval=30min
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target
