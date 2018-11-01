@@ -1,0 +1,8 @@
+Python package and systemd configuration to support configuration management tasks when using LIO to provide
+an iSCSI gateway to a ceph cluster
+
+This package must be installed on each target gateway host.
+
+In addition to providing the configuration logic (ceph_iscsi_config package), a daemon is also provided which
+handles the restoration of the LIO configuration following a node reboot/outage.
+
