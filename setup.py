@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 from setuptools import setup
+
 import distutils.command.install_scripts
 import shutil
 import os
@@ -26,18 +27,21 @@ class StripExtension(distutils.command.install_scripts.install_scripts):
 
 
 setup(
-    name="gwcli",
-    version="2.7",
-    description="cli interface to iscsi gateways based on configshell_fb modules",
+    name="ceph_iscsi",
+    version="3.0",
+    description="Common classes/functions and CLI tools used to configure iSCSI "
+                "gateways backed by Ceph RBD",
     long_description=long_description,
     author="Paul Cuzner",
     author_email="pcuzner@redhat.com",
-    url="http://github.com/pcuzner/ceph-iscsi-cli",
+    url="http://github.com/pcuzner/ceph-iscsi",
     license="GPLv3",
     packages=[
+        "ceph_iscsi_config",
         "gwcli"
     ],
     scripts=[
+        "rbd-target-gw.py",
         'gwcli.py',
         'rbd-target-api.py'
     ],
