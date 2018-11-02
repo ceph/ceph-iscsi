@@ -972,7 +972,7 @@ class LUN(GWObject):
                 with cluster.open_ioctx(pool) as ioctx:
 
                     pool_disks = [disk_key for disk_key in srtd_disks
-                                  if disk_key.startswith(pool)]
+                                  if disk_key.startswith(pool + '.')]
                     for disk_key in pool_disks:
 
                         pool, image_name = disk_key.split('.')
