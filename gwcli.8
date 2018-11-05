@@ -128,7 +128,7 @@ Gateways provide the access points for rbd images over iSCSI, so there should be
 .PP
 .TP
 \fB/iscsi-target/<iqn>/ create <node_name> <portal_ip_address>
-Gateways are defined by a node name (preferably a shortname, but it must resolve), and an IPv4 address that the iSCSI 'service' will be bound to (i.e. the iSCSI portal IP address). When adding a gateway, the candidate machine will be checked to ensure the relevant files and daemons are in place.
+Gateways are defined by a node name (preferably a shortname, but it must resolve), and an IPv4/IPv6 address that the iSCSI 'service' will be bound to (i.e. the iSCSI portal IP address). When adding a gateway, the candidate machine will be checked to ensure the relevant files and daemons are in place.
 .SH HOST-GROUPS
 Host groups provide a more convenient way of managing multiple servers that must share the same disk masking configuration. For example in a RHV/oVirt or Vmware environment, each host needs access to the same LUNs. Host groups allow you to create a logical group which contains the hosts and the disks that each host in the group should have access to. Please note that sharing devices across hosts needs a cluster aware filesystem or equivalent locking to avoid data corruption.
 .PP

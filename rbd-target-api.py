@@ -8,6 +8,7 @@ import logging
 import logging.handlers
 from logging.handlers import RotatingFileHandler
 import ssl
+import operator
 import OpenSSL
 import threading
 import time
@@ -15,7 +16,7 @@ import inspect
 import re
 import platform
 
-from functools import wraps
+from functools import (reduce, wraps)
 from rpm import labelCompare
 import rados
 import rbd
@@ -30,8 +31,9 @@ from ceph_iscsi_config.group import Group
 from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.utils import (get_ip, ipv4_addresses, gen_file_hash,
-                                     valid_rpm, CephiSCSIError)
+from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
+                                     ip_addresses, gen_file_hash, valid_rpm,
+                                     CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
                          valid_client, valid_snapshot_name, GatewayAPIError)
@@ -72,15 +74,22 @@ def requires_restricted_auth(f):
     def decorated(*args, **kwargs):
 
         # First check that the source of the request is actually valid
-        local_gw = ['127.0.0.1']
         gw_names = [gw for gw in config.config['gateways']
                     if isinstance(config.config['gateways'][gw], dict)]
-        gw_ips = [get_ip(gw_name) for gw_name in gw_names] + \
-            local_gw + settings.config.trusted_ip_list
+        gw_names.append('localhost')
+        gw_names += config.config['gateways'].get('ip_list', [])
 
-        if request.remote_addr not in gw_ips:
+        gw_ips = reduce(operator.concat,
+                        [resolve_ip_addresses(gw_name) for gw_name in gw_names]) + \
+            settings.config.trusted_ip_list
+
+        # remove interface scope suffix and IPv4-over-IPv6 prefix
+        remote_addr = request.remote_addr.rsplit('%', 1)[0]
+        remote_addr = remote_addr.split('::ffff:', 1)[-1]
+
+        if remote_addr not in gw_ips:
             return jsonify(message="API access not available to "
-                                   "{}".format(request.remote_addr)), 403
+                                   "{}".format(remote_addr)), 403
 
         # check credentials supplied in the http request are valid
         auth = request.authorization
@@ -154,15 +163,15 @@ def get_api_info():
 def get_sys_info(query_type=None):
     """
     Provide system information based on the query_type
-    Valid query types are: ipv4_addresses, checkconf and checkversions
+    Valid query types are: ip_addresses, checkconf and checkversions
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/sysinfo/ipv4_addresses
+    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/sysinfo/ip_addresses
     """
 
-    if query_type == 'ipv4_addresses':
+    if query_type == 'ip_addresses':
 
-        return jsonify(data=ipv4_addresses()), 200
+        return jsonify(data=ip_addresses()), 200
 
     elif query_type == 'checkconf':
 
@@ -425,7 +434,7 @@ def gateway(gateway_name=None):
     Define iscsi gateway(s) across node(s), adding TPGs, disks and clients
     The call requires the following variables to be set;
     :param gateway_name: (str) gateway name
-    :param ip_address: (str) ipv4 dotted quad for the address iSCSI should use
+    :param ip_address: (str) IPv4/IPv6 address iSCSI should use
     :param nosync: (bool) whether to sync the LIO objects to the new gateway
            default: FALSE
     :param skipchecks: (bool) whether to skip OS/software versions checks
@@ -477,11 +486,10 @@ def gateway(gateway_name=None):
     gateway_ip_list = config.config['gateways'].get('ip_list', [])
 
     gateway_ip_list.append(ip_address)
-
     first_gateway = (len(gateway_ip_list) == 1)
 
     if first_gateway:
-        gateways = ['127.0.0.1']
+        gateways = ['localhost']
     else:
         gateways = gateway_ip_list
 
@@ -536,13 +544,15 @@ def _gateway(gateway_name=None):
                            gateway_ip_list)
 
         if gateway.error:
-            logger.error("Unable to create an instance of the GWTarget class")
+            logger.error("Unable to create an instance of the GWTarget class: "
+                         "{}".format(gateway.error_msg))
             return jsonify(message="Failed to create the gateway"), 500
 
         gateway.manage(target_mode)
         if gateway.error:
-            logger.error("manage({}) logic failed for {}".format(target_mode,
-                                                                 gateway_name))
+            logger.error("manage({}) logic failed for {}: "
+                         "{}".format(target_mode, gateway_name,
+                                     gateway.error_msg))
             return jsonify(message="Failed to create the gateway"), 500
 
         logger.info("created the gateway")
@@ -718,7 +728,7 @@ def disk(image_id):
 
         suffixes = [n for n in range(1, int(count) + 1)]
         # make call to local api server first!
-        gateways.insert(0, '127.0.0.1')
+        gateways.insert(0, 'localhost')
 
         for sfx in suffixes:
 
@@ -786,7 +796,7 @@ def _disk(image_id):
 
     elif request.method == 'PUT':
         # A put is for either a create or a resize
-        # put('http://127.0.0.1:5000/api/disk/rbd.ansible3',
+        # put('http://localhost:5000/api/disk/rbd.ansible3',
         #     data={'pool': 'rbd','size': '3G','owner':'ceph-1'})
 
         pool_name, image_name = image_id.split('.', 1)
@@ -939,7 +949,7 @@ def lun_reconfigure(image_id, controls):
                 if isinstance(config.config['gateways'][key], dict)]
     gateways.remove(local_gw)
     logger.debug("Other gateways: {}".format(gateways))
-    gateways.insert(0, '127.0.0.1')
+    gateways.insert(0, 'localhost')
 
     # deactivate disk
     api_vars = {'mode': 'deactivate'}
@@ -969,7 +979,7 @@ def lun_reconfigure(image_id, controls):
         resp_text = "{}".format(err)
     else:
         # We already activated this local node, so skip it
-        gateways.remove('127.0.0.1')
+        gateways.remove('localhost')
         api_vars['controls'] = json.dumps(controls)
 
     # activate disk
@@ -1239,7 +1249,7 @@ def clientauth(client_iqn):
                 "image_list": image_list,
                 "chap": chap}
 
-    gateways.insert(0, '127.0.0.1')
+    gateways.insert(0, 'localhost')
 
     resp_text, resp_code = call_api(gateways, '_clientauth', client_iqn,
                                     http_method='put',
@@ -1324,7 +1334,7 @@ def clientlun(client_iqn):
                 "image_list": image_list,
                 "chap": chap}
 
-    gateways.insert(0, '127.0.0.1')
+    gateways.insert(0, 'localhost')
     resp_text, resp_code = call_api(gateways, '_clientlun', client_iqn,
                                     http_method='put',
                                     api_vars=api_vars)
@@ -1404,7 +1414,7 @@ def client(client_iqn):
     if request.method == 'PUT':
         # creating a client is done locally first, then applied to the
         # other gateways
-        gateways.insert(0, '127.0.0.1')
+        gateways.insert(0, 'localhost')
 
         resp_text, resp_code = call_api(gateways, '_client', client_iqn,
                                         http_method='put',
@@ -1416,7 +1426,7 @@ def client(client_iqn):
     else:
         # DELETE client request
         # Process flow: remote gateways > local > delete config object entry
-        gateways.append('127.0.0.1')
+        gateways.append('localhost')
 
         resp_text, resp_code = call_api(gateways, '_client', client_iqn,
                                         http_method='delete',
@@ -1579,7 +1589,7 @@ def hostgroup(group_name):
                     "disks": ','.join(group_disks)}
 
         # updated = []
-        gw_list.insert(0, '127.0.0.1')
+        gw_list.insert(0, 'localhost')
         logger.debug("gateway update order is {}".format(','.join(gw_list)))
 
         resp_text, resp_code = call_api(gw_list, '_hostgroup', group_name,
@@ -1599,7 +1609,7 @@ def hostgroup(group_name):
         # At this point the group name is valid, so go ahead and remove it
         api_endpoint = ("{}://{}:{}/api/"
                         "_hostgroup/{}".format(http_mode,
-                                               '127.0.0.1',
+                                               'localhost',
                                                settings.config.api_port,
                                                group_name
                                                ))
@@ -1670,17 +1680,17 @@ def _hostgroup(group_name):
 
 
 def iscsi_active():
-
-    state = False
-
-    with open('/proc/net/tcp') as tcp_data:
-        for con in tcp_data:
-            field = con.split()
-            if '0CBC' in field[1] and field[3] == '0A':
-                # iscsi port is up (x'0cbc' = 3260), and listening (x'0a')
-                state = True
-                break
-    return state
+    for x in ['/proc/net/tcp', '/proc/net/tcp6']:
+        try:
+            with open(x) as tcp_data:
+                for con in tcp_data:
+                    field = con.split()
+                    if '0CBC' in field[1] and field[3] == '0A':
+                        # iscsi port is up (x'0cbc' = 3260), and listening (x'0a')
+                        return True
+        except Exception:
+            pass
+    return False
 
 
 @app.route('/api/_ping', methods=['GET'])
@@ -1719,7 +1729,7 @@ def target_ready(gateway_list):
 
     for gw in gateway_list:
         api_endpoint = ("{}://{}:{}/api/_ping".format(http_mode,
-                                                      gw,
+                                                      normalize_ip_literal(gw),
                                                       settings.config.api_port))
         try:
             api = APIRequest(api_endpoint)
@@ -1767,7 +1777,7 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
         logger.debug("processing GW '{}'".format(gw))
         api_endpoint = ("{}://{}:{}/api/"
                         "{}/{}".format(http_mode,
-                                       gw,
+                                       normalize_ip_literal(gw),
                                        settings.config.api_port,
                                        endpoint,
                                        element
@@ -1786,7 +1796,7 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
                          "{}".format(endpoint,
                                      gw,
                                      api.response.status_code))
-            if gw == '127.0.0.1':
+            if gw == 'localhost':
                 gw = this_host()
 
             if len(updated) > 0:
@@ -1985,7 +1995,7 @@ def main():
 
     # Start the API server. threaded is enabled to prevent deadlocks when one
     # request makes further api requests
-    app.run(host='0.0.0.0',
+    app.run(host=settings.config.api_host,
             port=settings.config.api_port,
             debug=settings.config.debug,
             use_evalex=False,
