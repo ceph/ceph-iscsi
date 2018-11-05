@@ -29,7 +29,6 @@ BuildArch:  noarch
 
 Requires:  python-rados >= 10.2.2
 Requires:  python-rbd >= 10.2.2
-Requires:  python-netaddr >= 0.7.5
 Requires:  python-netifaces >= 0.10.4
 Requires:  python-rtslib >= 2.1.fb67
 Requires:  rpm-python >= 4.11

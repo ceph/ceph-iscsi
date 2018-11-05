@@ -13,7 +13,7 @@ from rtslib_fb.utils import RTSLibError
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
-                                     valid_size, get_pool_id, ipv4_addresses,
+                                     valid_size, get_pool_id, ip_addresses,
                                      get_pools, get_rbd_size, this_host,
                                      human_size, CephiSCSIError)
 from ceph_iscsi_config.gateway_object import GWObject
@@ -961,7 +961,7 @@ class LUN(GWObject):
             logger.info("No LUNs to export")
             return True
 
-        ips = ipv4_addresses()
+        ips = ip_addresses()
 
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
 

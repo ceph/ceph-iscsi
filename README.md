@@ -20,7 +20,6 @@ installed before starting the rbd-target-gw service:
 
 python-rados
 python-rbd
-python-netaddr
 python-netifaces
 python-rtslib
 python-crypto

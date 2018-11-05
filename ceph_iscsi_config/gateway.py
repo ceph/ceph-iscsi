@@ -10,9 +10,9 @@ from rtslib_fb.alua import ALUATargetPortGroup
 
 import ceph_iscsi_config.settings as settings
 
-from ceph_iscsi_config.utils import (ipv4_addresses, this_host,
-                                     format_lio_yes_no, CephiSCSIError,
-                                     CephiSCSIInval)
+from ceph_iscsi_config.utils import (normalize_ip_address, normalize_ip_literal,
+                                     ip_addresses, this_host, format_lio_yes_no,
+                                     CephiSCSIError, CephiSCSIInval)
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
 from ceph_iscsi_config.client import GWClient
@@ -57,13 +57,16 @@ class GWTarget(GWObject):
 
         self.iqn = iqn
 
+        # Ensure IPv6 addresses are in the normalized address (not literal) format
+        gateway_ip_list = [normalize_ip_address(x) for x in gateway_ip_list]
+
         # If the ip list received has data in it, this is a target we need to
         # act on the IP's provided, otherwise just set to null
         if gateway_ip_list:
             # if the ip list provided doesn't match any ip of this host, abort
             # the assumption here is that we'll only have one matching ip in
             # the list!
-            matching_ip = set(gateway_ip_list).intersection(ipv4_addresses())
+            matching_ip = set(gateway_ip_list).intersection(ip_addresses())
             if len(list(matching_ip)) == 0:
                 self.error = True
                 self.error_msg = ("gateway IP addresses provided do not match"
@@ -116,7 +119,8 @@ class GWTarget(GWObject):
         :param tpg: tpg to check (object)
         :return: list of IP's this tpg has (list)
         """
-        return [portal.ip_address for portal in tpg.network_portals]
+        return [normalize_ip_address(portal.ip_address) for portal
+                in tpg.network_portals]
 
     def check_tpgs(self):
 
@@ -183,7 +187,7 @@ class GWTarget(GWObject):
                         return
 
                 try:
-                    NetworkPortal(tpg, self.active_portal_ip)
+                    NetworkPortal(tpg, normalize_ip_literal(self.active_portal_ip))
                 except RTSLibError as e:
                     self.error = True
                     self.error_msg = e
@@ -234,12 +238,12 @@ class GWTarget(GWObject):
                               "ip {}".format(ip))
             if ip == self.active_portal_ip:
                 if self.enable_portal:
-                    NetworkPortal(tpg, ip)
+                    NetworkPortal(tpg, normalize_ip_literal(ip))
                 tpg.enable = True
                 self.logger.debug("(Gateway.create_tpg) Added tpg for "
                                   "portal ip {} is enabled".format(ip))
             else:
-                NetworkPortal(tpg, ip)
+                NetworkPortal(tpg, normalize_ip_literal(ip))
                 # disable the tpg on this host
                 tpg.enable = False
                 # by disabling tpg_enabled_sendtargets, discovery to just one
@@ -343,10 +347,10 @@ class GWTarget(GWObject):
         owning_gw = config.config['disks'][stg_object.name]['owner']
         tpg = lun.parent_tpg
 
-        if tpg_ip_address is None:
+        if not tpg_ip_address:
             # just need to check one portal
             for ip in tpg.network_portals:
-                tpg_ip_address = ip.ip_address
+                tpg_ip_address = normalize_ip_address(ip.ip_address)
                 break
 
         if tpg_ip_address is None:

@@ -259,10 +259,13 @@ def define_gateway():
                        gw_iqn,
                        gw_ip_list,
                        enable_portal=portals_active())
+    if gateway.error:
+        halt("Error initializing iSCSI target: {}".format(gateway.error_msg))
 
     gateway.manage('target')
     if gateway.error:
-        halt("Error creating the iSCSI target (target, TPGs, Portals)")
+        halt("Error creating the iSCSI target (target, TPGs, Portals): "
+             "{}".format(gateway.error_msg))
 
     return gateway
 
