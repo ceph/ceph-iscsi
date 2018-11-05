@@ -285,7 +285,7 @@ class Disks(UIGroup):
                                                                image))
 
         # make call to local api server's disk endpoint
-        disk_api = '{}://127.0.0.1:{}/api/disk/{}'.format(self.http_mode,
+        disk_api = '{}://localhost:{}/api/disk/{}'.format(self.http_mode,
                                                           settings.config.api_port,
                                                           disk_key)
 
@@ -313,7 +313,7 @@ class Disks(UIGroup):
                 else:
                     disk_key = "{}.{}".format(pool, image)
 
-                disk_api = ('{}://127.0.0.1:{}/api/disk/'
+                disk_api = ('{}://localhost:{}/api/disk/'
                             '{}'.format(self.http_mode,
                                         settings.config.api_port,
                                         disk_key))
@@ -700,7 +700,7 @@ class Disk(UINode):
         local_gw = this_host()
 
         # Issue the api request for reconfigure
-        disk_api = ('{}://127.0.0.1:{}/api/'
+        disk_api = ('{}://localhost:{}/api/'
                     'disk/{}'.format(self.http_mode,
                                      settings.config.api_port,
                                      self.image_id))
@@ -740,7 +740,7 @@ class Disk(UINode):
         local_gw = this_host()
 
         # Issue the api request for the resize
-        disk_api = ('{}://127.0.0.1:{}/api/'
+        disk_api = ('{}://localhost:{}/api/'
                     'disk/{}'.format(self.http_mode,
                                      settings.config.api_port,
                                      self.image_id))
@@ -792,7 +792,7 @@ class Disk(UINode):
             self.logger.warning("Please be patient, rollback might take time")
 
         self.logger.debug("Issuing snapshot {} request".format(action))
-        disk_api = ('{}://127.0.0.1:{}/api/'
+        disk_api = ('{}://localhost:{}/api/'
                     'disksnap/{}/{}'.format(self.http_mode,
                                             settings.config.api_port,
                                             self.image_id,

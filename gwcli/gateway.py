@@ -11,7 +11,7 @@ from gwcli.utils import (this_host, response_message, GatewayAPIError,
                          GatewayError, APIRequest, console_message, valid_iqn)
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import format_lio_yes_no
+from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
 from ceph_iscsi_config.gateway import GWTarget
 
 import rtslib_fb.root as root
@@ -44,7 +44,7 @@ class ISCSIRoot(UIRoot):
 
         if endpoint is None:
 
-            self.local_api = ('{}://127.0.0.1:{}/'
+            self.local_api = ('{}://localhost:{}/'
                               'api'.format(self.http_mode,
                                            settings.config.api_port))
 
@@ -255,7 +255,7 @@ class ISCSITarget(UIGroup):
         # 'safe' to continue with the definition
         self.logger.debug("Create an iscsi target definition in the UI")
 
-        local_api = ('{}://127.0.0.1:{}/api/'
+        local_api = ('{}://localhost:{}/api/'
                      'target/{}'.format(self.http_mode,
                                         settings.config.api_port,
                                         target_iqn))
@@ -296,7 +296,7 @@ class ISCSITarget(UIGroup):
 
         # get a new copy of the config dict over the local API
         # check that there aren't any disks or client listed
-        local_api = ("{}://127.0.0.1:{}/api/"
+        local_api = ("{}://localhost:{}/api/"
                      "config".format(self.http_mode,
                                      settings.config.api_port))
 
@@ -445,7 +445,7 @@ class Target(UINode):
             return
 
         # Issue the api request for the reconfigure
-        gateways_api = ('{}://127.0.0.1:{}/api/'
+        gateways_api = ('{}://localhost:{}/api/'
                         'target/{}'.format(self.http_mode,
                                            settings.config.api_port,
                                            self.target_iqn))
@@ -588,7 +588,7 @@ class GatewayGroup(UIGroup):
         first host added should be the gateway running the command
 
         gateway_name ... should resolve to the hostname of the gateway
-        ip_address ..... is the IP v4 address of the interface the iscsi
+        ip_address ..... is the IPv4/IPv6 address of the interface the iscsi
                          portal should use
         nosync ......... by default new gateways are sync'd with the
                          existing configuration by cli. By specifying nosync
@@ -602,6 +602,7 @@ class GatewayGroup(UIGroup):
                          to result in an unstable configuration.
         """
 
+        ip_address = normalize_ip_address(ip_address)
         self.logger.debug("CMD: ../gateways/ create {} {} "
                           "nosync={} skipchecks={}".format(gateway_name,
                                                            ip_address,
@@ -613,10 +614,10 @@ class GatewayGroup(UIGroup):
 
         if gateway_name != local_gw and len(current_gateways) == 0:
             # the first gateway defined must be the local machine. By doing
-            # this the initial create uses 127.0.0.1, and places it's portal IP
+            # this the initial create uses localhost, and places it's portal IP
             # in the gateway ip list. Once the gateway ip list is defined, the
             # api server can resolve against the gateways - until the list is
-            # defined only a request from 127.0.0.1 is acceptable to the api
+            # defined only a request from localhost is acceptable to the api
             self.logger.error("The first gateway defined must be the local "
                               "machine")
             return
@@ -646,7 +647,7 @@ class GatewayGroup(UIGroup):
         self.logger.info("Adding gateway, {}".format(sync_text))
 
         gw_api = '{}://{}:{}/api'.format(self.http_mode,
-                                         "127.0.0.1",
+                                         "localhost",
                                          settings.config.api_port)
         gw_rqst = gw_api + '/gateway/{}'.format(gateway_name)
         gw_vars = {"nosync": nosync,

@@ -86,7 +86,7 @@ class HostGroups(UIGroup):
         # this is a new group
         group_api = ('{}://{}:{}/api/hostgroup/'
                      '{}'.format(self.http_mode,
-                                 "127.0.0.1",
+                                 "localhost",
                                  settings.config.api_port,
                                  group_name))
 
@@ -125,7 +125,7 @@ class HostGroups(UIGroup):
         # OK, so the group exists...
         group_api = ('{}://{}:{}/api/hostgroup/'
                      '{}'.format(self.http_mode,
-                                 "127.0.0.1",
+                                 "localhost",
                                  settings.config.api_port,
                                  group_name))
 
@@ -226,7 +226,7 @@ class HostGroup(UIGroup):
         # Basic checks passed, hand-off to the API now
         group_api = ('{}://{}:{}/api/hostgroup/'
                      '{}'.format(self.http_mode,
-                                 "127.0.0.1",
+                                 "localhost",
                                  settings.config.api_port,
                                  self.name))
 
@@ -304,7 +304,7 @@ class HostGroup(UIGroup):
         # Basic checks passed, hand-off to the API
         group_api = ('{}://{}:{}/api/hostgroup/'
                      '{}'.format(self.http_mode,
-                                 "127.0.0.1",
+                                 "localhost",
                                  settings.config.api_port,
                                  self.name))
 

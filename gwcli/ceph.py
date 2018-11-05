@@ -197,6 +197,8 @@ class CephCluster(UIGroup):
 
         self.logger.debug("Querying ceph for state information")
         with rados.Rados(conffile=self.conf) as cluster:
+            cluster.wait_for_latest_osdmap()
+
             cmd = {'prefix': 'status', 'format': 'json'}
             ret, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
 
@@ -286,6 +288,8 @@ class CephPools(UIGroup):
         # pool type information...so it's SLEDGEHAMMER meets NUT time
         self.logger.debug("Fetching ceph osd information")
         with rados.Rados(conffile=self.parent.conf) as cluster:
+            cluster.wait_for_latest_osdmap()
+
             cmd = {'prefix': 'osd dump', 'format': 'json'}
             rc, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
 
@@ -310,6 +314,8 @@ class CephPools(UIGroup):
         # interface, and pushed down to the child objects. Having a refresh
         # method within the child object would have been preferred!
         with rados.Rados(conffile=self.parent.conf) as cluster:
+            cluster.wait_for_latest_osdmap()
+
             cmd = {'prefix': 'df', 'format': 'json'}
             rc, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
 
