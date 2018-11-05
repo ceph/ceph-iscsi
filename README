@@ -79,7 +79,6 @@ python-requests
 python-flask
 python-rados
 python-rbd
-python-netaddr
 python-netifaces
 python-rtslib
 python-configshell

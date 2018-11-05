@@ -93,6 +93,7 @@ class Settings(object):
     defaults = {"cluster_name": "ceph",
                 "gateway_keyring": "ceph.client.admin.keyring",
                 "time_out": 30,
+                "api_host": "::",
                 "api_port": 5000,
                 "api_secure": "true",
                 "api_ssl_verify": "false",

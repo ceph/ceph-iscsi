@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 
 import socket
-import netaddr
 import netifaces
-import struct
 import subprocess
 import rados
 import rbd
+import re
 import datetime
 import hashlib
 import os
@@ -43,8 +42,37 @@ def shellcommand(command_string):
         return response
 
 
+def normalize_ip_address(ip_address):
+    """
+    IPv6 addresses should not include the square brackets utilized by
+    IPv6 literals (RFC 3986)
+    """
+    address_regex = re.compile(r"^\[(.*)\]$")
+    match = address_regex.match(ip_address)
+    if match:
+        return match.group(1)
+    return ip_address
+
+
+def normalize_ip_literal(ip_address):
+    """
+    rtslib expects IPv4 addresses as a dotted-quad string, and IPv6
+    addresses surrounded by brackets.
+    """
+    ip_address = normalize_ip_address(ip_address)
+    try:
+        socket.inet_pton(socket.AF_INET6, ip_address)
+        return "[" + ip_address + "]"
+    except Exception:
+        pass
+
+    return ip_address
+
+
 def get_ip(addr):
     """
+    NOTE: this method is deprecated but is still used by older ceph-ansible versions
+
     return an ipv4 address for the given address - could be an ip or name
     passed in
     :param addr: name or ip address (dotted quad)
@@ -69,6 +97,34 @@ def get_ip(addr):
     return converted_addr
 
 
+def resolve_ip_addresses(addr):
+    """
+    return list of IPv4/IPv6 address for the given address - could be an ip or
+    name passed in
+    :param addr: name or ip address (dotted quad)
+    :return: list of IPv4/IPv6 addresses
+    """
+    families = [socket.AF_INET, socket.AF_INET6]
+    normalized_addr = normalize_ip_address(addr)
+    for family in families:
+        try:
+            socket.inet_pton(family, normalized_addr)
+            return [normalized_addr]
+        except Exception:
+            pass
+
+    addrs = set()
+    for family in families:
+        try:
+            infos = socket.getaddrinfo(addr, 0, family)
+            for info in infos:
+                addrs.add(info[4][0])
+        except Exception:
+            pass
+
+    return list(addrs)
+
+
 def valid_ip(ip, port=22):
     """
     Validate either a single IP or a list of IPs. An IP is valid if I can
@@ -83,20 +139,27 @@ def valid_ip(ip, port=22):
     else:
         return False
 
-    ip_OK = True
+    ip_ok = True
 
+    families = [socket.AF_INET, socket.AF_INET6]
     for addr in ip_list:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1)
-        try:
-            sock.connect((addr, port))
-        except socket.error:
-            ip_OK = False
-            break
-        else:
-            sock.close()
+        addr_ok = False
+        for family in families:
+            sock = socket.socket(family, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            try:
+                sock.connect((addr, port))
+            except socket.error:
+                pass
+            else:
+                sock.close()
+                addr_ok = True
+                break
 
-    return ip_OK
+        if not addr_ok:
+            ip_ok = False
+            break
+    return ip_ok
 
 
 def valid_size(size):
@@ -114,30 +177,6 @@ def valid_size(size):
     return valid
 
 
-def valid_cidr(subnet):
-    """
-    Confirm whether a given cidr is valid
-    :param subnet: string of the form ip_address/netmask
-    :return: Boolean representing when the CIDR passed is valid
-    """
-
-    try:
-        ip, s_mask = subnet.split('/')
-        netmask = int(s_mask)
-        if not 1 <= netmask <= 32:
-            raise ValueError
-        struct.unpack('!L', socket.inet_aton(ip))[0]
-    except ValueError:
-        # netmask is invalid
-        return False
-    except socket.error:
-        # illegal ip address component
-        return False
-
-    # at this point the ip and netmask are ok to use, so return True
-    return True
-
-
 def format_lio_yes_no(value):
     if value:
         return "Yes"
@@ -146,6 +185,8 @@ def format_lio_yes_no(value):
 
 def ipv4_addresses():
     """
+    NOTE: this method is deprecated but is still used by older ceph-ansible versions
+
     return a list of IPv4 addresses on the system (excluding 127.0.0.1)
     :return: IP address list
     """
@@ -164,39 +205,26 @@ def ipv4_addresses():
     return ip_list
 
 
-def ipv4_address():
+def ip_addresses():
     """
-    Generator function providing ipv4 network addresses on this host
-    :return: IP address - dotted quad format
+    return a list of IPv4/IPv6 addresses on the system (excluding 127.0.0.1/::1)
+    :return: IP address list
     """
-
+    ip_list = set()
     for iface in netifaces.interfaces():
-        if len(netifaces.ifaddresses(iface)) < 3:
-            continue
-        for link in netifaces.ifaddresses(iface)[netifaces.AF_INET]:
-            if link['addr'] != '127.0.0.1':
-                yield link['addr']
+        if netifaces.AF_INET in netifaces.ifaddresses(iface):
+            for link in netifaces.ifaddresses(iface)[netifaces.AF_INET]:
+                ip_list.add(link['addr'])
+        if netifaces.AF_INET6 in netifaces.ifaddresses(iface):
+            for link in netifaces.ifaddresses(iface)[netifaces.AF_INET6]:
+                if '%' in link['addr']:
+                    continue
+                ip_list.add(link['addr'])
 
+    ip_list.discard('::1')
+    ip_list.discard('127.0.0.1')
 
-def get_ip_address(iscsi_network):
-    """
-    Return an IP address assigned to the running host that matches the given
-    subnet address. This IP becomes the portal IP for the target portal group
-    :param iscsi_network: cidr network address
-    :return: IP address, or '' if the host does not have an interface on the
-    required subnet
-    """
-
-    subnet = netaddr.IPSet([iscsi_network])
-    target_ip_range = [str(ip) for ip in subnet]  # list where each element is an ip address
-
-    ip = ''
-    for local_ip in ipv4_address():
-        if local_ip in target_ip_range:
-            ip = local_ip
-            break
-
-    return ip
+    return list(ip_list)
 
 
 def human_size(num):
