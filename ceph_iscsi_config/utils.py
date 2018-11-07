@@ -407,7 +407,7 @@ def gen_control_string(controls):
     :return: control string (str)
     """
     control = ''
-    for key, value in controls.iteritems():
+    for key, value in controls.items():
         if value is not None:
             control += "{}={},".format(key, value)
     return None if control == '' else control[:-1]

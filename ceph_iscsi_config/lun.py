@@ -933,7 +933,7 @@ class LUN(GWObject):
         gw_items = gw_nodes.items()
 
         # first entry is the lowest number of active_luns
-        gw_items.sort(key=lambda x: (x[1]['active_luns']))
+        gw_items = sorted(gw_items, key=lambda x: (x[1]['active_luns']))
 
         # 1st tuple is gw with lowest active_luns, so return the 1st
         # element which is the hostname

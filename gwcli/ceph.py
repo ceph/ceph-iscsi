@@ -190,7 +190,7 @@ class CephCluster(UIGroup):
         vers_out = os_cmd("ceph -c {} version".format(self.conf))
 
         # RHEL packages include additional info, that we don't need
-        version_str = vers_out.split()[2]
+        version_str = vers_out.split()[2].decode('utf-8')
         return '.'.join(version_str.split('.')[:3])
 
     def update_state(self):

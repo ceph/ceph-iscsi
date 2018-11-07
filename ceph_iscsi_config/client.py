@@ -69,7 +69,7 @@ class GWClient(GWObject):
         self.client_luns = {}
         self.tpg = None
         self.tpg_luns = {}
-        self.lun_id_list = range(256)           # available LUN ids 0..255
+        self.lun_id_list = list(range(256))           # available LUN ids 0..255
         self.change_count = 0
 
         # enable commit to the config for changes by default
