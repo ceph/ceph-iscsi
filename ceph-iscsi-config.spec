@@ -76,6 +76,7 @@ install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 %{python2_sitelib}/*
 %{_bindir}/rbd-target-gw
 %{_unitdir}/rbd-target-gw.service
+%attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-gw
 
 %changelog
 

@@ -42,6 +42,7 @@ setup(
     scripts=[
         "rbd-target-gw.py"
     ],
+    data_files=[("/var/log/rbd-target-gw", [])],
     cmdclass={
         "install_scripts": StripExtension
     }
