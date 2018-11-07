@@ -83,6 +83,7 @@ install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependenc
 %{_sysconfdir}/systemd/system/rbd-target-gw.service.d
 %{python2_sitelib}/*
 %{_mandir}/man8/gwcli.8.gz
+%attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-api
 
 %changelog
 
