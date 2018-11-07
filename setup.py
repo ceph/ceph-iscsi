@@ -41,6 +41,7 @@ setup(
         'gwcli.py',
         'rbd-target-api.py'
     ],
+    data_files=[("/var/log/rbd-target-api", [])],
     cmdclass={
         "install_scripts": StripExtension
     }
