@@ -406,7 +406,7 @@ if __name__ == '__main__':
     syslog_handler.setFormatter(syslog_format)
 
     # file target - more verbose logging for diagnostics
-    file_handler = RotatingFileHandler('/var/log/rbd-target-gw.log',
+    file_handler = RotatingFileHandler('/var/log/rbd-target-gw/rbd-target-gw.log',
                                        maxBytes=5242880,
                                        backupCount=7)
     file_handler.setLevel(logging.DEBUG)
