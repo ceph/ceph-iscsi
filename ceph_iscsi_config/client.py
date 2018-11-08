@@ -13,7 +13,7 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
 
-from ceph_iscsi_config.common import Config, ansible_control
+from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import encryption_available, CephiSCSIError
 from ceph_iscsi_config.gateway_object import GWObject
 
@@ -455,15 +455,7 @@ class GWClient(GWObject):
         # use current config to hold a copy of the current rados config
         # object (dict)
         self.current_config = config_object.config
-
-        running_under_ansible = ansible_control()
-        self.logger.debug("(GWClient.manage) running under ansible?"
-                          " {}".format(running_under_ansible))
-
-        if running_under_ansible:
-            update_host = GWClient.get_update_host(self.current_config)
-        else:
-            update_host = committer
+        update_host = committer
 
         self.logger.debug("GWClient.manage) update host to handle any config "
                           "update is {}".format(update_host))
@@ -498,13 +490,7 @@ class GWClient(GWObject):
                     self.commit_enabled = False
             else:
                 # requested iqn is not in the config object
-                if running_under_ansible:
-                    if update_host == gethostname().split('.')[0]:
-                        self.seed_config(config_object)
-                else:
-                    # not ansible, so just run the command
-                    self.seed_config(config_object)
-
+                self.seed_config(config_object)
                 self.metadata = GWClient.seed_metadata
 
             self.logger.debug("(manage) config updates to be applied from "

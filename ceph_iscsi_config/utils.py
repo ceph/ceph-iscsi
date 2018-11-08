@@ -69,34 +69,6 @@ def normalize_ip_literal(ip_address):
     return ip_address
 
 
-def get_ip(addr):
-    """
-    NOTE: this method is deprecated but is still used by older ceph-ansible versions
-
-    return an ipv4 address for the given address - could be an ip or name
-    passed in
-    :param addr: name or ip address (dotted quad)
-    :return: ipv4 address, or 0.0.0.0 if the address can't be validated as
-    ipv4 or resolved from
-             a name
-    """
-
-    converted_addr = '0.0.0.0'
-
-    try:
-        socket.inet_aton(addr)
-    except socket.error:
-        # not an ip address, maybe a name
-        try:
-            converted_addr = socket.gethostbyname(addr)
-        except socket.error:
-            pass
-    else:
-        converted_addr = addr
-
-    return converted_addr
-
-
 def resolve_ip_addresses(addr):
     """
     return list of IPv4/IPv6 address for the given address - could be an ip or
@@ -181,28 +153,6 @@ def format_lio_yes_no(value):
     if value:
         return "Yes"
     return "No"
-
-
-def ipv4_addresses():
-    """
-    NOTE: this method is deprecated but is still used by older ceph-ansible versions
-
-    return a list of IPv4 addresses on the system (excluding 127.0.0.1)
-    :return: IP address list
-    """
-    ip_list = []
-    for iface in netifaces.interfaces():
-        # Skip interfaces that don't have IPv4 information (no AF_INET
-        # section (2))
-        if netifaces.AF_INET not in netifaces.ifaddresses(iface):
-            continue
-
-        for link in netifaces.ifaddresses(iface)[netifaces.AF_INET]:
-            ip_list.append(link['addr'])
-
-    ip_list.remove('127.0.0.1')
-
-    return ip_list
 
 
 def ip_addresses():
