@@ -736,7 +736,9 @@ def disk(image_id):
                                                                      sfx)
 
             api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
-                        'mode': mode, 'controls': request.form['controls']}
+                        'mode': mode}
+            if 'controls' in request.form:
+                api_vars['controls'] = request.form['controls']
 
             resp_text, resp_code = call_api(gateways, '_disk',
                                             image_name,
