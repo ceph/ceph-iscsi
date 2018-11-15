@@ -336,11 +336,11 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
     try:
         target.update_tpg_controls()
     except RTSLibError as err:
-        logger.error("Unable to update tpg control overrides")
-        return "Unable to update tpg control overrides - {}".format(err)
+        logger.error("Unable to update tpg control - {}".format(err))
+        return "Unable to update tpg control - {}".format(err)
 
     # re-apply client control overrides
-    client_errors = False
+    error_msg = "ok"
     for client_iqn in config.config['clients']:
         client_metadata = config.config['clients'][client_iqn]
         image_list = client_metadata['luns'].keys()
@@ -355,7 +355,7 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
         if client.error:
             logger.error("Could not create client. Control override failed "
                          "{} - {}".format(client_iqn, client.error_msg))
-            client_errors = True
+            error_msg = client.error_msg
             continue
 
         for k, v in client_controls.iteritems():
@@ -363,14 +363,14 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
 
         client.manage('reconfigure')
         if client.error:
-            logger.error("Client control override failed "
+            logger.error("Unable to update client control - "
                          "{} - {}".format(client_iqn, client.error_msg))
-            client_errors = True
+            error_msg = client.error_msg
             if "Invalid argument" in client.error_msg:
                 # Kernel/rtslib reported EINVAL so immediately fail
                 return client.error_msg
-    if client_errors:
-        return "Client control override failed."
+    if error_msg != "ok":
+        return "Unable to update client control - {}".format(error_msg)
 
     return "ok"
 
