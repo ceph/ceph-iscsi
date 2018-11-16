@@ -230,8 +230,8 @@ class Config(object):
             seed_now = Config.seed_config
             seed_now['created'] = get_time()
             seed = json.dumps(seed_now, sort_keys=True, indent=4, separators=(',', ': '))
-            ioctx.write_full(self.config_name, seed)
-            ioctx.set_xattr(self.config_name, "epoch", "0")
+            ioctx.write_full(self.config_name, seed.encode('utf-8'))
+            ioctx.set_xattr(self.config_name, "epoch", "0".encode('utf-8'))
             self.changed = True
 
         self.unlock()
@@ -361,8 +361,9 @@ class Config(object):
             self.logger.debug("_commit_rbd updating config to {}".format(config_str))
             config_str_fmtd = json.dumps(current_config, sort_keys=True,
                                          indent=4, separators=(',', ': '))
-            ioctx.write_full(self.config_name, config_str_fmtd)
-            ioctx.set_xattr(self.config_name, "epoch", str(current_config["epoch"]))
+            ioctx.write_full(self.config_name, config_str_fmtd.encode('utf-8'))
+            ioctx.set_xattr(self.config_name, "epoch",
+                            str(current_config["epoch"]).encode('utf-8'))
             del self.txn_list[:]                # empty the list of transactions
 
         self.unlock()

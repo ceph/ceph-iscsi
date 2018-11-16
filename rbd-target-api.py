@@ -204,7 +204,7 @@ def parse_target_controls(request):
         return tpg_controls, client_controls
 
     controls = _parse_controls(request.form['controls'], GWTarget.SETTINGS)
-    for k, v in controls.iteritems():
+    for k, v in controls.items():
         if k in GWClient.SETTINGS:
             client_controls[k] = v
         else:
@@ -257,11 +257,11 @@ def target(target_iqn=None):
 
     orig_tpg_controls = {}
     orig_client_controls = {}
-    for k, v in tpg_controls.iteritems():
+    for k, v in tpg_controls.items():
         orig_tpg_controls[k] = getattr(target, k)
         setattr(target, k, v)
 
-    for k, v in client_controls.iteritems():
+    for k, v in client_controls.items():
         orig_client_controls[k] = getattr(target, k)
         setattr(target, k, v)
 
@@ -324,7 +324,7 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
         logger.error("Unable to create an instance of the GWTarget class")
         return target.error_msg
 
-    for k, v in tpg_controls.iteritems():
+    for k, v in tpg_controls.items():
         setattr(target, k, v)
 
     if target.exists():
@@ -358,7 +358,7 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
             client_errors = True
             continue
 
-        for k, v in client_controls.iteritems():
+        for k, v in client_controls.items():
             setattr(client, k, v)
 
         client.manage('reconfigure')
@@ -830,7 +830,7 @@ def _disk(image_id):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            for k, v in controls.iteritems():
+            for k, v in controls.items():
                 setattr(lun, k, v)
 
             if mode == 'create' and len(config.config['disks']) >= 256:
@@ -889,7 +889,7 @@ def _disk(image_id):
 
                 return jsonify(message="LUN deactivated"), 200
             elif mode == 'activate':
-                for k, v in controls.iteritems():
+                for k, v in controls.items():
                     setattr(lun, k, v)
 
                 try:
@@ -968,7 +968,7 @@ def lun_reconfigure(image_id, controls):
 
     lun = LUN(logger, pool_name, image_name, size, disk['owner'])
 
-    for k, v in controls.iteritems():
+    for k, v in controls.items():
         setattr(lun, k, v)
 
     try:
@@ -1306,7 +1306,7 @@ def clientlun(client_iqn):
 
     disk = request.form.get('disk')
 
-    lun_list = config.config['clients'][client_iqn]['luns'].keys()
+    lun_list = list(config.config['clients'][client_iqn]['luns'].keys())
 
     if request.method == 'PUT':
         lun_list.append(disk)

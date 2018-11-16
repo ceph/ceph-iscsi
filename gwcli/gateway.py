@@ -718,7 +718,7 @@ class Gateway(UINode):
 
         UINode.__init__(self, gateway_name, parent)
 
-        for k, v in gateway_config.iteritems():
+        for k, v in gateway_config.items():
             self.__setattr__(k, v)
 
         self.state = "DOWN"

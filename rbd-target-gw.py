@@ -181,7 +181,7 @@ def osd_blacklist_cleanup():
         cleanup_state = False
     else:
 
-        blacklist_output = blacklist.split('\n')[:-1]
+        blacklist_output = blacklist.decode('utf-8').split('\n')[:-1]
         if len(blacklist_output) > 1:
 
             # We have entries to look for, so first build a list of ipv4

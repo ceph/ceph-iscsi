@@ -45,7 +45,7 @@ class Clients(UIGroup):
                                  % (self.path, 'hosts'))
 
     def load(self, client_info):
-        for client_iqn, client_settings in client_info.iteritems():
+        for client_iqn, client_settings in client_info.items():
             Client(self, client_iqn, client_settings)
 
     def ui_command_create(self, client_iqn):
@@ -254,7 +254,7 @@ class Client(UINode):
         self.ip_address = ''
         self.alias = ''
 
-        for k, v in client_settings.iteritems():
+        for k, v in client_settings.items():
             self.__setattr__(k, v)
 
         # decode the password if necessary

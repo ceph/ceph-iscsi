@@ -1,7 +1,10 @@
 
 __author__ = 'pcuzner@redhat.com'
 
-from ConfigParser import ConfigParser
+try:
+    from ConfigParser import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
 from distutils.util import strtobool
 
 import re
@@ -29,7 +32,7 @@ class Settings(object):
         """
         controls = {}
 
-        for key, raw_value in raw_controls.iteritems():
+        for key, raw_value in raw_controls.items():
             if key not in settings_list:
                 raise ValueError("Supported controls: {}".format(",".join(settings_list)))
 

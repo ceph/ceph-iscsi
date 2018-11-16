@@ -2,7 +2,10 @@
 
 import json
 import time
-import Queue
+try:
+    import Queue
+except ImportError:
+    import queue as Queue
 import threading
 import rados
 import rbd
@@ -229,7 +232,7 @@ class Disks(UIGroup):
             self.logger.error(err)
             return
 
-        for k, v in controls.iteritems():
+        for k, v in controls.items():
             if not v:
                 self.logger.error("Missing value for {}.".format(k))
                 return
@@ -591,7 +594,7 @@ class Disk(UINode):
     def _apply_config(self, image_config):
         # set the remaining attributes based on the fields in the dict
         disk_map = self.parent.disk_info
-        for k, v in image_config.iteritems():
+        for k, v in image_config.items():
             disk_map[self.image_id][k] = v
             self.__setattr__(k, v)
         for k in LUN.SETTINGS:
