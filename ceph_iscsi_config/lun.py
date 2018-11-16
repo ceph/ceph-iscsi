@@ -366,8 +366,6 @@ class LUN(GWObject):
             for mlun in alun.mapped_luns:
                 node_acl = mlun.parent_nodeacl
 
-        for attached_lun in so.attached_luns:
-            for node_acl in attached_lun.parent_tpg.node_acls:
                 if node_acl.session and \
                         node_acl.session.get('state', '').upper() == 'LOGGED_IN':
                     raise CephiSCSIError("LUN {} in-use".format(self.image))
