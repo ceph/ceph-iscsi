@@ -841,6 +841,9 @@ class LUN(GWObject):
                 return "pool name is invalid"
 
         if mode == 'create':
+            if len(config['disks']) >= 256:
+                return "Disk limit of 256 reached."
+
             disk_regex = re.compile(r"^[a-zA-Z0-9\-_]+$")
             if not disk_regex.search(kwargs['pool']):
                 return "Invalid pool name (use alphanumeric, '_', or '-' characters)"
