@@ -835,10 +835,6 @@ def _disk(image_id):
             for k, v in controls.iteritems():
                 setattr(lun, k, v)
 
-            if mode == 'create' and len(config.config['disks']) >= 256:
-                logger.error("LUN alloc problem - too many LUNs")
-                return jsonify(message="LUN allocation failure: too many LUNs"), 500
-
             lun.allocate()
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
