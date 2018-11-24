@@ -366,8 +366,6 @@ class LUN(GWObject):
             for mlun in alun.mapped_luns:
                 node_acl = mlun.parent_nodeacl
 
-        for attached_lun in so.attached_luns:
-            for node_acl in attached_lun.parent_tpg.node_acls:
                 if node_acl.session and \
                         node_acl.session.get('state', '').upper() == 'LOGGED_IN':
                     raise CephiSCSIError("LUN {} in-use".format(self.image))
@@ -843,6 +841,9 @@ class LUN(GWObject):
                 return "pool name is invalid"
 
         if mode == 'create':
+            if len(config['disks']) >= 256:
+                return "Disk limit of 256 reached."
+
             disk_regex = re.compile(r"^[a-zA-Z0-9\-_]+$")
             if not disk_regex.search(kwargs['pool']):
                 return "Invalid pool name (use alphanumeric, '_', or '-' characters)"
