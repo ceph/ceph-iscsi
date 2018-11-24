@@ -97,6 +97,7 @@ gzip %{buildroot}%{_mandir}/man8/gwcli.8
 %{_sysconfdir}/systemd/system/rbd-target-gw.service.d
 %{_mandir}/man8/gwcli.8.gz
 %attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-gw
+%attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-api
 
 %changelog
 
