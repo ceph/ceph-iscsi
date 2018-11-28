@@ -597,7 +597,7 @@ class GatewayGroup(UIGroup):
                          restarted to apply the current configuration
                          (default = False)
         skipchecks ..... set this to true to force gateway validity checks
-                         to be bypassed(default = False). This is a developer
+                         to be bypassed(default = false). This is a developer
                          option ONLY. Skipping these checks has the potential
                          to result in an unstable configuration.
         """
