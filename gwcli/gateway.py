@@ -416,7 +416,7 @@ class Target(UINode):
 
     def ui_command_reconfigure(self, attribute, value):
         """
-        The reconfigure command allows you to tune various gatway attributes.
+        The reconfigure command allows you to tune various gateway attributes.
         An empty value for an attribute resets the lun attribute to its
         default.
         attribute : attribute to reconfigure. supported attributes:
