@@ -532,7 +532,9 @@ class GatewayGroup(UIGroup):
         self.check_gateways()
 
     def ui_command_info(self):
-
+        '''
+        List configured gateways.
+        '''
         self.logger.debug("CMD: ../gateways/ info")
 
         for child in self.children:
