@@ -108,7 +108,7 @@ def requires_restricted_auth(f):
 
 @app.errorhandler(Exception)
 def unhandled_exception(e):
-    app.logger.exception("Unhandled Exception")
+    logger.exception("Unhandled Exception")
     return jsonify(message="Unhandled exception: {}".format(e)), 500
 
 
