@@ -35,8 +35,9 @@ from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
                                      ip_addresses, gen_file_hash, valid_rpm,
                                      CephiSCSIError)
 
-from gwcli.utils import (this_host, APIRequest, valid_gateway,
-                         valid_client, valid_snapshot_name, GatewayAPIError)
+from gwcli.utils import (this_host, APIRequest, valid_gateway, valid_client,
+                         get_remote_gateways, valid_snapshot_name,
+                         GatewayAPIError)
 
 app = Flask(__name__)
 
@@ -281,15 +282,14 @@ def target(target_iqn=None):
 
     # This is a reconfigure operation, so first confirm the gateways
     # are in place (we need defined gateways)
-    local_gw = this_host()
-    logger.debug("this host is {}".format(local_gw))
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
-    logger.debug("other gateways - {}".format(gateways))
+    try:
+        gateways = get_remote_gateways(config, logger)
+    except CephiSCSIError as err:
+        logger.warning("target operation request failed: {}".format(err))
+        return jsonify(message="{}".format(err)), 400
+
     # We perform the reconfigure locally here to make sure the values are valid
     # and simplify error cleanup
-    gateways.remove(local_gw)
-
     resp_text = local_target_reconfigure(target_iqn, tpg_controls,
                                          client_controls)
     if "ok" != resp_text:
@@ -677,23 +677,22 @@ def disk(image_id):
 
     # This is a create/resize operation, so first confirm the gateways
     # are in place (we need gateways to perform the lun masking tasks
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
-    logger.debug("All gateways: {}".format(gateways))
+    try:
+        gateways = get_remote_gateways(config, logger)
+    except CephiSCSIError as err:
+        logger.warning("disk operation request failed: {}".format(err))
+        return jsonify(message="{}".format(err)), 400
 
     # Any disk operation needs at least 2 gateways to be present
-    if len(gateways) < settings.config.minimum_gateways:
+    if len(gateways) + 1 < settings.config.minimum_gateways:
         msg = "at least {} gateways must exist before disk operations " \
               "are permitted".format(settings.config.minimum_gateways)
         logger.warning("disk create request failed: {}".format(msg))
         return jsonify(message=msg), 400
 
     if request.method == 'PUT':
-
         # at this point we have a disk request, and the gateways are available
         # for the LUN masking operations
-        gateways.remove(local_gw)
-        logger.debug("Other gateways: {}".format(gateways))
 
         # pool = request.form.get('pool')
         size = request.form.get('size')
@@ -764,7 +763,6 @@ def disk(image_id):
         api_vars = {'purge_host': local_gw}
 
         # process other gateways first
-        gateways.remove(local_gw)
         gateways.append(local_gw)
 
         resp_text, resp_code = call_api(gateways, '_disk',
@@ -941,12 +939,11 @@ def lun_reconfigure(image_id, controls):
     if not disk:
         return "rbd image {} not found".format(image_id), 404
 
-    local_gw = this_host()
-    logger.debug("this host is {}".format(local_gw))
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
-    gateways.remove(local_gw)
-    logger.debug("Other gateways: {}".format(gateways))
+    try:
+        gateways = get_remote_gateways(config, logger)
+    except CephiSCSIError as err:
+        return "{}".format(err), 400
+
     gateways.insert(0, 'localhost')
 
     # deactivate disk
@@ -1105,13 +1102,11 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
     if not disk:
         return "rbd image {} not found".format(image_id), 404
 
-    local_gw = this_host()
-    logger.debug("this host is {}".format(local_gw))
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
-    logger.debug("other gateways - {}".format(gateways))
-    gateways.remove(local_gw)
-    gateways.append(local_gw)
+    try:
+        gateways = get_remote_gateways(config, logger)
+    except CephiSCSIError as err:
+        return "{}".format(err), 400
+    gateways.append(this_host())
 
     api_vars = {
         'mode': 'deactivate'}
@@ -1227,12 +1222,10 @@ def clientauth(client_iqn):
     """
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
-    local_gw = this_host()
-    logger.debug("this host is {}".format(local_gw))
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
-    logger.debug("other gateways - {}".format(gateways))
-    gateways.remove(local_gw)
+    try:
+        gateways = get_remote_gateways(config, logger)
+    except CephiSCSIError as err:
+        return jsonify(message="{}".format(err)), 400
 
     lun_list = config.config['clients'][client_iqn]['luns'].keys()
     image_list = ','.join(lun_list)
@@ -1243,7 +1236,7 @@ def clientauth(client_iqn):
         logger.error("BAD auth request from {}".format(request.remote_addr))
         return jsonify(message=client_usable), 400
 
-    api_vars = {"committing_host": local_gw,
+    api_vars = {"committing_host": this_host(),
                 "image_list": image_list,
                 "chap": chap}
 
@@ -1294,13 +1287,10 @@ def clientlun(client_iqn):
     """
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
-
-    local_gw = this_host()
-    logger.debug("this host is {}".format(local_gw))
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
-    gateways.remove(local_gw)
-    logger.debug("other gateways - {}".format(gateways))
+    try:
+        gateways = get_remote_gateways(config, logger)
+    except CephiSCSIError as err:
+        return jsonify(message="{}".format(err)), 400
 
     disk = request.form.get('disk')
 
@@ -1328,7 +1318,7 @@ def clientlun(client_iqn):
         return jsonify(message=client_usable), 400
 
     # committing host is the local LIO node
-    api_vars = {"committing_host": local_gw,
+    api_vars = {"committing_host": this_host(),
                 "image_list": image_list,
                 "chap": chap}
 
@@ -1393,21 +1383,19 @@ def client(client_iqn):
               "DELETE": 'delete'}
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
-    local_gw = this_host()
-    logger.debug("this host is {}".format(local_gw))
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
-    logger.debug("other gateways - {}".format(gateways))
-    gateways.remove(local_gw)
-
-    # committing host is the node responsible for updating the config object
-    api_vars = {"committing_host": local_gw}
+    try:
+        gateways = get_remote_gateways(config, logger)
+    except CephiSCSIError as err:
+        return jsonify(message="{}".format(err)), 400
 
     # validate the PUT/DELETE request first
     client_usable = valid_client(mode=method[request.method],
                                  client_iqn=client_iqn)
     if client_usable != 'ok':
         return jsonify(message=client_usable), 400
+
+    # committing host is the node responsible for updating the config object
+    api_vars = {"committing_host": this_host()}
 
     if request.method == 'PUT':
         # creating a client is done locally first, then applied to the
@@ -1535,10 +1523,10 @@ def hostgroup(group_name):
     http_mode = 'https' if settings.config.api_secure else 'http'
     valid_hostgroup_actions = ['add', 'remove']
 
-    local_gw = this_host()
-    gw_list = [key for key in config.config['gateways']
-               if isinstance(config.config['gateways'][key], dict)]
-    gw_list.remove(local_gw)
+    try:
+        gateways = get_remote_gateways(config, logger)
+    except CephiSCSIError as err:
+        return jsonify(message="{}".format(err)), 400
 
     action = request.form.get('action', 'add')
     if action.lower() not in valid_hostgroup_actions:
@@ -1587,10 +1575,10 @@ def hostgroup(group_name):
                     "disks": ','.join(group_disks)}
 
         # updated = []
-        gw_list.insert(0, 'localhost')
-        logger.debug("gateway update order is {}".format(','.join(gw_list)))
+        gateways.insert(0, 'localhost')
+        logger.debug("gateway update order is {}".format(','.join(gateways)))
 
-        resp_text, resp_code = call_api(gw_list, '_hostgroup', group_name,
+        resp_text, resp_code = call_api(gateways, '_hostgroup', group_name,
                                         http_method='put', api_vars=api_vars)
 
         return jsonify(message="hostgroup create/update {}".format(resp_text)), \

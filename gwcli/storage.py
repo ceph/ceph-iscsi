@@ -467,7 +467,6 @@ class Disks(UIGroup):
         self.logger.debug("Starting delete for rbd {}".format(image_id))
 
         local_gw = this_host()
-        # other_gateways = get_other_gateways(self.parent.target.children)
 
         api_vars = {'purge_host': local_gw}
 
