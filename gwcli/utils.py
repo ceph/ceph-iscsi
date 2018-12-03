@@ -13,8 +13,8 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 import rtslib_fb.root as root
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (resolve_ip_addresses, gen_file_hash)
-
+from ceph_iscsi_config.utils import (resolve_ip_addresses, gen_file_hash,
+                                     CephiSCSIError)
 
 __author__ = 'Paul Cuzner'
 
@@ -166,29 +166,27 @@ def valid_gateway(gw_name, gw_ip, config):
     return "ok"
 
 
-def get_other_gateways(gw_objects):
-    """
-    Look at the set of objects passed and look for gateway objects,
-    then return a list of gateway names that exclude the local
-    machine
-    :param gw_objects: set of objects to search
-    :return: gateway names (list)
-    """
-    other_gateways = []
-
+def get_remote_gateways(config, logger):
+    '''
+    Return the list of remote gws.
+    :param: config: Config object with gws setup.
+    :param: logger: Logger object
+    :return: A list of gw names, or CephiSCSIError if not run on a gw in the
+             config
+    '''
     local_gw = this_host()
+    logger.debug("this host is {}".format(local_gw))
+    gateways = [key for key in config.config['gateways']
+                if isinstance(config.config['gateways'][key], dict)]
+    logger.debug("all gateways - {}".format(gateways))
+    if local_gw not in gateways:
+        raise CephiSCSIError("{} cannot be used to perform this operation "
+                             "because it is not defined within the gateways "
+                             "configuration".format(local_gw))
 
-    gws_root = list(gw_objects)  # children returns a set, so need to cast to a list
-    if len(gws_root) > 0:
-        gw_group = [obj for obj in gws_root[0].children if obj.name == 'gateways']
-        gw_list = list(gw_group[0].children)        # list of Gateway objects
-
-        for gw in gw_list:
-            if gw.name == local_gw:
-                continue
-            other_gateways.append(gw.name)
-
-    return other_gateways
+    gateways.remove(local_gw)
+    logger.debug("remote gateways: {}".format(gateways))
+    return gateways
 
 
 def valid_credentials(credentials_str, auth_type='chap'):
