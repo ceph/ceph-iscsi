@@ -6,7 +6,7 @@ import threading
 from gwcli.node import UIGroup, UINode, UIRoot
 from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks
-from gwcli.client import Clients, CHAP
+from gwcli.client import Clients
 from gwcli.utils import (this_host, response_message, GatewayAPIError,
                          GatewayError, APIRequest, console_message, valid_iqn)
 
@@ -114,66 +114,23 @@ class ISCSIRoot(UIRoot):
                              "{}".format(api.response.status_code)
             return {}
 
-    def export_ansible(self, config):
-
-        ansible_vars = []
-        ansible_vars.append("seed_monitor: {}".format(self.ceph.local_ceph.healthy_mon))
-        ansible_vars.append("cluster_name: {}".format(settings.config.cluster_name))
-        ansible_vars.append("gateway_keyring: {}".format(settings.config.gateway_keyring))
-        ansible_vars.append("deploy_settings: true")
-        ansible_vars.append("perform_system_checks: true")
-        ansible_vars.append('gateway_iqn: "{}"'.format(config['gateways']['iqn']))
-        ansible_vars.append('gateway_ip_list: "{}"'.format(
-            ",".join(config['gateways'].get('ip_list', []))))
-        ansible_vars.append("# rbd device definitions")
-        ansible_vars.append("rbd_devices:")
-
-        disk_template = ("  - {{ pool: '{}', image: '{}', size: '{}', "
-                         "host: '{}', state: 'present' }}")
-
-        for disk in self.disks.children:
-            ansible_vars.append(disk_template.format(disk.pool,
-                                                     disk.image,
-                                                     disk.size_h,
-                                                     disk.owner))
-
-        ansible_vars.append("# client connections")
-        ansible_vars.append("client_connections:")
-        client_template = ("  - {{ client: '{}', image_list: '{}', "
-                           "chap: '{}', status: 'present' }}")
-
-        for client in sorted(config['clients'].keys()):
-            client_metadata = config['clients'][client]
-            lun_data = client_metadata['luns']
-            sorted_luns = [s[0] for s in sorted(lun_data.items(),
-                                                key=lambda v: v[1]['lun_id'])]
-            chap = CHAP(client_metadata['auth']['chap'])
-            ansible_vars.append(client_template.format(client,
-                                                       ','.join(sorted_luns),
-                                                       chap.chap_str))
-        for var in ansible_vars:
-            print(var)
-
     def export_copy(self, config):
 
         fmtd_config = json.dumps(config, sort_keys=True,
                                  indent=4, separators=(',', ': '))
         print(fmtd_config)
 
-    def ui_command_export(self, mode='ansible'):
+    def ui_command_export(self, mode='copy'):
         """
-        Print the configuration in a format that can be used by ceph-ansible or
-        as a backup.
+        Print the configuration in a format that can be used as a backup.
 
         The export command supports two modes:
 
-        ansible - The configuration will be printed in a format that can be
-                  used for the ceph-ansible iscsigws.yml.
         copy - This prints the internal configuration. It can used for backup
                or for support requests.
         """
 
-        valid_modes = ['ansible', 'copy']
+        valid_modes = ['copy']
 
         self.logger.debug("CMD: export mode={}".format(mode))
 
@@ -187,9 +144,7 @@ class ISCSIRoot(UIRoot):
             self.logger.error("Export requested, but the config is empty")
             return
 
-        if mode == "ansible":
-            self.export_ansible(current_config)
-        elif mode == 'copy':
+        if mode == 'copy':
             self.export_copy(current_config)
 
     def ui_command_info(self):

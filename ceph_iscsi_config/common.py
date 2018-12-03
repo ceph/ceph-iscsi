@@ -3,7 +3,6 @@
 import rados
 import time
 import json
-import sys
 import traceback
 
 import ceph_iscsi_config.settings as settings
@@ -374,19 +373,6 @@ class Config(object):
 
     def commit(self, post_action='close'):
         self._commit_rbd(post_action)
-
-
-def ansible_control():
-    """
-    establish whether ansible modules are in the current path to determine
-    whether the code is called through ansible, or directly through a module
-    import. This is done by looking at the call stack, and relies on the main
-    method in the ansible custom module being prefixed by 'ansible'
-    e.g. ansible_main()
-    :return: Boolean
-    """
-
-    return sys._getframe(2).f_code.co_name.startswith('ansible')
 
 
 def main():
