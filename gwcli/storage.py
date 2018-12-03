@@ -373,7 +373,7 @@ class Disks(UIGroup):
 
         return disk_users
 
-    def ui_command_resize(self, image_id=None, size=None):
+    def ui_command_resize(self, image_id, size):
         """
         The resize command allows you to increase the size of an
         existing rbd image. Attempting to decrease the size of an
@@ -384,20 +384,13 @@ class Disks(UIGroup):
         """
         self.logger.debug("CMD: /disks/ resize {} {}".format(image_id,
                                                              size))
-        if image_id and size:
-            if image_id in self.disk_lookup:
-                disk = self.disk_lookup[image_id]
-                disk.resize(size)
-                return
-            else:
-                self.logger.error("the disk '{}' does not exist in this "
-                                  "configuration".format(image_id))
-
-                return
-
-        else:
-            self.logger.error("resize needs the disk image name and new size")
+        if image_id not in self.disk_lookup:
+            self.logger.error("the disk '{}' does not exist in this "
+                              "configuration".format(image_id))
             return
+
+        disk = self.disk_lookup[image_id]
+        disk.resize(size)
 
     def ui_command_reconfigure(self, image_id, attribute, value):
         """
@@ -723,7 +716,7 @@ class Disk(UINode):
                               "{}".format(response_message(api.response,
                                                            self.logger)))
 
-    def resize(self, size=None):
+    def resize(self, size):
         """
         Perform the resize operation, and sync the disk size across each of the
         gateways
@@ -734,6 +727,9 @@ class Disk(UINode):
         # create so this logic is very similar to a 'create' request
 
         size_rqst = size.upper()
+        if not valid_size(size_rqst):
+            self.logger.error("Size is invalid")
+            return
 
         # At this point the size request needs to be honoured
         self.logger.debug("Resizing {} to {}".format(self.image_id,
@@ -833,7 +829,7 @@ class Disk(UINode):
             # update the pool commit numbers
             pool._calc_overcommit()
 
-    def ui_command_resize(self, size=None):
+    def ui_command_resize(self, size):
         """
         The resize command allows you to increase the size of an
         existing rbd image. Attempting to decrease the size of an
