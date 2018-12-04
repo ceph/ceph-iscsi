@@ -67,7 +67,7 @@ class HostGroups(UIGroup):
         """
         Create a host group definition. Group names can be use up to 32
         alphanumeric characters, including '_', '-' and '@'. Note that once a
-        group is it can not be renamed.
+        group is created it can not be renamed.
         """
         self.logger.debug("CMD: ../host-groups/ create {}".format(group_name))
 

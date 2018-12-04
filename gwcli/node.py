@@ -14,6 +14,11 @@ class UICommon(ConfigNode):
         self.logger = logging.getLogger('gwcli')
 
     def ui_command_goto(self, shortcut='/'):
+        '''
+        cd to the bookmark at shortcut.
+
+        See 'help bookmarks' for more info on bookmarks.
+        '''
         if shortcut in self.shell.prefs['bookmarks']:
             return self.ui_command_cd(self.shell.prefs['bookmarks'][shortcut])
         else:

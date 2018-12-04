@@ -416,7 +416,7 @@ class Target(UINode):
 
     def ui_command_reconfigure(self, attribute, value):
         """
-        The reconfigure command allows you to tune various gatway attributes.
+        The reconfigure command allows you to tune various gateway attributes.
         An empty value for an attribute resets the lun attribute to its
         default.
         attribute : attribute to reconfigure. supported attributes:
@@ -532,7 +532,9 @@ class GatewayGroup(UIGroup):
         self.check_gateways()
 
     def ui_command_info(self):
-
+        '''
+        List configured gateways.
+        '''
         self.logger.debug("CMD: ../gateways/ info")
 
         for child in self.children:
@@ -597,7 +599,7 @@ class GatewayGroup(UIGroup):
                          restarted to apply the current configuration
                          (default = False)
         skipchecks ..... set this to true to force gateway validity checks
-                         to be bypassed(default = False). This is a developer
+                         to be bypassed(default = false). This is a developer
                          option ONLY. Skipping these checks has the potential
                          to result in an unstable configuration.
         """
