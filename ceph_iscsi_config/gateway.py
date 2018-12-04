@@ -375,7 +375,7 @@ class GWTarget(GWObject):
             # someone mapped a LU then unmapped it without deleting the
             # stg_object, or we are reloading the config.
             alua_tpg = ALUATargetPortGroup(stg_object, group_name)
-            if alua_tpg.tpg_id != tpg.tag:
+            if alua_tpg.tg_pt_gp_id != tpg.tag:
                 # ports and owner were rearranged. Not sure we support that.
                 raise CephiSCSIInval("Existing ALUA group tag for group {} "
                                      "in invalid state.\n".format(group_name))
