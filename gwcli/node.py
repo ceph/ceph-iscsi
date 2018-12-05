@@ -56,8 +56,7 @@ class UINode(UIGroup):
 
     def ui_command_info(self):
         """
-        Generic handler showing the attributes of the current object
-        :return: None
+        Show the attributes of the current object.
         """
 
         text = self.get_info()
