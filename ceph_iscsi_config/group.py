@@ -10,7 +10,7 @@ from ceph_iscsi_config.utils import ListComparison
 
 class Group(object):
 
-    def __init__(self, logger, group_name, members=[], disks=[]):
+    def __init__(self, logger, target_iqn, group_name, members=[], disks=[]):
 
         """
         Manage a host group definition. The input for the group object is the
@@ -18,6 +18,7 @@ class Group(object):
         idempotent group definition across API/CLI and more importantly Ansible
 
         :param logger: (logging object) used for centralised logging
+        :param target_iqn: (str) target iqn
         :param group_name: (str) group name
         :param members: (list) iscsi IQN's of the clients
         :param disks: (list) disk names of the format pool.image
@@ -35,11 +36,13 @@ class Group(object):
             self.error_msg = self.config.error_msg
             return
 
+        self.target_iqn = target_iqn
         self.group_name = group_name
         self.group_members = members
         self.disks = disks
 
-        if group_name in self.config.config['groups']:
+        target_config = self.config.config['targets'][self.target_iqn]
+        if group_name in target_config['groups']:
             self.new_group = False
         else:
             self.new_group = True
@@ -67,13 +70,13 @@ class Group(object):
         :return: (bool) true/false whether the client should be accepted
         """
 
-        config = self.config.config     # use a local var for readability
+        target_config = self.config.config['targets'][self.target_iqn]
 
         self.logger.debug("checking '{}'".format(client_iqn))
 
         # to validate the request, pass through a 'negative' filter
         if action == 'add':
-            client = config['clients'].get(client_iqn, {})
+            client = target_config['clients'].get(client_iqn, {})
             if not client:
                 self._set_error("client '{}' doesn't exist".format(client_iqn))
                 return False
@@ -89,7 +92,7 @@ class Group(object):
                 return False
         else:
             # client_iqn must exist in the group
-            if client_iqn not in config['groups'][self.group_name].get('members'):
+            if client_iqn not in target_config['groups'][self.group_name].get('members'):
                 self._set_error("client '{}' is not a member of "
                                 "{}".format(client_iqn,
                                             self.group_name))
@@ -105,13 +108,14 @@ class Group(object):
     def _valid_disk(self, action, disk):
 
         self.logger.debug("checking disk '{}'".format(disk))
+        target_config = self.config.config['targets'][self.target_iqn]
         if action == 'add':
 
-            if disk not in self.config.config['disks']:
+            if disk not in target_config['disks']:
                 self._set_error("disk '{}' doesn't exist".format(disk))
                 return False
         else:
-            if disk not in self.config.config['groups'][self.group_name]['disks']:
+            if disk not in target_config['groups'][self.group_name]['disks']:
                 self._set_error("disk '{}' is not in the group".format(disk))
                 return False
 
@@ -125,7 +129,8 @@ class Group(object):
         """
 
         lun_range = list(range(0, 256, 1))      # 0->255
-        group = self.config.config['groups'][self.group_name]
+        target_config = self.config.config['targets'][self.target_iqn]
+        group = target_config['groups'][self.group_name]
         group_disks = group.get('disks')
         for d in group_disks:
             lun_range.remove(group_disks[d].get('lun_id'))
@@ -142,7 +147,7 @@ class Group(object):
             "disks": {}
         }
 
-        config_dict = self.config.config
+        target_config = self.config.config['targets'][self.target_iqn]
 
         if self.new_group:
 
@@ -157,12 +162,12 @@ class Group(object):
             self.logger.debug("New group definition required")
 
             # new_group = True
-            config_dict['groups'][self.group_name] = group_seed
+            target_config['groups'][self.group_name] = group_seed
 
         # Now the group definition is at least seeded, so let's look at the
         # member and disk information passed
 
-        this_group = config_dict['groups'][self.group_name]
+        this_group = target_config['groups'][self.group_name]
 
         members = ListComparison(this_group.get('members'),
                                  self.group_members)
@@ -224,8 +229,8 @@ class Group(object):
 
     def update_metadata(self, members, disks):
 
-        config_dict = self.config.config
-        this_group = config_dict['groups'].get(self.group_name, {})
+        target_config = self.config.config['targets'][self.target_iqn]
+        this_group = target_config['groups'].get(self.group_name, {})
         group_disks = this_group.get('disks', {})
         if disks.added:
             # update the groups disk list
@@ -267,18 +272,14 @@ class Group(object):
         self.logger.debug("Group '{}' updated to "
                           "{}".format(self.group_name,
                                       json.dumps(this_group)))
-        if self.new_group:
-            self.config.add_item("groups", self.group_name,
-                                 this_group)
-        else:
-            self.config.update_item("groups", self.group_name,
-                                    this_group)
+        target_config['groups'][self.group_name] = this_group
+        self.config.update_item('targets', self.target_iqn, target_config)
         self.config.commit()
 
     def enforce_policy(self):
 
-        config_dict = self.config.config
-        this_group = config_dict['groups'][self.group_name]
+        target_config = self.config.config['targets'][self.target_iqn]
+        this_group = target_config['groups'][self.group_name]
         group_disks = this_group.get('disks')
         host_group = this_group.get('members')
 
@@ -295,38 +296,42 @@ class Group(object):
                 return
 
     def add_client(self, client_iqn):
-        client_metadata = self.config.config['clients'][client_iqn]
+        target_config = self.config.config['targets'][self.target_iqn]
+        client_metadata = target_config['clients'][client_iqn]
         client_metadata['group_name'] = self.group_name
-        self.config.update_item("clients", client_iqn, client_metadata)
+        self.config.update_item('targets', self.target_iqn, target_config)
         self.logger.info("Added {} to group {}".format(client_iqn,
                                                        self.group_name))
 
     def update_disk_md(self, client_iqn, group_disks):
-        md = self.config.config['clients'].get(client_iqn)
+        target_config = self.config.config['targets'][self.target_iqn]
+        md = target_config['clients'].get(client_iqn)
         md['luns'] = group_disks
-        self.config.update_item("clients", client_iqn, md)
+        self.config.update_item('targets', self.target_iqn, target_config)
         self.logger.info("updated {} disk map to "
                          "{}".format(client_iqn,
                                      json.dumps(group_disks)))
 
     def update_client(self, client_iqn, image_list):
 
-        client = GWClient(self.logger, client_iqn, image_list, '')
+        client = GWClient(self.logger, client_iqn, image_list, '', self.target_iqn)
         client.manage('reconfigure')
 
         # grab the client's metadata from the config (needed by setup_luns)
-        client.metadata = self.config.config['clients'][client_iqn]
+        target_config = self.config.config['targets'][self.target_iqn]
+        client.metadata = target_config['clients'][client_iqn]
         client.setup_luns()
 
         if client.error:
             self._set_error(client.error_msg)
 
     def remove_client(self, client_iqn):
-        client_md = self.config.config["clients"][client_iqn]
+        target_config = self.config.config['targets'][self.target_iqn]
+        client_md = target_config["clients"][client_iqn]
 
         # remove the group_name setting from the client
         client_md['group_name'] = ''
-        self.config.update_item("clients", client_iqn, client_md)
+        self.config.update_item('targets', self.target_iqn, target_config)
         self.logger.info("Removed {} from group {}".format(client_iqn,
                                                            self.group_name))
 
@@ -334,13 +339,15 @@ class Group(object):
 
         # act on the group name
         # get the members from the current definition
-        groups = self.config.config['groups']
+        target_config = self.config.config['targets'][self.target_iqn]
+        groups = target_config['groups']
         if self.group_name in groups:
             for mbr in groups[self.group_name]["members"]:
                 self.remove_client(mbr)
 
             # issue a del_item to the config object for this group_name
-            self.config.del_item("groups", self.group_name)
+            groups.pop(self.group_name)
+            self.config.update_item('targets', self.target_iqn, target_config)
             self.config.commit()
             self.logger.info("Group {} removed".format(self.group_name))
         else:

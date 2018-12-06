@@ -76,7 +76,7 @@ def valid_iqn(iqn):
     return True
 
 
-def valid_gateway(gw_name, gw_ip, config):
+def valid_gateway(target_iqn, gw_name, gw_ip, config):
     """
     validate the request for a new gateway
     :param gw_name: (str) host (shortname) of the gateway
@@ -88,10 +88,11 @@ def valid_gateway(gw_name, gw_ip, config):
     http_mode = 'https' if settings.config.api_secure else "http"
 
     # if the gateway request already exists in the config, computer says "no"
-    if gw_name in config['gateways']:
+    target_config = config['targets'][target_iqn]
+    if gw_name in target_config['portals']:
         return "Gateway name {} already defined".format(gw_name)
 
-    if gw_ip in config['gateways'].get('ip_list', []):
+    if gw_ip in target_config.get('ip_list', []):
         return "IP address already defined to the configuration"
 
     # validate the gateway name is resolvable
@@ -176,8 +177,8 @@ def get_remote_gateways(config, logger):
     '''
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
-    gateways = [key for key in config.config['gateways']
-                if isinstance(config.config['gateways'][key], dict)]
+    gateways = [key for key in config
+                if isinstance(config[key], dict)]
     logger.debug("all gateways - {}".format(gateways))
     if local_gw not in gateways:
         raise CephiSCSIError("{} cannot be used to perform this operation "
@@ -240,9 +241,11 @@ def valid_client(**kwargs):
 
     mode = kwargs['mode']
     client_iqn = kwargs['client_iqn']
+    target_iqn = kwargs['target_iqn']
     config = get_config()
     if not config:
         return "Unable to query the local API for the current config"
+    target_config = config['targets'][target_iqn]
 
     if mode == 'create':
         # iqn must be valid
@@ -250,7 +253,7 @@ def valid_client(**kwargs):
             return ("Invalid IQN name for iSCSI")
 
         # iqn must not already exist
-        if client_iqn in config['clients']:
+        if client_iqn in target_config['clients']:
             return ("A client with the name '{}' is "
                     "already defined".format(client_iqn))
 
@@ -268,11 +271,11 @@ def valid_client(**kwargs):
     elif mode == 'delete':
 
         # client must exist in the configuration
-        if client_iqn not in config['clients']:
+        if client_iqn not in target_config['clients']:
             return ("{} is not defined yet - nothing to "
                     "delete".format(client_iqn))
 
-        this_client = config['clients'].get(client_iqn)
+        this_client = target_config['clients'].get(client_iqn)
         if this_client.get('group_name', None):
             return ("Unable to delete '{}' - it belongs to "
                     "group {}".format(client_iqn,
@@ -296,7 +299,7 @@ def valid_client(**kwargs):
     elif mode == 'auth':
         chap = kwargs['chap']
         # client iqn must exist
-        if client_iqn not in config['clients']:
+        if client_iqn not in target_config['clients']:
             return ("Client '{}' does not exist".format(client_iqn))
 
         # must provide chap as either '' or a user/password string
@@ -313,7 +316,7 @@ def valid_client(**kwargs):
 
     elif mode == 'disk':
 
-        this_client = config['clients'].get(client_iqn)
+        this_client = target_config['clients'].get(client_iqn)
         if this_client.get('group_name', None):
             return ("Unable to manage disks for '{}' - it belongs to "
                     "group {}".format(client_iqn,
@@ -324,7 +327,7 @@ def valid_client(**kwargs):
                     " a comma separated str of rbd images (pool.image)")
 
         rqst_disks = set(kwargs['image_list'].split(','))
-        mapped_disks = set(config['clients'][client_iqn]['luns'].keys())
+        mapped_disks = set(target_config['clients'][client_iqn]['luns'].keys())
         current_disks = set(config['disks'].keys())
 
         if len(rqst_disks) > len(mapped_disks):

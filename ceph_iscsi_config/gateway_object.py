@@ -22,16 +22,9 @@ class GWObject(object):
         self._add_properies()
 
     def _set_config_controls(self, config, controls):
-        if self.cfg_type_key:
-            config.config[self.cfg_type][self.cfg_type_key]['controls'] = controls
-        else:
-            config.config['controls'] = controls
+        config.config[self.cfg_type][self.cfg_type_key]['controls'] = controls
 
     def _get_config_controls(self):
-        # global controls
-        if self.cfg_type == 'controls':
-            return self.config.config.get('controls', {})
-
         # This might be the initial creation so it will not be in the
         # config yet
         if self.cfg_type_key in self.config.config[self.cfg_type]:
@@ -67,14 +60,9 @@ class GWObject(object):
             # update our config
             self._set_config_controls(self.config, self.controls)
 
-            # update remote config
-            if self.cfg_type == 'controls':
-                self.config.update_item(self.cfg_type, self.cfg_type_key,
-                                        self.controls)
-            else:
-                updated_obj = self.config.config[self.cfg_type][self.cfg_type_key]
-                self.config.update_item(self.cfg_type, self.cfg_type_key,
-                                        updated_obj)
+            updated_obj = self.config.config[self.cfg_type][self.cfg_type_key]
+            self.config.update_item(self.cfg_type, self.cfg_type_key,
+                                    updated_obj)
 
         self.config.commit()
         if self.config.error:

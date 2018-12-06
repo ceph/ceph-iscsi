@@ -33,17 +33,19 @@ class GWClient(GWObject):
                      "group_name": ""
                      }
 
-    def __init__(self, logger, client_iqn, image_list, chap):
+    def __init__(self, logger, client_iqn, image_list, chap, target_iqn):
         """
         Instantiate an instance of an LIO client
         :param client_iqn: (str) iscsi iqn string
         :param image_list: (list) list of rbd images (pool/image) to attach
                            to this client or list of tuples (disk, lunid)
         :param chap: (str) chap credentials in the format 'user/password'
+        :param target_iqn: (str) target iqn string
         :return:
         """
 
         self.iqn = client_iqn
+        self.target_iqn = target_iqn
         self.lun_lookup = {}        # only used for hostgroup based definitions
         self.requested_images = []
 
@@ -97,8 +99,7 @@ class GWClient(GWObject):
                               ": {}".format(dup_string))
 
         try:
-            # We only support global client controls.
-            super(GWClient, self).__init__('controls', '', logger,
+            super(GWClient, self).__init__('targets', target_iqn, logger,
                                            GWClient.SETTINGS)
         except CephiSCSIError as err:
             self.error = True
@@ -181,7 +182,8 @@ class GWClient(GWObject):
 
         # NB. this will check all tpg's for a matching iqn
         for client in r.node_acls:
-            if client.node_wwn == self.iqn:
+            target = client.parent_tpg.parent_target
+            if client.node_wwn == self.iqn and target.wwn == self.target_iqn:
                 self.acl = client
                 self.tpg = client.parent_tpg
                 try:
@@ -199,7 +201,7 @@ class GWClient(GWObject):
         # The configuration only has one active tpg, so pick that one for any
         # acl definitions
         for tpg in r.tpgs:
-            if tpg.enable:
+            if tpg.enable and tpg.parent_target.wwn == self.target_iqn:
                 self.tpg = tpg
 
         try:
@@ -218,7 +220,7 @@ class GWClient(GWObject):
             self.change_count += 1
 
     @staticmethod
-    def define_clients(logger, config):
+    def define_clients(logger, config, target_iqn):
         """
         define the clients (nodeACLs) to the gateway definition
         :param logger: logger object to print to
@@ -227,8 +229,9 @@ class GWClient(GWObject):
         """
 
         # Client configurations (NodeACL's)
-        for client_iqn in config.config['clients']:
-            client_metadata = config.config['clients'][client_iqn]
+        target_config = config.config['targets'][target_iqn]
+        for client_iqn in target_config['clients']:
+            client_metadata = target_config['clients'][client_iqn]
             client_chap = CHAP(client_metadata['auth']['chap'])
 
             image_list = client_metadata['luns'].keys()
@@ -242,7 +245,8 @@ class GWClient(GWObject):
             client = GWClient(logger,
                               client_iqn,
                               image_list,
-                              chap_str)
+                              chap_str,
+                              target_iqn)
 
             client.manage('present')  # ensure the client exists
 
@@ -428,9 +432,9 @@ class GWClient(GWObject):
         """
         function to seed the config object with a new client definition
         """
-
-        config.add_item("clients", self.iqn)
-        config.update_item("clients", self.iqn, GWClient.seed_metadata)
+        target_config = config.config["targets"][self.target_iqn]
+        target_config['clients'][self.iqn] = GWClient.seed_metadata
+        config.update_item("targets", self.target_iqn, target_config)
 
         # persist the config update, and leave the connection to the ceph
         # object open since adding just the iqn is only the start of the
@@ -456,6 +460,7 @@ class GWClient(GWObject):
         # use current config to hold a copy of the current rados config
         # object (dict)
         self.current_config = config_object.config
+        target_config = self.current_config['targets'][self.target_iqn]
         update_host = committer
 
         self.logger.debug("GWClient.manage) update host to handle any config "
@@ -471,8 +476,8 @@ class GWClient(GWObject):
             # already in the config object - if so this is just a rerun, or a
             # reboot so config object updates are not needed when we change
             # the LIO environment
-            if self.iqn in self.current_config['clients'].keys():
-                self.metadata = self.current_config['clients'][self.iqn]
+            if self.iqn in target_config['clients'].keys():
+                self.metadata = target_config['clients'][self.iqn]
                 config_image_list = sorted(self.metadata['luns'].keys())
 
                 #
@@ -543,9 +548,10 @@ class GWClient(GWObject):
                         # update the config object with this clients settings
                         self.logger.debug("Updating config object metadata "
                                           "for '{}'".format(self.iqn))
-                        config_object.update_item("clients",
-                                                  self.iqn,
-                                                  self.metadata)
+                        target_config['clients'][self.iqn] = self.metadata
+                        config_object.update_item("targets",
+                                                  self.target_iqn,
+                                                  target_config)
 
                         # persist the config update
                         config_object.commit()
@@ -568,7 +574,8 @@ class GWClient(GWObject):
                     if update_host == gethostname().split('.')[0]:
                         self.logger.debug("Removing {} from the config "
                                           "object".format(self.iqn))
-                        config_object.del_item("clients", self.iqn)
+                        target_config['clients'].pop(self.iqn)
+                        config_object.update_item("targets", self.target_iqn, target_config)
                         config_object.commit()
 
             else:

@@ -78,8 +78,8 @@ def requires_restricted_auth(f):
         gw_names = [gw for gw in config.config['gateways']
                     if isinstance(config.config['gateways'][gw], dict)]
         gw_names.append('localhost')
-        gw_names += config.config['gateways'].get('ip_list', [])
-
+        for _, target in config.config['targets'].items():
+            gw_names += target.get('ip_list', [])
         gw_ips = reduce(operator.concat,
                         [resolve_ip_addresses(gw_name) for gw_name in gw_names]) + \
             settings.config.trusted_ip_list
@@ -215,6 +215,19 @@ def parse_target_controls(request):
     return tpg_controls, client_controls
 
 
+@app.route('/api/targets', methods=['GET'])
+@requires_restricted_auth
+def get_targets():
+    """
+    List targets defined in the configuration.
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/targets
+    """
+
+    return jsonify({'targets': config.config['targets'].keys()}), 200
+
+
 @app.route('/api/target/<target_iqn>', methods=['PUT'])
 @requires_restricted_auth
 def target(target_iqn=None):
@@ -282,8 +295,9 @@ def target(target_iqn=None):
 
     # This is a reconfigure operation, so first confirm the gateways
     # are in place (we need defined gateways)
+    target_config = config.config['targets'][target_iqn]
     try:
-        gateways = get_remote_gateways(config, logger)
+        gateways = get_remote_gateways(target_config['portals'], logger)
     except CephiSCSIError as err:
         logger.warning("target operation request failed: {}".format(err))
         return jsonify(message="{}".format(err)), 400
@@ -341,8 +355,9 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
 
     # re-apply client control overrides
     error_msg = "ok"
-    for client_iqn in config.config['clients']:
-        client_metadata = config.config['clients'][client_iqn]
+    target_config = config.config['targets'][target_iqn]
+    for client_iqn in target_config['clients']:
+        client_metadata = target_config['clients'][client_iqn]
         image_list = client_metadata['luns'].keys()
         client_chap = CHAP(client_metadata['auth']['chap'])
         chap_str = client_chap.chap_str
@@ -351,7 +366,7 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
                          "{}".format(client_chap.error_msg))
             halt("Unable to decode password for {}".format(client_iqn))
 
-        client = GWClient(logger, client_iqn, image_list, chap_str)
+        client = GWClient(logger, client_iqn, image_list, chap_str, target_iqn)
         if client.error:
             logger.error("Could not create client. Control override failed "
                          "{} - {}".format(client_iqn, client.error_msg))
@@ -413,26 +428,29 @@ def get_config():
         return jsonify(config.config), 200
 
 
-@app.route('/api/gateways', methods=['GET'])
+@app.route('/api/gateways/<target_iqn>', methods=['GET'])
 @requires_restricted_auth
-def gateways():
+def gateways(target_iqn=None):
     """
     Return the gateway subsection of the config object to the caller
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/gateways
+    curl --insecure --user admin:admin -X GET
+        http://192.168.122.69:5000/api/gateways/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
+    target_config = config.config['targets'][target_iqn]
     if request.method == 'GET':
-        return jsonify(config.config['gateways']), 200
+        return jsonify(target_config['portals']), 200
 
 
-@app.route('/api/gateway/<gateway_name>', methods=['PUT'])
+@app.route('/api/gateway/<target_iqn>/<gateway_name>', methods=['PUT'])
 @requires_restricted_auth
-def gateway(gateway_name=None):
+def gateway(target_iqn=None, gateway_name=None):
     """
     Define iscsi gateway(s) across node(s), adding TPGs, disks and clients
     The call requires the following variables to be set;
+    :param target_iqn: (str) target iqn
     :param gateway_name: (str) gateway name
     :param ip_address: (str) IPv4/IPv6 address iSCSI should use
     :param nosync: (bool) whether to sync the LIO objects to the new gateway
@@ -464,7 +482,8 @@ def gateway(gateway_name=None):
         gateway_usable = 'ok'
     else:
         logger.info("gateway validation needed for {}".format(gateway_name))
-        gateway_usable = valid_gateway(gateway_name,
+        gateway_usable = valid_gateway(target_iqn,
+                                       gateway_name,
                                        ip_address,
                                        current_config)
 
@@ -473,17 +492,17 @@ def gateway(gateway_name=None):
 
     resp_text = "Gateway added"  # Assume the best!
 
-    current_disks = config.config['disks']
-    current_clients = config.config['clients']
-    target_iqn = config.config['gateways'].get('iqn')
+    target_config = config.config['targets'][target_iqn]
+    current_disks = target_config['disks']
+    current_clients = target_config['clients']
 
-    total_objects = len(current_disks.keys()) + len(current_clients.keys())
+    total_objects = len(current_disks) + len(current_clients.keys())
 
     # if the config is empty, it doesn't matter what nosync is set to
     if total_objects == 0:
         nosync = 'true'
 
-    gateway_ip_list = config.config['gateways'].get('ip_list', [])
+    gateway_ip_list = target_config.get('ip_list', [])
 
     gateway_ip_list.append(ip_address)
     first_gateway = (len(gateway_ip_list) == 1)
@@ -493,36 +512,37 @@ def gateway(gateway_name=None):
     else:
         gateways = gateway_ip_list
 
-    api_vars = {"target_iqn": target_iqn,
-                "gateway_ip_list": ",".join(gateway_ip_list),
+    api_vars = {"gateway_ip_list": ",".join(gateway_ip_list),
                 "mode": "target",
                 "nosync": nosync}
 
     resp_text, resp_code = call_api(gateways, '_gateway',
-                                    gateway_name,
+                                    '{}/{}'.format(target_iqn, gateway_name),
                                     http_method='put',
                                     api_vars=api_vars)
 
     return jsonify(message="Gateway creation {}".format(resp_text)), resp_code
 
 
-@app.route('/api/_gateway/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
+@app.route('/api/_gateway/<target_iqn>/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
-def _gateway(gateway_name=None):
+def _gateway(target_iqn=None, gateway_name=None):
     """
     Manage the local iSCSI gateway definition
     Internal Use ONLY
     Gateways may be be added(PUT), queried (GET) or deleted (DELETE) from
     the configuration
+    :param target_iqn: (str) target iqn
     :param gateway_name: (str) gateway name, normally the DNS name
     **RESTRICTED**
     """
 
     if request.method == 'GET':
+        target_config = config.config['targets'][target_iqn]
 
-        if gateway_name in config.config['gateways']:
+        if gateway_name in target_config['portals']:
 
-            return jsonify(config.config['gateways'][gateway_name]), 200
+            return jsonify(target_config['portals'][gateway_name]), 200
         else:
             return jsonify(message="Gateway doesn't exist in the "
                                    "configuration"), 404
@@ -533,7 +553,6 @@ def _gateway(gateway_name=None):
         logger.debug("Attempting create of gateway {}".format(gateway_name))
 
         gateway_ips = str(request.form['gateway_ip_list'])
-        target_iqn = str(request.form['target_iqn'])
         target_mode = str(request.form.get('mode', 'target'))
         nosync = str(request.form.get('nosync', 'false'))
 
@@ -582,7 +601,7 @@ def _gateway(gateway_name=None):
 
                 logger.info("Syncing client configuration")
                 try:
-                    GWClient.define_clients(logger, config)
+                    GWClient.define_clients(logger, config, target_iqn)
                 except CephiSCSIError as err:
                     gateway.manage('clearconfig')
                     return jsonify(message="Failed to sync clients on gateway"
@@ -593,7 +612,7 @@ def _gateway(gateway_name=None):
     else:
         # DELETE gateway request
         gateway = GWTarget(logger,
-                           config.config['gateways']['iqn'],
+                           target_iqn,
                            '')
         if gateway.error:
             return jsonify(message="Failed to connect to the gateway"), 500
@@ -611,6 +630,165 @@ def _gateway(gateway_name=None):
             config.refresh()
 
             return jsonify(message="Gateway removed successfully"), 200
+
+
+@app.route('/api/targetlun/<target_iqn>', methods=['PUT', 'DELETE'])
+@requires_restricted_auth
+def target_disk(target_iqn=None):
+    """
+    Coordinate the addition(PUT) and removal(DELETE) of a disk for a target
+    :param target_iqn: (str) IQN of the target
+    :param disk: (str) rbd image name on the format pool.image
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d disk=rbd.new2_1
+        -X PUT https://192.168.122.69:5000/api/targetlun/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
+    """
+
+    target_config = config.config['targets'][target_iqn]
+
+    portals = [key for key in target_config['portals']]
+    # Any disk operation needs at least 2 gateways to be present
+    if len(portals) < settings.config.minimum_gateways:
+        msg = "at least {} gateways must exist before disk mapping operations " \
+              "are permitted".format(settings.config.minimum_gateways)
+        logger.warning("disk add request failed: {}".format(msg))
+        return jsonify(message=msg), 400
+
+    disk = request.form.get('disk')
+
+    if request.method == 'PUT':
+
+        if disk not in config.config['disks']:
+            return jsonify(message="Disk {} is not defined in the configuration".format(disk)), 400
+
+        for iqn, target in config.config['targets'].items():
+            if disk in target['disks']:
+                return jsonify(message="Disk {} cannot be used because it is already mapped on "
+                                       "target {}".format(disk, iqn)), 400
+
+        owner = LUN.get_owner(config.config['gateways'], target_config['portals'])
+        logger.debug("{} owner will be {}".format(disk, owner))
+        disk_metadata = config.config['disks'][disk]
+        disk_metadata['owner'] = owner
+        config.update_item("disks", disk, disk_metadata)
+
+        target_config['disks'].append(disk)
+        config.update_item("targets", target_iqn, target_config)
+
+        gateway_dict = config.config['gateways'][owner]
+        gateway_dict['active_luns'] += 1
+        config.update_item('gateways', owner, gateway_dict)
+
+        # To keep the connection used by the ConfigWatcher
+        config.commit("retain")
+
+        api_vars = {'disk': disk}
+        gateways = target_config.get('ip_list', [])
+        resp_text, resp_code = call_api(gateways, '_targetlun',
+                                        '{}'.format(target_iqn),
+                                        http_method='put',
+                                        api_vars=api_vars)
+        if resp_code != 200:
+            return jsonify(message="Add target LUN mapping failed - "
+                                   "{}".format(resp_text)), resp_code
+
+    else:
+        # this is a DELETE request
+
+        if disk not in config.config['disks']:
+            return jsonify(message="Disk {} is not defined in the "
+                                   "configuration".format(disk)), 400
+
+        if disk not in target_config['disks']:
+            return jsonify(message="Disk {} is not defined in target "
+                                   "{}".format(disk, target_iqn)), 400
+
+        local_gw = this_host()
+        api_vars = {
+            'disk': disk,
+            'purge_host': local_gw
+        }
+        gateways = target_config.get('ip_list', [])
+        resp_text, resp_code = call_api(gateways, '_targetlun',
+                                        '{}'.format(target_iqn),
+                                        http_method='delete',
+                                        api_vars=api_vars)
+        if resp_code != 200:
+            return jsonify(message="Delete target LUN mapping failed - "
+                                   "{}".format(resp_text)), resp_code
+
+    return jsonify(message="Target LUN mapping updated successfully"), 200
+
+
+@app.route('/api/_targetlun/<target_iqn>', methods=['PUT', 'DELETE'])
+@requires_restricted_auth
+def _target_disk(target_iqn=None):
+    """
+    Manage the addition/removal of disks from a target on the local gateway
+    Internal Use ONLY
+    **RESTRICTED**
+    """
+
+    disk = request.form.get('disk')
+
+    target_config = config.config['targets'][target_iqn]
+    ip_list = target_config.get('ip_list', [])
+    gateway = GWTarget(logger,
+                       target_iqn,
+                       ip_list)
+
+    if gateway.error:
+        logger.error("LUN mapping failed : "
+                     "{}".format(gateway.error_msg))
+        return jsonify(message="LUN map failed"), 500
+
+    if request.method == 'PUT':
+        # Add the mapping for the lun to ensure the block device is
+        # present on all TPG's
+
+        logger.info("Syncing LUN configuration")
+        try:
+            LUN.define_luns(logger, config, gateway)
+        except CephiSCSIError as err:
+            return jsonify(message="Failed to sync LUNs on gateway. "
+                                   "Err {}.".format(err)), 500
+
+        logger.info("Syncing TPG to LUN mapping")
+        gateway.manage('map')
+        if gateway.error:
+            return jsonify(message="Failed to sync LUNs on gateway, "
+                                   "Err {}.".format(gateway.error_msg)), 500
+
+    else:
+        # DELETE gateway request
+
+        purge_host = request.form['purge_host']
+        logger.debug("delete request for disk image '{}'".format(disk))
+        pool, image = disk.split('.', 1)
+
+        lun = LUN(logger,
+                  pool,
+                  image,
+                  0,
+                  purge_host)
+
+        if lun.error:
+            # problem defining the LUN instance
+            logger.error("Error initializing the LUN : "
+                         "{}".format(lun.error_msg))
+            return jsonify(message="Error establishing LUN instance"), 500
+
+        lun.unmap_lun(target_iqn)
+        if lun.error:
+            status_code = 400 if lun.error_msg else 500
+            logger.error("LUN remove failed : {}".format(lun.error_msg))
+            return jsonify(message="Failed to remove the LUN - "
+                                   "{}".format(lun.error_msg)), status_code
+
+        config.refresh()
+
+    return jsonify(message="LUN mapped"), 200
 
 
 @app.route('/api/disks')
@@ -678,17 +856,10 @@ def disk(image_id):
     # This is a create/resize operation, so first confirm the gateways
     # are in place (we need gateways to perform the lun masking tasks
     try:
-        gateways = get_remote_gateways(config, logger)
+        gateways = get_remote_gateways(config.config['gateways'], logger)
     except CephiSCSIError as err:
         logger.warning("disk operation request failed: {}".format(err))
         return jsonify(message="{}".format(err)), 400
-
-    # Any disk operation needs at least 2 gateways to be present
-    if len(gateways) + 1 < settings.config.minimum_gateways:
-        msg = "at least {} gateways must exist before disk operations " \
-              "are permitted".format(settings.config.minimum_gateways)
-        logger.warning("disk create request failed: {}".format(msg))
-        return jsonify(message=msg), 400
 
     if request.method == 'PUT':
         # at this point we have a disk request, and the gateways are available
@@ -848,22 +1019,6 @@ def _disk(image_id):
             if mode == 'create':
                 # new disk is allocated, so refresh the local config object
                 config.refresh()
-
-                iqn = config.config['gateways']['iqn']
-                ip_list = config.config['gateways']['ip_list']
-
-                # Add the mapping for the lun to ensure the block device is
-                # present on all TPG's
-                gateway = GWTarget(logger,
-                                   iqn,
-                                   ip_list)
-
-                gateway.manage('map')
-                if gateway.error:
-                    logger.error("LUN mapping failed : "
-                                 "{}".format(gateway.error_msg))
-                    return jsonify(message="LUN map failed"), 500
-
                 return jsonify(message="LUN created"), 200
 
             elif mode == 'resize':
@@ -882,6 +1037,11 @@ def _disk(image_id):
             if not size:
                 logger.error("LUN size unknown - {}".format(image_id))
                 return jsonify(message="LUN {} failure".format(mode)), 500
+
+            if 'owner' not in disk:
+                msg = "Disk {}.{} must be assigned to a target".format(disk['pool'], disk['image'])
+                logger.error("LUN owner not defined - {}".format(msg))
+                return jsonify(message="LUN {} failure - {}".format(mode, msg)), 400
 
             lun = LUN(logger, pool_name, image_name, size, disk['owner'])
             if mode == 'deactivate':
@@ -918,7 +1078,7 @@ def _disk(image_id):
 
         if lun.error:
             # problem defining the LUN instance
-            logger.error("Error initialising the LUN : "
+            logger.error("Error initializing the LUN : "
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
 
@@ -947,7 +1107,7 @@ def lun_reconfigure(image_id, controls):
         return "rbd image {} not found".format(image_id), 404
 
     try:
-        gateways = get_remote_gateways(config, logger)
+        gateways = get_remote_gateways(config.config['gateways'], logger)
     except CephiSCSIError as err:
         return "{}".format(err), 400
 
@@ -1110,7 +1270,7 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
         return "rbd image {} not found".format(image_id), 404
 
     try:
-        gateways = get_remote_gateways(config, logger)
+        gateways = get_remote_gateways(config.config['gateways'], logger)
     except CephiSCSIError as err:
         return "{}".format(err), 400
     gateways.append(this_host())
@@ -1159,19 +1319,21 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
     return resp_text, resp_code
 
 
-@app.route('/api/clients', methods=['GET'])
+@app.route('/api/clients/<target_iqn>', methods=['GET'])
 @requires_restricted_auth
-def get_clients():
+def get_clients(target_iqn=None):
     """
     List clients defined to the configuration.
     This information will include auth information, hence the
     restricted_auth wrapper
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/clients
+    curl --insecure --user admin:admin -X GET
+        https://192.168.122.69:5000/api/clients/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
-    client_list = config.config['clients'].keys()
+    target_config = config.config['targets'][target_iqn]
+    client_list = target_config['clients'].keys()
     response = {"clients": client_list}
 
     return jsonify(response), 200
@@ -1191,7 +1353,8 @@ def _update_client(**kwargs):
     client = GWClient(logger,
                       kwargs['client_iqn'],
                       image_list,
-                      kwargs['chap'])
+                      kwargs['chap'],
+                      kwargs['target_iqn'])
 
     if client.error:
         logger.error("Invalid client request - {}".format(client.error_msg))
@@ -1208,12 +1371,13 @@ def _update_client(**kwargs):
         return 200, "Client configured successfully"
 
 
-@app.route('/api/clientauth/<client_iqn>', methods=['PUT'])
+@app.route('/api/clientauth/<target_iqn>/<client_iqn>', methods=['PUT'])
 @requires_restricted_auth
-def clientauth(client_iqn):
+def clientauth(target_iqn, client_iqn):
     """
     Coordinate client authentication changes across each gateway node
     The following parameters are needed to manage client auth
+    :param target_iqn: (str) target IQN name
     :param client_iqn: (str) client IQN name
     :param chap: (str) chap string of the form username/password or ''
             username is 8-64 chars long containing any alphanumeric in
@@ -1229,16 +1393,20 @@ def clientauth(client_iqn):
     """
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
+    target_config = config.config['targets'][target_iqn]
     try:
-        gateways = get_remote_gateways(config, logger)
+        gateways = get_remote_gateways(target_config['portals'], logger)
     except CephiSCSIError as err:
         return jsonify(message="{}".format(err)), 400
 
-    lun_list = config.config['clients'][client_iqn]['luns'].keys()
+    lun_list = target_config['clients'][client_iqn]['luns'].keys()
     image_list = ','.join(lun_list)
     chap = request.form.get('chap')
 
-    client_usable = valid_client(mode='auth', client_iqn=client_iqn, chap=chap)
+    client_usable = valid_client(mode='auth',
+                                 client_iqn=client_iqn,
+                                 chap=chap,
+                                 target_iqn=target_iqn)
     if client_usable != 'ok':
         logger.error("BAD auth request from {}".format(request.remote_addr))
         return jsonify(message=client_usable), 400
@@ -1249,7 +1417,8 @@ def clientauth(client_iqn):
 
     gateways.insert(0, 'localhost')
 
-    resp_text, resp_code = call_api(gateways, '_clientauth', client_iqn,
+    resp_text, resp_code = call_api(gateways, '_clientauth',
+                                    '{}/{}'.format(target_iqn, client_iqn),
                                     http_method='put',
                                     api_vars=api_vars)
 
@@ -1257,12 +1426,13 @@ def clientauth(client_iqn):
         resp_code
 
 
-@app.route('/api/_clientauth/<client_iqn>', methods=['PUT'])
+@app.route('/api/_clientauth/<target_iqn>/<client_iqn>', methods=['PUT'])
 @requires_restricted_auth
-def _clientauth(client_iqn):
+def _clientauth(target_iqn, client_iqn):
     """
     Manage client authentication credentials on the local gateway
     Internal Use ONLY
+    :param target_iqn: IQN of the target
     :param client_iqn: IQN of the client
     **RESTRICTED**
     """
@@ -1275,14 +1445,15 @@ def _clientauth(client_iqn):
     status_code, status_text = _update_client(client_iqn=client_iqn,
                                               images=image_list,
                                               chap=chap,
-                                              committing_host=committing_host)
+                                              committing_host=committing_host,
+                                              target_iqn=target_iqn)
 
     return jsonify(message=status_text), status_code
 
 
-@app.route('/api/clientlun/<client_iqn>', methods=['PUT', 'DELETE'])
+@app.route('/api/clientlun/<target_iqn>/<client_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
-def clientlun(client_iqn):
+def clientlun(target_iqn, client_iqn):
     """
     Coordinate the addition(PUT) and removal(DELETE) of a disk for a client
     :param client_iqn: (str) IQN of the client
@@ -1294,14 +1465,15 @@ def clientlun(client_iqn):
     """
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
+    target_config = config.config['targets'][target_iqn]
     try:
-        gateways = get_remote_gateways(config, logger)
+        gateways = get_remote_gateways(target_config['portals'], logger)
     except CephiSCSIError as err:
         return jsonify(message="{}".format(err)), 400
 
     disk = request.form.get('disk')
 
-    lun_list = list(config.config['clients'][client_iqn]['luns'].keys())
+    lun_list = list(target_config['clients'][client_iqn]['luns'].keys())
 
     if request.method == 'PUT':
         lun_list.append(disk)
@@ -1312,12 +1484,13 @@ def clientlun(client_iqn):
         else:
             return jsonify(message="disk not mapped to client"), 400
 
-    chap_obj = CHAP(config.config['clients'][client_iqn]['auth']['chap'])
+    chap_obj = CHAP(target_config['clients'][client_iqn]['auth']['chap'])
     chap = "{}/{}".format(chap_obj.user, chap_obj.password)
     image_list = ','.join(lun_list)
 
     client_usable = valid_client(mode='disk', client_iqn=client_iqn,
-                                 image_list=image_list)
+                                 image_list=image_list,
+                                 target_iqn=target_iqn)
     if client_usable != 'ok':
         logger.error("Bad disk request for client {} : "
                      "{}".format(client_iqn,
@@ -1330,7 +1503,8 @@ def clientlun(client_iqn):
                 "chap": chap}
 
     gateways.insert(0, 'localhost')
-    resp_text, resp_code = call_api(gateways, '_clientlun', client_iqn,
+    resp_text, resp_code = call_api(gateways, '_clientlun',
+                                    '{}/{}'.format(target_iqn, client_iqn),
                                     http_method='put',
                                     api_vars=api_vars)
 
@@ -1338,19 +1512,20 @@ def clientlun(client_iqn):
         resp_code
 
 
-@app.route('/api/_clientlun/<client_iqn>', methods=['GET', 'PUT'])
+@app.route('/api/_clientlun/<target_iqn>/<client_iqn>', methods=['GET', 'PUT'])
 @requires_restricted_auth
-def _clientlun(client_iqn):
+def _clientlun(target_iqn, client_iqn):
     """
     Manage the addition/removal of disks from a client on the local gateway
     Internal Use ONLY
     **RESTRICTED**
     """
+    target_config = config.config['targets'][target_iqn]
 
     if request.method == 'GET':
 
-        if client_iqn in config.config['clients']:
-            lun_config = config.config['clients'][client_iqn]['luns']
+        if client_iqn in target_config['clients']:
+            lun_config = target_config['clients'][client_iqn]['luns']
 
             return jsonify(message=lun_config), 200
         else:
@@ -1367,16 +1542,18 @@ def _clientlun(client_iqn):
         status_code, status_text = _update_client(client_iqn=client_iqn,
                                                   images=image_list,
                                                   chap=chap,
-                                                  committing_host=committing_host)
+                                                  committing_host=committing_host,
+                                                  target_iqn=target_iqn)
 
         return jsonify(message=status_text), status_code
 
 
-@app.route('/api/client/<client_iqn>', methods=['PUT', 'DELETE'])
+@app.route('/api/client/<target_iqn>/<client_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
-def client(client_iqn):
+def client(target_iqn, client_iqn):
     """
     Handle the client create/delete actions across gateways
+    :param target_iqn: (str) IQN of the target
     :param client_iqn: (str) IQN of the client to create or delete
     **RESTRICTED**
     Examples:
@@ -1390,14 +1567,16 @@ def client(client_iqn):
               "DELETE": 'delete'}
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
+    target_config = config.config['targets'][target_iqn]
     try:
-        gateways = get_remote_gateways(config, logger)
+        gateways = get_remote_gateways(target_config['portals'], logger)
     except CephiSCSIError as err:
         return jsonify(message="{}".format(err)), 400
 
     # validate the PUT/DELETE request first
     client_usable = valid_client(mode=method[request.method],
-                                 client_iqn=client_iqn)
+                                 client_iqn=client_iqn,
+                                 target_iqn=target_iqn)
     if client_usable != 'ok':
         return jsonify(message=client_usable), 400
 
@@ -1409,7 +1588,8 @@ def client(client_iqn):
         # other gateways
         gateways.insert(0, 'localhost')
 
-        resp_text, resp_code = call_api(gateways, '_client', client_iqn,
+        resp_text, resp_code = call_api(gateways, '_client',
+                                        '{}/{}'.format(target_iqn, client_iqn),
                                         http_method='put',
                                         api_vars=api_vars)
 
@@ -1421,7 +1601,8 @@ def client(client_iqn):
         # Process flow: remote gateways > local > delete config object entry
         gateways.append('localhost')
 
-        resp_text, resp_code = call_api(gateways, '_client', client_iqn,
+        resp_text, resp_code = call_api(gateways, '_client',
+                                        '{}/{}'.format(target_iqn, client_iqn),
                                         http_method='delete',
                                         api_vars=api_vars)
 
@@ -1429,20 +1610,22 @@ def client(client_iqn):
             resp_code
 
 
-@app.route('/api/_client/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
+@app.route('/api/_client/<target_iqn>/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
-def _client(client_iqn):
+def _client(target_iqn, client_iqn):
     """
     Manage a client definition on the local gateway
     Internal Use ONLY
+    :param target_iqn: iscsi name for the target
     :param client_iqn: iscsi name for the client
     **RESTRICTED**
     """
 
     if request.method == 'GET':
 
-        if client_iqn in config.config['clients']:
-            return jsonify(config.config["clients"][client_iqn]), 200
+        target_config = config.config['targets'][target_iqn]
+        if client_iqn in target_config['clients']:
+            return jsonify(target_config["clients"][client_iqn]), 200
         else:
             return jsonify(message="Client does not exist"), 404
 
@@ -1463,7 +1646,8 @@ def _client(client_iqn):
         status_code, status_text = _update_client(client_iqn=client_iqn,
                                                   images=image_list,
                                                   chap=chap,
-                                                  committing_host=committing_host)
+                                                  committing_host=committing_host,
+                                                  target_iqn=target_iqn)
 
         logger.debug("client create: {}".format(status_code))
         logger.debug("client create: {}".format(status_text))
@@ -1474,8 +1658,9 @@ def _client(client_iqn):
         committing_host = request.form['committing_host']
 
         # Make sure the delete request is for a client we have defined
-        if client_iqn in config.config['clients'].keys():
-            client = GWClient(logger, client_iqn, '', '')
+        target_config = config.config['targets'][target_iqn]
+        if client_iqn in target_config['clients'].keys():
+            client = GWClient(logger, client_iqn, '', '', target_iqn)
             client.manage('absent', committer=committing_host)
 
             if client.error:
@@ -1493,23 +1678,25 @@ def _client(client_iqn):
             return jsonify(message="Client does not exist!"), 404
 
 
-@app.route('/api/hostgroups', methods=['GET'])
+@app.route('/api/hostgroups/<target_iqn>', methods=['GET'])
 @requires_restricted_auth
-def hostgroups():
+def hostgroups(target_iqn=None):
     """
     Return the hostgroup names defined to the configuration
     **RESTRICTED**
     Examples:
-    curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/hostgroups
+    curl --insecure --user admin:admin -X GET
+        http://192.168.122.69:5000/api/hostgroups/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
+    target_config = config.config['targets'][target_iqn]
     if request.method == 'GET':
-        return jsonify({"groups": config.config['groups'].keys()}), 200
+        return jsonify({"groups": target_config['groups'].keys()}), 200
 
 
-@app.route('/api/hostgroup/<group_name>', methods=['GET', 'PUT', 'DELETE'])
+@app.route('/api/hostgroup/<target_iqn>/<group_name>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
-def hostgroup(group_name):
+def hostgroup(target_iqn, group_name):
     """
     co-ordinate the management of host groups across iSCSI gateway hosts
     **RESTRICTED**
@@ -1530,8 +1717,9 @@ def hostgroup(group_name):
     http_mode = 'https' if settings.config.api_secure else 'http'
     valid_hostgroup_actions = ['add', 'remove']
 
+    target_config = config.config['targets'][target_iqn]
     try:
-        gateways = get_remote_gateways(config, logger)
+        gateways = get_remote_gateways(target_config['portals'], logger)
     except CephiSCSIError as err:
         return jsonify(message="{}".format(err)), 400
 
@@ -1539,18 +1727,20 @@ def hostgroup(group_name):
     if action.lower() not in valid_hostgroup_actions:
         return jsonify(message="Invalid hostgroup action specified"), 405
 
+    target_config = config.config['targets'][target_iqn]
+
     if request.method == 'GET':
         # return the requested definition
-        if group_name in config.config['groups'].keys():
-            return jsonify(config.config['groups'].get(group_name)), 200
+        if group_name in target_config['groups'].keys():
+            return jsonify(target_config['groups'].get(group_name)), 200
         else:
             # group name does not exist
             return jsonify(message="Group name does not exist"), 404
 
     elif request.method == 'PUT':
 
-        if group_name in config.config['groups']:
-            host_group = config.config['groups'].get(group_name)
+        if group_name in target_config['groups']:
+            host_group = target_config['groups'].get(group_name)
             current_members = host_group.get('members')
             current_disks = host_group.get('disks').keys()
         else:
@@ -1585,7 +1775,8 @@ def hostgroup(group_name):
         gateways.insert(0, 'localhost')
         logger.debug("gateway update order is {}".format(','.join(gateways)))
 
-        resp_text, resp_code = call_api(gateways, '_hostgroup', group_name,
+        resp_text, resp_code = call_api(gateways, '_hostgroup',
+                                        '{}/{}'.format(target_iqn, group_name),
                                         http_method='put', api_vars=api_vars)
 
         return jsonify(message="hostgroup create/update {}".format(resp_text)), \
@@ -1595,17 +1786,18 @@ def hostgroup(group_name):
         # Delete request just purges the entry from the config, so we only
         # need to run against the local gateway
 
-        if not config.config['groups'].get(group_name, None):
+        if not target_config['groups'].get(group_name, None):
             return jsonify(message="Group name '{}' not "
                                    "found".format(group_name)), 404
 
         # At this point the group name is valid, so go ahead and remove it
         api_endpoint = ("{}://{}:{}/api/"
-                        "_hostgroup/{}".format(http_mode,
-                                               'localhost',
-                                               settings.config.api_port,
-                                               group_name
-                                               ))
+                        "_hostgroup/{}/{}".format(http_mode,
+                                                  'localhost',
+                                                  settings.config.api_port,
+                                                  target_iqn,
+                                                  group_name
+                                                  ))
 
         api = APIRequest(api_endpoint)
         api.delete()
@@ -1620,9 +1812,9 @@ def hostgroup(group_name):
                                                          api.response.json()['message'])), 400
 
 
-@app.route('/api/_hostgroup/<group_name>', methods=['GET', 'PUT', 'DELETE'])
+@app.route('/api/_hostgroup/<target_iqn>/<group_name>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
-def _hostgroup(group_name):
+def _hostgroup(target_iqn, group_name):
     """
     Manage a hostgroup definition on the local iscsi gateway
     Internal Use ONLY
@@ -1630,10 +1822,12 @@ def _hostgroup(group_name):
     :param group_name:
     :return:
     """
+    target_config = config.config['targets'][target_iqn]
+
     if request.method == 'GET':
         # return the requested definition
-        if group_name in config.config['groups'].keys():
-            return jsonify(config.config['groups'].get(group_name)), 200
+        if group_name in target_config['groups'].keys():
+            return jsonify(target_config['groups'].get(group_name)), 200
         else:
             # group name does not exist
             return jsonify(message="Group name does not exist"), 404
@@ -1652,7 +1846,7 @@ def _hostgroup(group_name):
             disks = disks.split(',')
 
         # create/update a host group definition
-        grp = Group(logger, group_name, members, disks)
+        grp = Group(logger, target_iqn, group_name, members, disks)
 
         grp.apply()
 
@@ -1664,7 +1858,7 @@ def _hostgroup(group_name):
 
     else:
         # request is for a delete of a host group
-        grp = Group(logger, group_name)
+        grp = Group(logger, target_iqn, group_name)
         grp.purge()
         if not grp.error:
             return jsonify(message="Group '{}' removed".format(group_name)), 200

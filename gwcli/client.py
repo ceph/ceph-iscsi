@@ -69,11 +69,14 @@ class Clients(UIGroup):
                               "iSCSI".format(client_iqn))
             return
 
+        target_iqn = self.parent.name
+
         # Issue the API call to create the client
         client_api = ('{}://localhost:{}/api/'
-                      'client/{}'.format(self.http_mode,
-                                         settings.config.api_port,
-                                         client_iqn))
+                      'client/{}/{}'.format(self.http_mode,
+                                            settings.config.api_port,
+                                            target_iqn,
+                                            client_iqn))
 
         self.logger.debug("Client CREATE for {}".format(client_iqn))
         api = APIRequest(client_api)
@@ -114,11 +117,14 @@ class Clients(UIGroup):
                               "iSCSI".format(client_iqn))
             return
 
+        target_iqn = self.parent.name
+
         client_api = ('{}://{}:{}/api/'
-                      'client/{}'.format(self.http_mode,
-                                         "localhost",
-                                         settings.config.api_port,
-                                         client_iqn))
+                      'client/{}/{}'.format(self.http_mode,
+                                            "localhost",
+                                            settings.config.api_port,
+                                            target_iqn,
+                                            client_iqn))
         api = APIRequest(client_api)
         api.delete()
 
@@ -337,12 +343,15 @@ class Client(UINode):
         self.logger.debug(
             "CHAP to be set to '{}' for '{}'".format(chap, self.client_iqn))
 
+        target_iqn = self.parent.parent.name
+
         api_vars = {"chap": chap}
 
         clientauth_api = ('{}://localhost:{}/api/'
-                          'clientauth/{}'.format(self.http_mode,
-                                                 settings.config.api_port,
-                                                 self.client_iqn))
+                          'clientauth/{}/{}'.format(self.http_mode,
+                                                    settings.config.api_port,
+                                                    target_iqn,
+                                                    self.client_iqn))
 
         api = APIRequest(clientauth_api, data=api_vars)
         api.put()
@@ -492,6 +501,18 @@ class Client(UINode):
                                   "client ".format(disk))
                 return
 
+        mapped_disks = [mapped_disk.name
+                        for mapped_disk in self.parent.parent.target_disks.children]
+        if disk not in mapped_disks:
+            rc = self.parent.parent.target_disks.add_disk(disk, None)
+            if rc == 0:
+                self.logger.debug("disk auto-map successful")
+            else:
+                self.logger.error("disk auto-map failed({}), try "
+                                  "using the /iscsi-target/<iqn>/disks add "
+                                  "command".format(rc))
+                return
+
         # At this point we are either in add/remove mode, with a valid disk
         # to act upon
         self.logger.debug("Client '{}' update - {} disk "
@@ -499,12 +520,15 @@ class Client(UINode):
                                       action,
                                       disk))
 
+        target_iqn = self.parent.parent.name
+
         api_vars = {"disk": disk}
 
         clientlun_api = ('{}://localhost:{}/api/'
-                         'clientlun/{}'.format(self.http_mode,
-                                               settings.config.api_port,
-                                               self.client_iqn))
+                         'clientlun/{}/{}'.format(self.http_mode,
+                                                  settings.config.api_port,
+                                                  target_iqn,
+                                                  self.client_iqn))
 
         api = APIRequest(clientlun_api, data=api_vars)
         if action == 'add':
