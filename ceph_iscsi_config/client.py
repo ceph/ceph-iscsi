@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 from base64 import b64encode, b64decode
 import os
 
@@ -667,7 +668,7 @@ class CHAP(object):
 
     def _set_chap_str(self, chap_str):
 
-        username, self.password_str = chap_str.split('/', 1)
+        self.user, self.password_str = chap_str.split('/', 1)
 
         if encryption_available() and len(self.password_str) > 0:
             self.password = self._encrypt()
@@ -679,11 +680,24 @@ class CHAP(object):
         key_path = os.path.join(settings.config.ceph_config_dir,
                                 settings.config.priv_key)
         try:
-            key = RSA.importKey(open(key_path))
-
-            cipher = PKCS1_OAEP.new(key)
-            plain_pw = cipher.decrypt(b64decode(self.password_str))
-        except Exception:
+            with open(key_path, 'rb') as keyf:
+                key = serialization.load_pem_private_key(keyf.read(), None,
+                                                         default_backend())
+            try:
+                plain_pw = key.decrypt(b64decode(self.password_str),
+                                       padding.OAEP(
+                                           mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                           algorithm=hashes.SHA256(),
+                                           label=None)).decode('utf-8')
+            except ValueError:
+                # decrypting a password that was encrypted with python-crypto?
+                plain_pw = key.decrypt(b64decode(self.password_str),
+                                       padding.OAEP(
+                                           mgf=padding.MGF1(algorithm=hashes.SHA1()),
+                                           algorithm=hashes.SHA1(),
+                                           label=None)).decode('utf-8')
+        except Exception as ex:
+            print(ex)
             self.error = True
             self.error_msg = 'Problems decoding the encrypted password'
             return None
@@ -694,9 +708,15 @@ class CHAP(object):
         key_path = os.path.join(settings.config.ceph_config_dir,
                                 settings.config.pub_key)
         try:
-            key = RSA.importKey(open(key_path))
-            cipher = PKCS1_OAEP.new(key)
-            encrypted_pw = b64encode(cipher.encrypt(self.password_str))
+            with open(key_path, 'rb') as keyf:
+                key = serialization.load_pem_public_key(keyf.read(),
+                                                        default_backend())
+
+            encrypted_pw = b64encode(key.encrypt(self.password_str.encode('utf-8'),
+                                     padding.OAEP(
+                                         mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                         algorithm=hashes.SHA256(),
+                                         label=None))).decode('utf-8')
         except Exception:
             self.error = True
             self.error_msg = 'Encoding password failed'
