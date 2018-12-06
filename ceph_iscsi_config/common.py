@@ -80,6 +80,7 @@ class Config(object):
 
         if self.init_config():
             self.config = self.get_config()
+            self._upgrade_config()
             self.changed = False
 
     def _read_config_object(self, ioctx):
@@ -153,6 +154,16 @@ class Config(object):
         cfg_dict = json.loads(cfg_data)
 
         return cfg_dict
+
+    def _upgrade_config(self):
+        if self.config['version'] >= Config.seed_config['version']:
+            return
+
+        if self.config['version'] <= 2:
+            self.add_item("groups", element_name=None, initial_value={})
+            self.update_item("version", element_name=None, element_value=3)
+
+        self.commit("retain")
 
     def init_config(self):
         try:
@@ -238,6 +249,7 @@ class Config(object):
     def refresh(self):
         self.logger.debug("config refresh - current config is {}".format(self.config))
         self.config = self.get_config()
+        self._upgrade_config()
 
     def add_item(self, cfg_type, element_name=None, initial_value=None):
         now = get_time()

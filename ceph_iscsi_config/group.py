@@ -35,9 +35,6 @@ class Group(object):
             self.error_msg = self.config.error_msg
             return
 
-        # check that the config object has a group section
-        Group._check_config(self.logger, self.config)
-
         self.group_name = group_name
         self.group_members = members
         self.disks = disks
@@ -50,30 +47,6 @@ class Group(object):
         self.logger.debug("Group : name={}".format(self.group_name))
         self.logger.debug("Group : members={}".format(self.group_members))
         self.logger.debug("Group : disks={}".format(self.disks))
-
-    @classmethod
-    def _check_config(cls, logger, config_object):
-        """
-        look at the current config object to determine whether it needs the
-        group section seeding
-        :param logger: (logging object) destination for log messages
-        :param config_object: Instance of the Config class
-        :return: Null
-        """
-
-        if 'groups' in config_object.config:
-            logger.debug("Config object contains a 'groups' section - config "
-                         "object upgrade is not required")
-            return
-        else:
-            # Need to upgrade the config object to include the new
-            # 'groups' section
-            logger.info("Adding 'groups' section to config object")
-            config_object.add_item("groups", element_name=None,
-                                   initial_value={})
-            config_object.update_item("version", element_name=None,
-                                      element_value=3)
-            config_object.commit()
 
     def __str__(self):
         return ("Group: {}\n- Members: {}\n- "
