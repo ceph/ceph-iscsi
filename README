@@ -82,7 +82,7 @@ python-rbd
 python-netifaces
 python-rtslib
 python-configshell
-python-crypto
+python-cryptography
 python-flask
 pyOpenSSL
 

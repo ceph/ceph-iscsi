@@ -32,7 +32,7 @@ python-rbd
 python-netifaces
 python-rtslib
 python-configshell
-python-crypto
+python-cryptography
 python-flask
 
 To install the python package that provides the application logic, run the
