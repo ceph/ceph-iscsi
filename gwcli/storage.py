@@ -145,15 +145,13 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_create(self, pool=None, image=None, size=None, count=1,
-                          **attributes):
+    def ui_command_create(self, pool=None, image=None, size=None, count=1):
         """
         Create a LUN and assign to the gateway(s).
 
         The create command supports two request formats;
 
-        Long format  : create pool=<name> image=<name> size=<size> [attributes:
-                       max_data_area_mb=<buffer_size> osd_op_timeout=<seconds> ...]
+        Long format  : create pool=<name> image=<name> size=<size>
         Short format : create pool.image <size>
 
         e.g.
@@ -172,15 +170,6 @@ class Disks(UIGroup):
                 create rbd.test 1g count=5
                 -> create 5 LUNs called test1..test5 each of 1GB in size
                    from the rbd pool
-        attributes :
-        max_data_area_mb : integer, optional size of kernel data ring buffer (MiB).
-                           Default 8.
-        qfull_timeout: integer, optional time in seconds to wait for ring space.
-                       Default 5.
-        osd_op_timeout: integer, optional time in seconds to wait for a Ceph op.
-                        Default 30.
-        hw_max_sectors: integer, optional in units of 512 byte sectors reported to
-                        initiators as max IO size. Default 1024.
 
         Notes.
         1) size does not support decimal representations
@@ -221,24 +210,10 @@ class Disks(UIGroup):
                 self.logger.error("invalid count format, must be an integer")
                 return
 
-        try:
-            controls = settings.Settings.normalize_controls(attributes,
-                                                            LUN.SETTINGS)
-        except ValueError as err:
-            self.logger.error(err)
-            return
-
-        for k, v in controls.items():
-            if not v:
-                self.logger.error("Missing value for {}.".format(k))
-                return
-
         self.logger.debug("CMD: /disks/ create pool={} "
-                          "image={} size={} count={} "
-                          "controls={}".format(pool, image, size, count,
-                                               attributes))
-        self.create_disk(pool=pool, image=image, size=size, count=count,
-                         controls=attributes)
+                          "image={} size={} "
+                          "count={} ".format(pool, image, size, count))
+        self.create_disk(pool=pool, image=image, size=size, count=count)
 
     def _valid_pool(self, pool=None):
         """
@@ -266,7 +241,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    controls={}, parent=None):
+                    parent=None):
 
         rc = 0
 
@@ -288,10 +263,8 @@ class Disks(UIGroup):
                                                           settings.config.api_port,
                                                           disk_key)
 
-        controls_json = json.dumps(controls)
-
         api_vars = {'pool': pool, 'owner': local_gw,
-                    'count': count, 'controls': controls_json, 'mode': 'create'}
+                    'count': count, 'mode': 'create'}
         if size:
             api_vars['size'] = size.upper()
 

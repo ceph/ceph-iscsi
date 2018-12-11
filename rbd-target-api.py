@@ -836,7 +836,7 @@ def disk(image_id):
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
         -X PUT https://192.168.122.69:5000/api/disk/rbd.new2_
     curl --insecure --user admin:admin -d mode=create -d size=10g -d pool=rbd
-        -d controls='{max_data_area_mb=32}' -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
+        -X PUT https://192.168.122.69:5000/api/disk/rbd.new3_
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
@@ -1007,9 +1007,6 @@ def _disk(image_id):
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
-
-            for k, v in controls.items():
-                setattr(lun, k, v)
 
             lun.allocate()
             if lun.error:
