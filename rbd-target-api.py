@@ -718,6 +718,13 @@ def disk(image_id):
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
+        if not size:
+            try:
+                rbd_image = RBDDev(image_name, 0, pool)
+                size = rbd_image.current_size
+            except rbd.ImageNotFound:
+                return jsonify(message="Size parameter is required when creating a new image"), 400
+
         if mode == 'reconfigure':
             resp_text, resp_code = lun_reconfigure(image_id, controls)
             if resp_code == 200:
