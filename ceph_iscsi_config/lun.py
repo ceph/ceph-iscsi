@@ -834,13 +834,13 @@ class LUN(GWObject):
 
         if mode in ['create', 'resize']:
 
-            if not valid_size(kwargs['size']):
-                return "Size is invalid"
-
-            elif kwargs['pool'] not in get_pools():
+            if kwargs['pool'] not in get_pools():
                 return "pool name is invalid"
 
         if mode == 'create':
+            if kwargs['size'] and not valid_size(kwargs['size']):
+                return "Size is invalid"
+
             if len(config['disks']) >= 256:
                 return "Disk limit of 256 reached."
 
@@ -882,6 +882,9 @@ class LUN(GWObject):
                                                kwargs['image']))
 
         if mode == 'resize':
+
+            if not valid_size(kwargs['size']):
+                return "Size is invalid"
 
             size = kwargs['size'].upper()
             current_size = get_rbd_size(kwargs['pool'], kwargs['image'])

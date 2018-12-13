@@ -475,10 +475,6 @@ class Client(UINode):
             if action == 'add':
                 ui_root = self.get_ui_root()
                 ui_disks = ui_root.disks
-                if not size:
-                    self.logger.error("To auto-define the disk to the client"
-                                      " you must provide a disk size")
-                    return
 
                 # a disk given here would be of the form pool.image
                 pool, image = disk.split('.')

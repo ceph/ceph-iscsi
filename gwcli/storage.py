@@ -202,20 +202,16 @@ class Disks(UIGroup):
                                           "({} ?)".format(size))
                         return
                 size = image
-            else:
-                self.logger.error("Shorthand command is create <pool>.<image>"
-                                  " <size>")
-                return
             pool, image = pool.split('.')
 
         else:
             # long format request
-            if not pool or not image or not size:
-                self.logger.error("Invalid create: pool, image and size "
+            if not pool or not image:
+                self.logger.error("Invalid create: pool and image "
                                   "parameters are needed")
                 return
 
-        if not valid_size(size):
+        if size and not valid_size(size):
             self.logger.error("Invalid size requested. Must be an integer, "
                               "suffixed by M, G or T. See help for more info")
             return
@@ -294,8 +290,10 @@ class Disks(UIGroup):
 
         controls_json = json.dumps(controls)
 
-        api_vars = {'pool': pool, 'size': size.upper(), 'owner': local_gw,
+        api_vars = {'pool': pool, 'owner': local_gw,
                     'count': count, 'controls': controls_json, 'mode': 'create'}
+        if size:
+            api_vars['size'] = size.upper()
 
         self.logger.debug("Issuing disk create request")
 
