@@ -715,6 +715,10 @@ def target_disk(target_iqn=None):
             return jsonify(message="Disk {} is not defined in target "
                                    "{}".format(disk, target_iqn)), 400
 
+        for group_name, group in target_config['groups'].items():
+            if disk in group['disks']:
+                return jsonify(message="Disk {} belongs to group "
+                                       "{}".format(disk, group_name)), 400
         local_gw = this_host()
         api_vars = {
             'disk': disk,
