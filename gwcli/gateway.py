@@ -194,7 +194,10 @@ class ISCSITargets(UIGroup):
         if api.response.status_code == 200:
             self.logger.info('ok')
             # create the target entry in the UI tree
-            Target(target_iqn, self)
+            target_exists = len([target for target in self.children
+                                 if target.name == target_iqn]) > 0
+            if not target_exists:
+                Target(target_iqn, self)
         else:
             self.logger.error("Failed to create the target on the local node")
 
