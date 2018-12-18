@@ -8,7 +8,8 @@ from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks, TargetDisks
 from gwcli.client import Clients
 from gwcli.utils import (this_host, response_message, GatewayAPIError,
-                         GatewayError, APIRequest, console_message, valid_iqn)
+                         GatewayError, APIRequest, console_message, valid_iqn,
+                         get_config)
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
@@ -201,6 +202,30 @@ class ISCSITargets(UIGroup):
                                   "{}".format(response_message(api.response,
                                                                self.logger)))
 
+    def ui_command_delete(self, target_iqn):
+        """
+        Delete an iSCSI target.
+        """
+
+        self.logger.debug("CMD: /iscsi delete {}".format(target_iqn))
+
+        gw_api = ('{}://localhost:{}/api/'
+                  'target/{}'.format(self.http_mode,
+                                     settings.config.api_port,
+                                     target_iqn))
+
+        api = APIRequest(gw_api)
+        api.delete()
+
+        if api.response.status_code == 200:
+            self.logger.info('ok')
+            # delete the target entry from the UI tree
+            target_object = [target for target in self.children
+                             if target.name == target_iqn][0]
+            self.remove_child(target_object)
+        else:
+            self.logger.error("Failed - {}".format(response_message(api.response, self.logger)))
+
     def ui_command_clearconfig(self, confirm=None):
         """
         The 'clearconfig' command allows you to return the configuration to an
@@ -223,23 +248,7 @@ class ISCSITargets(UIGroup):
 
         # get a new copy of the config dict over the local API
         # check that there aren't any disks or client listed
-        local_api = ("{}://localhost:{}/api/"
-                     "config".format(self.http_mode,
-                                     settings.config.api_port))
-
-        api = APIRequest(local_api)
-        api.get()
-
-        if api.response.status_code != 200:
-            self.logger.error("Unable to get fresh copy of the configuration")
-            raise GatewayAPIError
-
-        try:
-            current_config = api.response.json()
-        except Exception:
-            self.logger.error("Malformed REST API response")
-            raise GatewayAPIError
-
+        current_config = get_config()
         for target_iqn, target in current_config['targets'].items():
             num_clients = len(target['clients'].keys())
             if num_clients > 0:
@@ -266,11 +275,10 @@ class ISCSITargets(UIGroup):
         for gw_name in gw_list:
 
             gw_api = ('{}://{}:{}/api/'
-                      '_gateway/{}/{}'.format(self.http_mode,
-                                              gw_name,
-                                              settings.config.api_port,
-                                              target_iqn,
-                                              gw_name))
+                      '_target/{}'.format(self.http_mode,
+                                          gw_name,
+                                          settings.config.api_port,
+                                          target_iqn))
 
             api = APIRequest(gw_api)
             api.delete()

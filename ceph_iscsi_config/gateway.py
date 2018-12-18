@@ -193,7 +193,7 @@ class GWTarget(GWObject):
                 else:
                     break
 
-    def clear_config(self):
+    def clear_config(self, target_disks, unmapped_disks):
         """
         Remove the target definition form LIO
         :return: None
@@ -201,7 +201,8 @@ class GWTarget(GWObject):
         # check that there aren't any disks or clients in the configuration
         lio_root = root.RTSRoot()
 
-        disk_count = len([disk for disk in lio_root.storage_objects])
+        disk_count = len([disk for disk in lio_root.storage_objects
+                          if disk.name in target_disks or disk.name in unmapped_disks])
         clients = []
         for tpg in self.tpg_list:
             tpg_clients = [node for node in tpg._list_node_acls()]
@@ -210,7 +211,7 @@ class GWTarget(GWObject):
 
         if disk_count > 0 or client_count > 0:
             self.error = True
-            self.error_msg = ("Clients({}) and disks({}) must be removed"
+            self.error_msg = ("Clients({}) and disks({}) must be removed "
                               "before the gateways".format(client_count,
                                                            disk_count))
             return
@@ -574,10 +575,13 @@ class GWTarget(GWObject):
                 self.error = True
                 self.error_msg = "IQN provided does not exist"
 
-            self.clear_config()
+            target_config = config.config["targets"][self.iqn]
+            target_disks = target_config['disks']
+            unmapped_disks = [key for key, value in config.config['disks'].items()
+                              if not value.get('owner')]
+            self.clear_config(target_disks, unmapped_disks)
 
             if not self.error:
-                target_config = config.config["targets"][self.iqn]
                 gw_ip = target_config['portals'][local_gw]['portal_ip_address']
 
                 target_config['portals'].pop(local_gw)

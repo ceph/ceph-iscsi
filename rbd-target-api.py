@@ -228,7 +228,7 @@ def get_targets():
     return jsonify({'targets': config.config['targets'].keys()}), 200
 
 
-@app.route('/api/target/<target_iqn>', methods=['PUT'])
+@app.route('/api/target/<target_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
 def target(target_iqn=None):
     """
@@ -246,88 +246,103 @@ def target(target_iqn=None):
         -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
     """
 
-    mode = request.form.get('mode', None)
-    if mode not in [None, 'reconfigure']:
-        logger.error("Unexpected mode provided")
-        return jsonify(message="Unexpected mode provided for {} - "
-                               "{}".format(target_iqn, mode)), 500
+    if request.method == 'PUT':
+        mode = request.form.get('mode', None)
+        if mode not in [None, 'reconfigure']:
+            logger.error("Unexpected mode provided")
+            return jsonify(message="Unexpected mode provided for {} - "
+                                   "{}".format(target_iqn, mode)), 500
 
-    try:
-        tpg_controls, client_controls = parse_target_controls(request)
-    except ValueError as err:
-        logger.error("Unexpected or invalid controls")
-        return jsonify(message="Unexpected or invalid controls - "
-                               "{}".format(err)), 500
+        try:
+            tpg_controls, client_controls = parse_target_controls(request)
+        except ValueError as err:
+            logger.error("Unexpected or invalid controls")
+            return jsonify(message="Unexpected or invalid controls - "
+                                   "{}".format(err)), 500
 
-    gateway_ip_list = []
-    target = GWTarget(logger,
-                      str(target_iqn),
-                      gateway_ip_list)
+        gateway_ip_list = []
+        target = GWTarget(logger,
+                          str(target_iqn),
+                          gateway_ip_list)
 
-    if target.error:
-        logger.error("Unable to create an instance of the GWTarget class")
-        return jsonify(message="GWTarget problem - "
-                               "{}".format(target.error_msg)), 500
+        if target.error:
+            logger.error("Unable to create an instance of the GWTarget class")
+            return jsonify(message="GWTarget problem - "
+                                   "{}".format(target.error_msg)), 500
 
-    orig_tpg_controls = {}
-    orig_client_controls = {}
-    for k, v in tpg_controls.items():
-        orig_tpg_controls[k] = getattr(target, k)
-        setattr(target, k, v)
+        orig_tpg_controls = {}
+        orig_client_controls = {}
+        for k, v in tpg_controls.items():
+            orig_tpg_controls[k] = getattr(target, k)
+            setattr(target, k, v)
 
-    for k, v in client_controls.items():
-        orig_client_controls[k] = getattr(target, k)
-        setattr(target, k, v)
+        for k, v in client_controls.items():
+            orig_client_controls[k] = getattr(target, k)
+            setattr(target, k, v)
 
-    target.manage('init')
-    if target.error:
-        logger.error("Failure during gateway 'init' processing")
-        return jsonify(message="iscsi target 'init' process failed "
-                               "for {} - {}".format(target_iqn,
-                                                    target.error_msg)), 500
+        target.manage('init')
+        if target.error:
+            logger.error("Failure during gateway 'init' processing")
+            return jsonify(message="iscsi target 'init' process failed "
+                                   "for {} - {}".format(target_iqn,
+                                                        target.error_msg)), 500
 
-    if mode is None:
+        if mode is None:
+            config.refresh()
+            return jsonify(message="Target defined successfully"), 200
+
+        if not tpg_controls and not client_controls:
+            return jsonify(message="Target reconfigured."), 200
+
+        # This is a reconfigure operation, so first confirm the gateways
+        # are in place (we need defined gateways)
+        target_config = config.config['targets'][target_iqn]
+        try:
+            gateways = get_remote_gateways(target_config['portals'], logger)
+        except CephiSCSIError as err:
+            logger.warning("target operation request failed: {}".format(err))
+            return jsonify(message="{}".format(err)), 400
+
+        # We perform the reconfigure locally here to make sure the values are valid
+        # and simplify error cleanup
+        resp_text = local_target_reconfigure(target_iqn, tpg_controls,
+                                             client_controls)
+        if "ok" != resp_text:
+            reset_resp = local_target_reconfigure(target_iqn, orig_tpg_controls,
+                                                  orig_client_controls)
+            if "ok" != reset_resp:
+                logger.error("Failed to reset target controls - "
+                             "{}".format(reset_resp))
+
+            return jsonify(message="{}".format(resp_text)), 500
+
+        resp_text, resp_code = call_api(gateways, '_target', target_iqn,
+                                        http_method='put',
+                                        api_vars=request.form)
+        if resp_code != 200:
+            return jsonify(message="{}".format(resp_text)), resp_code
+
+        try:
+            target.commit_controls()
+        except CephiSCSIError as err:
+            logger.error("Control commit failed during gateway 'reconfigure'")
+            return jsonify(message="Could not commit controls - {}".format(err)), 500
         config.refresh()
-        return jsonify(message="Target defined successfully"), 200
-
-    if not tpg_controls and not client_controls:
         return jsonify(message="Target reconfigured."), 200
 
-    # This is a reconfigure operation, so first confirm the gateways
-    # are in place (we need defined gateways)
-    target_config = config.config['targets'][target_iqn]
-    try:
-        gateways = get_remote_gateways(target_config['portals'], logger)
-    except CephiSCSIError as err:
-        logger.warning("target operation request failed: {}".format(err))
-        return jsonify(message="{}".format(err)), 400
-
-    # We perform the reconfigure locally here to make sure the values are valid
-    # and simplify error cleanup
-    resp_text = local_target_reconfigure(target_iqn, tpg_controls,
-                                         client_controls)
-    if "ok" != resp_text:
-        reset_resp = local_target_reconfigure(target_iqn, orig_tpg_controls,
-                                              orig_client_controls)
-        if "ok" != reset_resp:
-            logger.error("Failed to reset target controls - "
-                         "{}".format(reset_resp))
-
-        return jsonify(message="{}".format(resp_text)), 500
-
-    resp_text, resp_code = call_api(gateways, '_target', target_iqn,
-                                    http_method='put',
-                                    api_vars=request.form)
-    if resp_code != 200:
-        return jsonify(message="{}".format(resp_text)), resp_code
-
-    try:
-        target.commit_controls()
-    except CephiSCSIError as err:
-        logger.error("Control commit failed during gateway 'reconfigure'")
-        return jsonify(message="Could not commit controls - {}".format(err)), 500
-    config.refresh()
-    return jsonify(message="Target reconfigured."), 200
+    else:
+        # DELETE target request
+        config.refresh()
+        target_config = config.config['targets'][target_iqn]
+        hostnames = target_config['portals'].keys()
+        if not hostnames:
+            return jsonify(message="The target must contain at least one portal"), 400
+        resp_text, resp_code = call_api(hostnames, '_target',
+                                        '{}'.format(target_iqn),
+                                        http_method='delete')
+        if resp_code != 200:
+            return jsonify(message="{}".format(resp_text)), resp_code
+        return jsonify(message="Target deleted."), 200
 
 
 def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
@@ -390,27 +405,45 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
     return "ok"
 
 
-@app.route('/api/_target/<target_iqn>', methods=['PUT'])
+@app.route('/api/_target/<target_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
 def _target(target_iqn=None):
-    mode = request.form.get('mode', None)
-    if mode not in ['reconfigure']:
-        logger.error("Unexpected mode provided")
-        return jsonify(message="Unexpected mode provided for {} - "
-                               "{}".format(target_iqn, mode)), 500
-    try:
-        tpg_controls, client_controls = parse_target_controls(request)
-    except ValueError as err:
-        logger.error("Unexpected or invalid controls")
-        return jsonify(message="Unexpected or invalid controls - "
-                               "{}".format(err)), 500
+    if request.method == 'PUT':
+        mode = request.form.get('mode', None)
+        if mode not in ['reconfigure']:
+            logger.error("Unexpected mode provided")
+            return jsonify(message="Unexpected mode provided for {} - "
+                                   "{}".format(target_iqn, mode)), 500
+        try:
+            tpg_controls, client_controls = parse_target_controls(request)
+        except ValueError as err:
+            logger.error("Unexpected or invalid controls")
+            return jsonify(message="Unexpected or invalid controls - "
+                                   "{}".format(err)), 500
 
-    resp_text = local_target_reconfigure(target_iqn, tpg_controls,
-                                         client_controls)
-    if "ok" != resp_text:
-        return jsonify(message="{}".format(resp_text)), 500
+        resp_text = local_target_reconfigure(target_iqn, tpg_controls,
+                                             client_controls)
+        if "ok" != resp_text:
+            return jsonify(message="{}".format(resp_text)), 500
 
-    return jsonify(message="Target reconfigured successfully"), 200
+        return jsonify(message="Target reconfigured successfully"), 200
+
+    else:
+        # DELETE target request
+        target = GWTarget(logger, target_iqn, '')
+        if target.error:
+            return jsonify(message="Failed to access target"), 500
+
+        target.manage('clearconfig')
+        if target.error:
+            logger.error("clearconfig failed: "
+                         "{}".format(target.error_msg))
+            return jsonify(message=target.error_msg), 400
+
+        else:
+
+            config.refresh()
+            return jsonify(message="Gateway removed successfully"), 200
 
 
 @app.route('/api/config', methods=['GET'])
@@ -524,7 +557,7 @@ def gateway(target_iqn=None, gateway_name=None):
     return jsonify(message="Gateway creation {}".format(resp_text)), resp_code
 
 
-@app.route('/api/_gateway/<target_iqn>/<gateway_name>', methods=['GET', 'PUT', 'DELETE'])
+@app.route('/api/_gateway/<target_iqn>/<gateway_name>', methods=['GET', 'PUT'])
 @requires_restricted_auth
 def _gateway(target_iqn=None, gateway_name=None):
     """
@@ -608,28 +641,6 @@ def _gateway(target_iqn=None, gateway_name=None):
                                            ". Err {}.".format(err)), 500
 
         return jsonify(message="Gateway defined/mapped"), 200
-
-    else:
-        # DELETE gateway request
-        gateway = GWTarget(logger,
-                           target_iqn,
-                           '')
-        if gateway.error:
-            return jsonify(message="Failed to connect to the gateway"), 500
-
-        gateway.manage('clearconfig')
-        if gateway.error:
-            logger.error("clearconfig failed for {} : "
-                         "{}".format(gateway_name,
-                                     gateway.error_msg))
-            return jsonify(message="Unable to remove {} from the "
-                                   "configuration".format(gateway_name)), 400
-
-        else:
-
-            config.refresh()
-
-            return jsonify(message="Gateway removed successfully"), 200
 
 
 @app.route('/api/targetlun/<target_iqn>', methods=['PUT', 'DELETE'])
