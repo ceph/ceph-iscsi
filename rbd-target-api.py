@@ -336,7 +336,7 @@ def target(target_iqn=None):
         target_config = config.config['targets'][target_iqn]
         hostnames = target_config['portals'].keys()
         if not hostnames:
-            return jsonify(message="The target must contain at least one portal"), 400
+            hostnames = [this_host()]
         resp_text, resp_code = call_api(hostnames, '_target',
                                         '{}'.format(target_iqn),
                                         http_method='delete')
