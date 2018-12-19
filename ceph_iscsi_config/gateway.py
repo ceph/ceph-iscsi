@@ -193,7 +193,7 @@ class GWTarget(GWObject):
                 else:
                     break
 
-    def clear_config(self, target_disks, unmapped_disks):
+    def clear_config(self, target_disks):
         """
         Remove the target definition form LIO
         :return: None
@@ -202,7 +202,7 @@ class GWTarget(GWObject):
         lio_root = root.RTSRoot()
 
         disk_count = len([disk for disk in lio_root.storage_objects
-                          if disk.name in target_disks or disk.name in unmapped_disks])
+                          if disk.name in target_disks])
         clients = []
         for tpg in self.tpg_list:
             tpg_clients = [node for node in tpg._list_node_acls()]
@@ -577,9 +577,7 @@ class GWTarget(GWObject):
 
             target_config = config.config["targets"][self.iqn]
             target_disks = target_config['disks']
-            unmapped_disks = [key for key, value in config.config['disks'].items()
-                              if not value.get('owner')]
-            self.clear_config(target_disks, unmapped_disks)
+            self.clear_config(target_disks)
 
             if not self.error:
                 gw_ip = target_config['portals'][local_gw]['portal_ip_address']
