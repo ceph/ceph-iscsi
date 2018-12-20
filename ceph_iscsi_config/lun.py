@@ -344,7 +344,8 @@ class LUN(GWObject):
 
         # Now we know the request is for a LUN in LIO, and it's not masked
         # to a client
-        self.remove_dev_from_lio(False)
+        remove_from_backstore = this_host != self.allocating_host
+        self.remove_dev_from_lio(remove_from_backstore)
         if self.error:
             return
 

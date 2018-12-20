@@ -720,6 +720,11 @@ def target_disk(target_iqn=None):
                 return jsonify(message="Disk {} belongs to group "
                                        "{}".format(disk, group_name)), 400
         local_gw = this_host()
+        if local_gw not in target_config['portals']:
+            return jsonify(message="{} cannot be used to perform this operation "
+                                   "because it is not defined within target "
+                                   "gateways".format(local_gw)), 400
+
         api_vars = {
             'disk': disk,
             'purge_host': local_gw
