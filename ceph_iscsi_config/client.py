@@ -9,7 +9,8 @@ import os
 import rtslib_fb.root as lio_root
 
 from socket import gethostname
-from rtslib_fb.target import NodeACL, TPG
+from rtslib_fb.target import NodeACL, Target, TPG
+from rtslib_fb.fabric import ISCSIFabricModule
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
@@ -178,30 +179,31 @@ class GWClient(GWObject):
         :return:
         """
 
-        r = lio_root.RTSRoot()
+        iscsi_fabric = ISCSIFabricModule()
+        target = Target(iscsi_fabric, self.target_iqn, 'lookup')
 
         # NB. this will check all tpg's for a matching iqn
-        for client in r.node_acls:
-            target = client.parent_tpg.parent_target
-            if client.node_wwn == self.iqn and target.wwn == self.target_iqn:
-                self.acl = client
-                self.tpg = client.parent_tpg
-                try:
-                    self.update_acl_controls()
-                except RTSLibError as err:
-                    self.logger.error("(Client.define_client) FAILED to update "
-                                      "{}".format(self.iqn))
-                    self.error = True
-                    self.error_msg = err
-                self.logger.debug("(Client.define_client) - {} already "
-                                  "defined".format(self.iqn))
-                return
+        for tpg in target.tpgs:
+            for client in tpg.node_acls:
+                if client.node_wwn == self.iqn:
+                    self.acl = client
+                    self.tpg = client.parent_tpg
+                    try:
+                        self.update_acl_controls()
+                    except RTSLibError as err:
+                        self.logger.error("(Client.define_client) FAILED to update "
+                                          "{}".format(self.iqn))
+                        self.error = True
+                        self.error_msg = err
+                    self.logger.debug("(Client.define_client) - {} already "
+                                      "defined".format(self.iqn))
+                    return
 
         # at this point the client does not exist, so create it
         # The configuration only has one active tpg, so pick that one for any
         # acl definitions
-        for tpg in r.tpgs:
-            if tpg.enable and tpg.parent_target.wwn == self.target_iqn:
+        for tpg in target.tpgs:
+            if tpg.enable:
                 self.tpg = tpg
 
         try:

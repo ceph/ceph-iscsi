@@ -193,21 +193,20 @@ class GWTarget(GWObject):
                 else:
                     break
 
-    def clear_config(self, target_disks):
+    def clear_config(self):
         """
         Remove the target definition form LIO
         :return: None
         """
         # check that there aren't any disks or clients in the configuration
-        lio_root = root.RTSRoot()
-
-        disk_count = len([disk for disk in lio_root.storage_objects
-                          if disk.name in target_disks])
         clients = []
+        disks = set()
         for tpg in self.tpg_list:
             tpg_clients = [node for node in tpg._list_node_acls()]
             clients += tpg_clients
+            disks.update([lun.storage_object.name for lun in tpg.luns])
         client_count = len(clients)
+        disk_count = len(disks)
 
         if disk_count > 0 or client_count > 0:
             self.error = True
@@ -403,16 +402,17 @@ class GWTarget(GWObject):
         """
 
         lio_root = root.RTSRoot()
+        target_config = config.config["targets"][self.iqn]
+        target_stg_object = [stg_object for stg_object in lio_root.storage_objects
+                             if stg_object.name in target_config['disks']]
 
         # process each storage object added to the gateway, and map to the tpg
-        for stg_object in lio_root.storage_objects:
+        for stg_object in target_stg_object:
 
             for tpg in self.tpg_list:
                 self.logger.debug("processing tpg{}".format(tpg.tag))
 
-                target_config = config.config["targets"][self.iqn]
-                if not self.lun_mapped(tpg, stg_object) \
-                        and stg_object.name in target_config['disks']:
+                if not self.lun_mapped(tpg, stg_object):
                     self.logger.debug("{} needed mapping to "
                                       "tpg{}".format(stg_object.name,
                                                      tpg.tag))
@@ -577,8 +577,7 @@ class GWTarget(GWObject):
                 return
 
             target_config = config.config["targets"][self.iqn]
-            target_disks = target_config['disks']
-            self.clear_config(target_disks)
+            self.clear_config()
 
             if not self.error:
                 if len(target_config['portals']) == 0:
