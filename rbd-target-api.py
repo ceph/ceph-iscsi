@@ -333,8 +333,10 @@ def target(target_iqn=None):
     else:
         # DELETE target request
         config.refresh()
-        target_config = config.config['targets'][target_iqn]
-        hostnames = target_config['portals'].keys()
+        hostnames = None
+        if target_iqn in config.config['targets']:
+            target_config = config.config['targets'][target_iqn]
+            hostnames = target_config['portals'].keys()
         if not hostnames:
             hostnames = [this_host()]
         resp_text, resp_code = call_api(hostnames, '_target',
