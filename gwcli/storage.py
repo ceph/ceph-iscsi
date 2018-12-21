@@ -145,6 +145,43 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
+    def ui_command_attach(self, pool=None, image=None):
+        """
+        Create a LUN and assign to the gateway(s)
+        (RBD image must exist).
+
+        The attach command supports two request formats;
+
+        Long format  : attach pool=<name> image=<name>
+        Short format : attach pool.image
+
+        e.g.
+        attach pool=rbd image=testimage
+        attach rbd.testimage
+
+        The syntax of each parameter is as follows;
+        pool  : Pool and image name may contain a-z, A-Z, 0-9, '_', or '-'
+        image   characters.
+
+        """
+
+        if pool and '.' in pool:
+            # shorthand version of the command
+            self.logger.debug("user provided pool.image format request")
+
+            pool, image = pool.split('.')
+
+        else:
+            # long format request
+            if not pool or not image:
+                self.logger.error("Invalid create: pool and image "
+                                  "parameters are needed")
+                return
+
+        self.logger.debug("CMD: /disks/ attach pool={} "
+                          "image={}".format(pool, image))
+        self.create_disk(pool=pool, image=image, create_image=False)
+
     def ui_command_create(self, pool=None, image=None, size=None, count=1):
         """
         Create a LUN and assign to the gateway(s).
@@ -241,7 +278,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    parent=None):
+                    parent=None, create_image=True):
 
         rc = 0
 
@@ -264,7 +301,8 @@ class Disks(UIGroup):
                                                           disk_key)
 
         api_vars = {'pool': pool, 'owner': local_gw,
-                    'count': count, 'mode': 'create'}
+                    'count': count, 'mode': 'create',
+                    'create_image': 'true' if create_image else 'false'}
         if size:
             api_vars['size'] = size.upper()
 

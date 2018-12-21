@@ -856,6 +856,7 @@ def disk(image_id):
     :param owner: (str) the owner of the rbd image
     :param controls: (JSON dict) valid control overrides
     :param preserve_image: (bool) do NOT delete RBD image
+    :param create_image: (bool) create RBD image if not exists
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
@@ -916,12 +917,17 @@ def disk(image_id):
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
-        if not size:
+        create_image = request.form.get('create_image') == 'true'
+        if not create_image or not size:
             try:
                 rbd_image = RBDDev(image_name, 0, pool)
                 size = rbd_image.current_size
             except rbd.ImageNotFound:
-                return jsonify(message="Size parameter is required when creating a new image"), 400
+                if not create_image:
+                    return jsonify(message="Image {} does not exist".format(image_id)), 400
+                else:
+                    return jsonify(message="Size parameter is required when creating a new "
+                                           "image"), 400
 
         if mode == 'reconfigure':
             resp_text, resp_code = lun_reconfigure(image_id, controls)
