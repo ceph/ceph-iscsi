@@ -855,6 +855,7 @@ def disk(image_id):
     :param count: (str) the number of images will be created
     :param owner: (str) the owner of the rbd image
     :param controls: (JSON dict) valid control overrides
+    :param preserve_image: (bool) do NOT delete RBD image
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
@@ -965,7 +966,10 @@ def disk(image_id):
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
-        api_vars = {'purge_host': local_gw}
+        api_vars = {
+            'purge_host': local_gw,
+            'preserve_image': request.form['preserve_image']
+        }
 
         # process other gateways first
         gateways.append(local_gw)
@@ -1091,6 +1095,7 @@ def _disk(image_id):
 
         # if valid_request(request.remote_addr):
         purge_host = request.form['purge_host']
+        preserve_image = request.form['preserve_image'] == 'true'
         logger.debug("delete request for disk image '{}'".format(image_id))
         pool, image = image_id.split('.', 1)
 
@@ -1106,7 +1111,7 @@ def _disk(image_id):
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
 
-        lun.remove_lun()
+        lun.remove_lun(preserve_image)
         if lun.error:
             if 'allocated to' in lun.error_msg:
                 # attempted to remove rbd that is still allocated to a client

@@ -264,7 +264,7 @@ class LUN(GWObject):
             self.error_msg = ("Pool '{}' does not exist. Unable to "
                               "continue".format(self.pool))
 
-    def remove_lun(self):
+    def remove_lun(self, preserve_image):
         this_host = gethostname().split('.')[0]
         self.logger.info("LUN deletion request received, rbd removal to be "
                          "performed by {}".format(self.allocating_host))
@@ -297,12 +297,13 @@ class LUN(GWObject):
         if this_host == self.allocating_host:
             # by using the allocating host we ensure the delete is not
             # issue by several hosts when initiated through ansible
-            rbd_image.delete()
-            if rbd_image.error:
-                self.error = True
-                self.error_msg = ("Unable to delete the underlying rbd "
-                                  "image {}".format(self.config_key))
-                return
+            if not preserve_image:
+                rbd_image.delete()
+                if rbd_image.error:
+                    self.error = True
+                    self.error_msg = ("Unable to delete the underlying rbd "
+                                      "image {}".format(self.config_key))
+                    return
 
             # remove the definition from the config object
             self.config.del_item('disks', self.config_key)

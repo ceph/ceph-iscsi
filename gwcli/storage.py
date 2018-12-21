@@ -402,6 +402,20 @@ class Disks(UIGroup):
         else:
             self.logger.error("disk name provided does not exist")
 
+    def ui_command_detach(self, image_id):
+        """
+        Delete a given rbd image from the configuration but not from ceph.
+
+        > detach <disk_name>
+        e.g.
+        > detach rbd.disk_1
+
+        "disk_name" refers to the name of the disk as shown in the UI, for
+        example rbd.disk_1.
+
+        """
+        self.delete_disk(image_id, True)
+
     def ui_command_delete(self, image_id):
         """
         Delete a given rbd image from the configuration and ceph. This is a
@@ -419,6 +433,9 @@ class Disks(UIGroup):
         the rbd image is, the longer the delete will take to run.
 
         """
+        self.delete_disk(image_id, False)
+
+    def delete_disk(self, image_id, preserve_image):
 
         # Perform a quick 'sniff' test on the request
         if image_id not in [disk.image_id for disk in self.children]:
@@ -432,7 +449,10 @@ class Disks(UIGroup):
 
         local_gw = this_host()
 
-        api_vars = {'purge_host': local_gw}
+        api_vars = {
+            'purge_host': local_gw,
+            'preserve_image': 'true' if preserve_image else 'false'
+        }
 
         disk_api = '{}://{}:{}/api/disk/{}'.format(self.http_mode,
                                                    local_gw,
