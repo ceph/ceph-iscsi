@@ -571,9 +571,9 @@ def _gateway(target_iqn=None, gateway_name=None):
     :param gateway_name: (str) gateway name, normally the DNS name
     **RESTRICTED**
     """
+    target_config = config.config['targets'][target_iqn]
 
     if request.method == 'GET':
-        target_config = config.config['targets'][target_iqn]
 
         if gateway_name in target_config['portals']:
 
@@ -586,6 +586,10 @@ def _gateway(target_iqn=None, gateway_name=None):
         # the parameters need to be cast to str for compatibility
         # with the comparison logic in common.config.add_item
         logger.debug("Attempting create of gateway {}".format(gateway_name))
+
+        if gateway_name in target_config['portals']:
+            return jsonify(message="Gateway already exist in the "
+                                   "configuration"), 404
 
         gateway_ips = str(request.form['gateway_ip_list'])
         target_mode = str(request.form.get('mode', 'target'))
