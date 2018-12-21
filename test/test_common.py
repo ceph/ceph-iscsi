@@ -140,6 +140,7 @@ class ChapTest(unittest.TestCase):
                 },
                 "created": "2018/12/07 09:18:04",
                 "image": "disk_1",
+                "allocating_host": "node1",
                 "owner": "node1",
                 "pool": "rbd",
                 "pool_id": 7,

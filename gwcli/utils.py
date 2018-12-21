@@ -167,11 +167,12 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
     return "ok"
 
 
-def get_remote_gateways(config, logger):
+def get_remote_gateways(config, logger, local_gw_required=True):
     '''
     Return the list of remote gws.
     :param: config: Config object with gws setup.
     :param: logger: Logger object
+    :param: local_gw_required: Check if local_gw is defined within gateways configuration
     :return: A list of gw names, or CephiSCSIError if not run on a gw in the
              config
     '''
@@ -180,12 +181,12 @@ def get_remote_gateways(config, logger):
     gateways = [key for key in config
                 if isinstance(config[key], dict)]
     logger.debug("all gateways - {}".format(gateways))
-    if local_gw not in gateways:
+    if local_gw_required and local_gw not in gateways:
         raise CephiSCSIError("{} cannot be used to perform this operation "
                              "because it is not defined within the gateways "
                              "configuration".format(local_gw))
-
-    gateways.remove(local_gw)
+    if local_gw in gateways:
+        gateways.remove(local_gw)
     logger.debug("remote gateways: {}".format(gateways))
     return gateways
 

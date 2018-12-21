@@ -188,6 +188,8 @@ class Config(object):
             for _, group in self.config['groups'].items():
                 group.pop('created', None)
                 group.pop('updated', None)
+            for _, disk in self.config['disks'].items():
+                disk['allocating_host'] = disk['owner']
             target = {
                 'disks': list(self.config['disks'].keys()),
                 'clients': self.config['clients'],

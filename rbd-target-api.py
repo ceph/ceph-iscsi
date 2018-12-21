@@ -725,11 +725,14 @@ def target_disk(target_iqn=None):
                                    "because it is not defined within target "
                                    "gateways".format(local_gw)), 400
 
+        allocating_host = config.config['disks'][disk]['allocating_host']
         api_vars = {
             'disk': disk,
+            'allocating_host': allocating_host,
             'purge_host': local_gw
         }
-        gateways = target_config.get('ip_list', [])
+        gateways = [key for key in config.config['gateways']
+                    if isinstance(config.config['gateways'][key], dict)]
         resp_text, resp_code = call_api(gateways, '_targetlun',
                                         '{}'.format(target_iqn),
                                         http_method='delete',
@@ -752,18 +755,18 @@ def _target_disk(target_iqn=None):
 
     disk = request.form.get('disk')
 
-    target_config = config.config['targets'][target_iqn]
-    ip_list = target_config.get('ip_list', [])
-    gateway = GWTarget(logger,
-                       target_iqn,
-                       ip_list)
-
-    if gateway.error:
-        logger.error("LUN mapping failed : "
-                     "{}".format(gateway.error_msg))
-        return jsonify(message="LUN map failed"), 500
-
     if request.method == 'PUT':
+        target_config = config.config['targets'][target_iqn]
+        ip_list = target_config.get('ip_list', [])
+        gateway = GWTarget(logger,
+                           target_iqn,
+                           ip_list)
+
+        if gateway.error:
+            logger.error("LUN mapping failed : "
+                         "{}".format(gateway.error_msg))
+            return jsonify(message="LUN map failed"), 500
+
         # Add the mapping for the lun to ensure the block device is
         # present on all TPG's
 
@@ -783,6 +786,7 @@ def _target_disk(target_iqn=None):
     else:
         # DELETE gateway request
 
+        allocating_host = request.form['allocating_host']
         purge_host = request.form['purge_host']
         logger.debug("delete request for disk image '{}'".format(disk))
         pool, image = disk.split('.', 1)
@@ -799,7 +803,7 @@ def _target_disk(target_iqn=None):
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
 
-        lun.unmap_lun(target_iqn)
+        lun.unmap_lun(target_iqn, allocating_host)
         if lun.error:
             status_code = 400 if lun.error_msg else 500
             logger.error("LUN remove failed : {}".format(lun.error_msg))
@@ -873,13 +877,16 @@ def disk(image_id):
             return jsonify(message="rbd image {} not "
                                    "found".format(image_id)), 404
 
-    # This is a create/resize operation, so first confirm the gateways
-    # are in place (we need gateways to perform the lun masking tasks
-    try:
-        gateways = get_remote_gateways(config.config['gateways'], logger)
-    except CephiSCSIError as err:
-        logger.warning("disk operation request failed: {}".format(err))
-        return jsonify(message="{}".format(err)), 400
+    # Initial disk creation is done only on local host and this host
+    # will be the only host that can be used to delete this disk ('allocating_host')
+    mode = request.form.get('mode')
+    gateways = []
+    if mode != 'create':
+        try:
+            gateways = get_remote_gateways(config.config['gateways'], logger, False)
+        except CephiSCSIError as err:
+            logger.warning("disk operation request failed: {}".format(err))
+            return jsonify(message="{}".format(err)), 400
 
     if request.method == 'PUT':
         # at this point we have a disk request, and the gateways are available
@@ -887,7 +894,6 @@ def disk(image_id):
 
         # pool = request.form.get('pool')
         size = request.form.get('size')
-        mode = request.form.get('mode')
         count = request.form.get('count', '1')
 
         controls = {}
@@ -953,7 +959,8 @@ def disk(image_id):
         # this is a DELETE request
         pool_name, image_name = image_id.split('.')
         disk_usable = LUN.valid_disk(config, logger, mode='delete',
-                                     pool=pool_name, image=image_name)
+                                     pool=pool_name, image=image_name,
+                                     allocating_host=local_gw)
 
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400

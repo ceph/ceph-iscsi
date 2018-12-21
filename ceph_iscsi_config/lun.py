@@ -256,16 +256,7 @@ class LUN(GWObject):
 
     def _validate_request(self):
 
-        # Before we start make sure that the target host is actually
-        # defined to the config
-        if self.allocating_host not in self.config.config['gateways'].keys():
-            self.logger.critical("Owning host is not valid, please provide a "
-                                 "valid gateway name for this rbd image")
-            self.error = True
-            self.error_msg = ("host name given for {} is not a valid gateway"
-                              " name, listed in the config".format(self.image))
-
-        elif not rados_pool(pool=self.pool):
+        if not rados_pool(pool=self.pool):
             # Could create the pool, but a fat finger moment in the config
             # file would mean rbd images get created and mapped, and then need
             # correcting. Better to exit if the pool doesn't exist
@@ -318,7 +309,7 @@ class LUN(GWObject):
 
             self.config.commit()
 
-    def unmap_lun(self, target_iqn):
+    def unmap_lun(self, target_iqn, backstore_allocating_host):
         this_host = gethostname().split('.')[0]
         self.logger.info("LUN unmap request received, config commit to be "
                          "performed by {}".format(self.allocating_host))
@@ -344,7 +335,7 @@ class LUN(GWObject):
 
         # Now we know the request is for a LUN in LIO, and it's not masked
         # to a client
-        remove_from_backstore = this_host != self.allocating_host
+        remove_from_backstore = this_host != backstore_allocating_host
         self.remove_dev_from_lio(remove_from_backstore)
         if self.error:
             return
@@ -596,6 +587,7 @@ class LUN(GWObject):
                     disk_attr = {"wwn": wwn,
                                  "image": self.image,
                                  "pool": self.pool,
+                                 "allocating_host": self.allocating_host,
                                  "pool_id": rbd_image.pool_id,
                                  "controls": self.controls}
 
@@ -845,7 +837,7 @@ class LUN(GWObject):
         mode_vars = {"create": ['pool', 'image', 'size', 'count'],
                      "resize": ['pool', 'image', 'size'],
                      "reconfigure": ['pool', 'image', 'controls'],
-                     "delete": ['pool', 'image']}
+                     "delete": ['pool', 'image', 'allocating_host']}
 
         if 'mode' in kwargs.keys():
             mode = kwargs['mode']
@@ -949,6 +941,11 @@ class LUN(GWObject):
                         "to: {}".format(disk_key,
                                         ','.join(mapped_list)))
 
+            allocating_host = config['disks'][disk_key]['allocating_host']
+            if kwargs['allocating_host'] != allocating_host:
+                return "Only the allocating host ({}) can delete disk " \
+                       "{}".format(allocating_host, disk_key)
+
         return 'ok'
 
     @staticmethod
@@ -1016,7 +1013,18 @@ class LUN(GWObject):
                                     raise CephiSCSIError("Error defining rbd "
                                                          "image {}".format(disk_key))
 
-                                lun.allocate()
+                                disk_config = config.config['disks'][disk_key]
+                                is_allocating_host = local_gw == disk_config['allocating_host']
+                                is_lun_mapped = False
+                                for _, target_config in config.config['targets'].items():
+                                    if local_gw in target_config['portals'] \
+                                            and disk_key in target_config['disks']:
+                                        is_lun_mapped = True
+                                        break
+
+                                if is_allocating_host or is_lun_mapped:
+                                    lun.allocate()
+
                                 if lun.error:
                                     raise CephiSCSIError("Error unable to "
                                                          "register  {} with "
