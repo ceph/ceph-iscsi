@@ -680,6 +680,14 @@ def target_disk(target_iqn=None):
                 return jsonify(message="Disk {} cannot be used because it is already mapped on "
                                        "target {}".format(disk, iqn)), 400
 
+        pool, image_name = disk.split('.')
+        try:
+            rbd_image = RBDDev(image_name, 0, pool)
+            size = rbd_image.current_size
+            logger.debug("{} size is {}".format(disk, size))
+        except rbd.ImageNotFound:
+            return jsonify(message="Image {} not found".format(disk)), 400
+
         owner = LUN.get_owner(config.config['gateways'], target_config['portals'])
         logger.debug("{} owner will be {}".format(disk, owner))
         disk_metadata = config.config['disks'][disk]
@@ -727,10 +735,8 @@ def target_disk(target_iqn=None):
                                    "because it is not defined within target "
                                    "gateways".format(local_gw)), 400
 
-        allocating_host = config.config['disks'][disk]['allocating_host']
         api_vars = {
             'disk': disk,
-            'allocating_host': allocating_host,
             'purge_host': local_gw
         }
         gateways = [key for key in config.config['gateways']
@@ -788,7 +794,6 @@ def _target_disk(target_iqn=None):
     else:
         # DELETE gateway request
 
-        allocating_host = request.form['allocating_host']
         purge_host = request.form['purge_host']
         logger.debug("delete request for disk image '{}'".format(disk))
         pool, image = disk.split('.', 1)
@@ -805,7 +810,7 @@ def _target_disk(target_iqn=None):
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
 
-        lun.unmap_lun(target_iqn, allocating_host)
+        lun.unmap_lun(target_iqn)
         if lun.error:
             status_code = 400 if lun.error_msg else 500
             logger.error("LUN remove failed : {}".format(lun.error_msg))
@@ -882,7 +887,6 @@ def disk(image_id):
                                    "found".format(image_id)), 404
 
     # Initial disk creation is done only on local host and this host
-    # will be the only host that can be used to delete this disk ('allocating_host')
     mode = request.form.get('mode')
     gateways = []
     if mode != 'create':
@@ -968,8 +972,7 @@ def disk(image_id):
         # this is a DELETE request
         pool_name, image_name = image_id.split('.')
         disk_usable = LUN.valid_disk(config, logger, mode='delete',
-                                     pool=pool_name, image=image_name,
-                                     allocating_host=local_gw)
+                                     pool=pool_name, image=image_name)
 
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
@@ -1047,7 +1050,7 @@ def _disk(image_id):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            lun.allocate()
+            lun.allocate(False)
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
                 return jsonify(message="LUN allocation failure"), 500

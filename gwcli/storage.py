@@ -74,19 +74,23 @@ class Disks(UIGroup):
                 break
             else:
                 pool, image = rbd_name.split('.')
+                disk_meta[rbd_name] = {}
                 with cluster_ioctx.open_ioctx(pool) as ioctx:
-                    with rbd.Image(ioctx, image) as rbd_image:
-                        size = rbd_image.size()
-                        features = rbd_image.features()
-                        snapshots = list(rbd_image.list_snaps())
+                    try:
+                        with rbd.Image(ioctx, image) as rbd_image:
+                            size = rbd_image.size()
+                            features = rbd_image.features()
+                            snapshots = list(rbd_image.list_snaps())
 
-                        self.scan_mutex.acquire()
-                        disk_meta[rbd_name] = {
-                            "size": size,
-                            "features": features,
-                            "snapshots": snapshots
-                        }
-                        self.scan_mutex.release()
+                            self.scan_mutex.acquire()
+                            disk_meta[rbd_name] = {
+                                "size": size,
+                                "features": features,
+                                "snapshots": snapshots
+                            }
+                            self.scan_mutex.release()
+                    except rbd.ImageNotFound:
+                        pass
 
     def refresh(self, disk_info):
         """
@@ -581,6 +585,7 @@ class Disk(UINode):
         self.size_h = ''
         self.features = 0
         self.feature_list = []
+        self.snapshots = []
         self.controls = {}
         self.control_values = {}
         self.ceph_cluster = self.parent.parent.ceph.local_ceph.name
@@ -601,6 +606,7 @@ class Disk(UINode):
         else:
             # size and features have been passed in from the Disks.refresh
             # method
+            self.exists = True
             self.size = size
             self.size_h = human_size(self.size)
             self.features = features
@@ -629,6 +635,9 @@ class Disk(UINode):
                 self.control_values[k] = "{} (override)".format(val)
 
     def summary(self):
+        if not self.exists:
+            return 'NOT FOUND', False
+
         msg = [self.image, "({})".format(self.size_h)]
 
         return " ".join(msg), True
@@ -679,12 +688,16 @@ class Disk(UINode):
         self.logger.debug("Refreshing image metadata")
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
-                with rbd.Image(ioctx, self.image) as rbd_image:
-                    self.size = rbd_image.size()
-                    self.size_h = human_size(self.size)
-                    self.features = rbd_image.features()
-                    self.feature_list = self._get_features()
-                    self._parse_snapshots(list(rbd_image.list_snaps()))
+                try:
+                    with rbd.Image(ioctx, self.image) as rbd_image:
+                        self.exists = True
+                        self.size = rbd_image.size()
+                        self.size_h = human_size(self.size)
+                        self.features = rbd_image.features()
+                        self.feature_list = self._get_features()
+                        self._parse_snapshots(list(rbd_image.list_snaps()))
+                except rbd.ImageNotFound:
+                    self.exists = False
 
     # def get_meta_data_krbd(self):
     #     """

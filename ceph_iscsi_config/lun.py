@@ -80,6 +80,9 @@ class RBDDev(object):
 
                     try:
                         rbd_inst.remove(ioctx, self.image)
+                    except rbd.ImageNotFound:
+                        rbd_deleted = True
+                        break
                     except rbd.ImageBusy:
                         # catch and ignore the busy state - rbd probably still mapped on
                         # another gateway, so we keep trying
@@ -283,14 +286,12 @@ class LUN(GWObject):
         # Check that the LUN is in LIO - if not there is nothing to do for
         # this request
         lun = self.lio_stg_object()
-        if not lun:
-            return
-
-        # Now we know the request is for a LUN in LIO, and it's not masked
-        # to a client
-        self.remove_dev_from_lio(True)
-        if self.error:
-            return
+        if lun:
+            # Now we know the request is for a LUN in LIO, and it's not masked
+            # to a client
+            self.remove_dev_from_lio()
+            if self.error:
+                return
 
         rbd_image = RBDDev(self.image, '0G', self.pool)
 
@@ -310,7 +311,7 @@ class LUN(GWObject):
 
             self.config.commit()
 
-    def unmap_lun(self, target_iqn, backstore_allocating_host):
+    def unmap_lun(self, target_iqn):
         this_host = gethostname().split('.')[0]
         self.logger.info("LUN unmap request received, config commit to be "
                          "performed by {}".format(self.allocating_host))
@@ -336,8 +337,7 @@ class LUN(GWObject):
 
         # Now we know the request is for a LUN in LIO, and it's not masked
         # to a client
-        remove_from_backstore = this_host != backstore_allocating_host
-        self.remove_dev_from_lio(remove_from_backstore)
+        self.remove_dev_from_lio()
         if self.error:
             return
 
@@ -472,7 +472,7 @@ class LUN(GWObject):
             if client_err:
                 raise CephiSCSIError(client_err)
 
-    def allocate(self):
+    def allocate(self, keep_dev_in_lio=True):
         self.logger.debug("LUN.allocate starting, listing rbd devices")
         disk_list = RBDDev.rbd_list(pool=self.pool)
         self.logger.debug("rados pool '{}' contains the following - "
@@ -584,6 +584,11 @@ class LUN(GWObject):
 
                     # lun is now in LIO, time for some housekeeping :P
                     wwn = lun._get_wwn()
+
+                    if not keep_dev_in_lio:
+                        self.remove_dev_from_lio()
+                        if self.error:
+                            return
 
                     disk_attr = {"wwn": wwn,
                                  "image": self.image,
@@ -789,7 +794,7 @@ class LUN(GWObject):
 
         return new_lun
 
-    def remove_dev_from_lio(self, remove_from_backstore=True):
+    def remove_dev_from_lio(self):
         lio_root = root.RTSRoot()
 
         # remove the device from all tpgs
@@ -808,20 +813,15 @@ class LUN(GWObject):
 
         for stg_object in lio_root.storage_objects:
             if stg_object.name == self.config_key:
-                if remove_from_backstore:
-                    try:
-                        stg_object.delete()
-                    except Exception as e:
-                        self.error = True
-                        self.error_msg = ("Delete from LIO/backstores failed - "
-                                          "{}".format(e))
-                        return
+                try:
+                    stg_object.delete()
+                except Exception as e:
+                    self.error = True
+                    self.error_msg = ("Delete from LIO/backstores failed - "
+                                      "{}".format(e))
+                    return
 
-                    break
-                else:
-                    for alua_tpg in stg_object._list_alua_tpgs():
-                        if alua_tpg.name != 'default_tg_pt_gp':
-                            alua_tpg.delete()
+                break
 
     @staticmethod
     def valid_disk(ceph_iscsi_config, logger, **kwargs):
@@ -838,7 +838,7 @@ class LUN(GWObject):
         mode_vars = {"create": ['pool', 'image', 'size', 'count'],
                      "resize": ['pool', 'image', 'size'],
                      "reconfigure": ['pool', 'image', 'controls'],
-                     "delete": ['pool', 'image', 'allocating_host']}
+                     "delete": ['pool', 'image']}
 
         if 'mode' in kwargs.keys():
             mode = kwargs['mode']
@@ -942,11 +942,6 @@ class LUN(GWObject):
                         "to: {}".format(disk_key,
                                         ','.join(mapped_list)))
 
-            allocating_host = config['disks'][disk_key]['allocating_host']
-            if kwargs['allocating_host'] != allocating_host:
-                return "Only the allocating host ({}) can delete disk " \
-                       "{}".format(allocating_host, disk_key)
-
         return 'ok'
 
     @staticmethod
@@ -1002,43 +997,40 @@ class LUN(GWObject):
                                   if disk_key.startswith(pool + '.')]
                     for disk_key in pool_disks:
 
-                        pool, image_name = disk_key.split('.')
+                        is_lun_mapped = False
+                        for _, target_config in config.config['targets'].items():
+                            if local_gw in target_config['portals'] \
+                                    and disk_key in target_config['disks']:
+                                is_lun_mapped = True
+                                break
+                        if is_lun_mapped:
+                            pool, image_name = disk_key.split('.')
 
-                        try:
-                            with rbd.Image(ioctx, image_name) as rbd_image:
-                                RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
+                            try:
+                                with rbd.Image(ioctx, image_name) as rbd_image:
+                                    RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
 
-                                lun = LUN(logger, pool, image_name,
-                                          rbd_image.size(), local_gw)
-                                if lun.error:
-                                    raise CephiSCSIError("Error defining rbd "
-                                                         "image {}".format(disk_key))
+                                    lun = LUN(logger, pool, image_name,
+                                              rbd_image.size(), local_gw)
+                                    if lun.error:
+                                        raise CephiSCSIError("Error defining rbd "
+                                                             "image {}".format(disk_key))
 
-                                disk_config = config.config['disks'][disk_key]
-                                is_allocating_host = local_gw == disk_config['allocating_host']
-                                is_lun_mapped = False
-                                for _, target_config in config.config['targets'].items():
-                                    if local_gw in target_config['portals'] \
-                                            and disk_key in target_config['disks']:
-                                        is_lun_mapped = True
-                                        break
-
-                                if is_allocating_host or is_lun_mapped:
                                     lun.allocate()
 
-                                if lun.error:
-                                    raise CephiSCSIError("Error unable to "
-                                                         "register  {} with "
-                                                         "LIO - {}".format(disk_key,
-                                                                           lun.error_msg))
+                                    if lun.error:
+                                        raise CephiSCSIError("Error unable to "
+                                                             "register  {} with "
+                                                             "LIO - {}".format(disk_key,
+                                                                               lun.error_msg))
 
-                        except rbd.ImageNotFound:
-                            raise CephiSCSIError("Disk '{}' defined to the "
-                                                 "config, but image '{}' can "
-                                                 "not be found in '{}' "
-                                                 "pool".format(disk_key,
-                                                               image_name,
-                                                               pool))
+                            except rbd.ImageNotFound:
+                                raise CephiSCSIError("Disk '{}' defined to the "
+                                                     "config, but image '{}' can "
+                                                     "not be found in '{}' "
+                                                     "pool".format(disk_key,
+                                                                   image_name,
+                                                                   pool))
 
         # Gateway Mapping : Map the LUN's registered to all tpg's within the
         # LIO target
