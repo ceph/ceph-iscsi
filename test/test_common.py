@@ -165,7 +165,8 @@ class ChapTest(unittest.TestCase):
                 "clients": {
                     "iqn.1994-05.com.redhat:rh7-client": {
                         "auth": {
-                            "chap": "myiscsiusername/myiscsipassword"
+                            "chap": "myiscsiusername/myiscsipassword",
+                            "chap_mutual": ""
                         },
                         "group_name": "mygroup",
                         "luns": {

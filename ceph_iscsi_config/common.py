@@ -185,6 +185,7 @@ class Config(object):
             for _, client in self.config['clients'].items():
                 client.pop('created', None)
                 client.pop('updated', None)
+                client['auth']['chap_mutual'] = ''
             for _, group in self.config['groups'].items():
                 group.pop('created', None)
                 group.pop('updated', None)

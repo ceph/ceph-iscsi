@@ -383,7 +383,14 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
                          "{}".format(client_chap.error_msg))
             halt("Unable to decode password for {}".format(client_iqn))
 
-        client = GWClient(logger, client_iqn, image_list, chap_str, target_iqn)
+        client_chap_mutual = CHAP(client_metadata['auth']['chap_mutual'])
+        chap_mutual_str = client_chap_mutual.chap_str
+        if client_chap_mutual.error:
+            logger.debug("Password decode issue : "
+                         "{}".format(client_chap_mutual.error_msg))
+            halt("Unable to decode password for {}".format(client_iqn))
+
+        client = GWClient(logger, client_iqn, image_list, chap_str, chap_mutual_str, target_iqn)
         if client.error:
             logger.error("Could not create client. Control override failed "
                          "{} - {}".format(client_iqn, client.error_msg))
@@ -1398,6 +1405,7 @@ def _update_client(**kwargs):
                       kwargs['client_iqn'],
                       image_list,
                       kwargs['chap'],
+                      kwargs['chap_mutual'],
                       kwargs['target_iqn'])
 
     if client.error:
@@ -1428,6 +1436,11 @@ def clientauth(target_iqn, client_iqn):
                 [0-9a-zA-Z] and '.' ':' '@' '_' '-'
             password is 12-16 chars long containing any alphanumeric in
                 [0-9a-zA-Z] and '@' '-' '_'
+    :param chap_mutual: (str) chap string of the form username/password or ''
+            username is 8-64 chars long containing any alphanumeric in
+                [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+            password is 12-16 chars long containing any alphanumeric in
+                [0-9a-zA-Z] and '@' '-' '_'
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d chap=''
@@ -1446,6 +1459,7 @@ def clientauth(target_iqn, client_iqn):
     lun_list = target_config['clients'][client_iqn]['luns'].keys()
     image_list = ','.join(lun_list)
     chap = request.form.get('chap')
+    chap_mutual = request.form.get('chap_mutual')
 
     client_usable = valid_client(mode='auth',
                                  client_iqn=client_iqn,
@@ -1457,7 +1471,8 @@ def clientauth(target_iqn, client_iqn):
 
     api_vars = {"committing_host": this_host(),
                 "image_list": image_list,
-                "chap": chap}
+                "chap": chap,
+                "chap_mutual": chap_mutual}
 
     gateways.insert(0, 'localhost')
 
@@ -1484,11 +1499,13 @@ def _clientauth(target_iqn, client_iqn):
     # PUT request to define/change authentication
     image_list = request.form['image_list']
     chap = request.form['chap']
+    chap_mutual = request.form['chap_mutual']
     committing_host = request.form['committing_host']
 
     status_code, status_text = _update_client(client_iqn=client_iqn,
                                               images=image_list,
                                               chap=chap,
+                                              chap_mutual=chap_mutual,
                                               committing_host=committing_host,
                                               target_iqn=target_iqn)
 
@@ -1530,6 +1547,8 @@ def clientlun(target_iqn, client_iqn):
 
     chap_obj = CHAP(target_config['clients'][client_iqn]['auth']['chap'])
     chap = "{}/{}".format(chap_obj.user, chap_obj.password)
+    chap_mutual_obj = CHAP(target_config['clients'][client_iqn]['auth']['chap_mutual'])
+    chap_mutual = "{}/{}".format(chap_mutual_obj.user, chap_mutual_obj.password)
     image_list = ','.join(lun_list)
 
     client_usable = valid_client(mode='disk', client_iqn=client_iqn,
@@ -1544,7 +1563,8 @@ def clientlun(target_iqn, client_iqn):
     # committing host is the local LIO node
     api_vars = {"committing_host": this_host(),
                 "image_list": image_list,
-                "chap": chap}
+                "chap": chap,
+                "chap_mutual": chap_mutual}
 
     gateways.insert(0, 'localhost')
     resp_text, resp_code = call_api(gateways, '_clientlun',
@@ -1581,11 +1601,13 @@ def _clientlun(target_iqn, client_iqn):
         image_list = request.form['image_list']
 
         chap = request.form['chap']
+        chap_mutual = request.form['chap_mutual']
         committing_host = request.form['committing_host']
 
         status_code, status_text = _update_client(client_iqn=client_iqn,
                                                   images=image_list,
                                                   chap=chap,
+                                                  chap_mutual=chap_mutual,
                                                   committing_host=committing_host,
                                                   target_iqn=target_iqn)
 
@@ -1686,10 +1708,12 @@ def _client(target_iqn, client_iqn):
         image_list = request.form.get('image_list', '')
 
         chap = request.form.get('chap', '')
+        chap_mutual = request.form.get('chap_mutual', '')
 
         status_code, status_text = _update_client(client_iqn=client_iqn,
                                                   images=image_list,
                                                   chap=chap,
+                                                  chap_mutual=chap_mutual,
                                                   committing_host=committing_host,
                                                   target_iqn=target_iqn)
 
@@ -1704,7 +1728,7 @@ def _client(target_iqn, client_iqn):
         # Make sure the delete request is for a client we have defined
         target_config = config.config['targets'][target_iqn]
         if client_iqn in target_config['clients'].keys():
-            client = GWClient(logger, client_iqn, '', '', target_iqn)
+            client = GWClient(logger, client_iqn, '', '', '', target_iqn)
             client.manage('absent', committer=committing_host)
 
             if client.error:

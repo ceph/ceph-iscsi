@@ -29,18 +29,19 @@ class GWClient(GWObject):
                 "nopin_timeout",
                 "cmdsn_depth"]
 
-    seed_metadata = {"auth": {"chap": ''},
+    seed_metadata = {"auth": {"chap": '', "chap_mutual": ''},
                      "luns": {},
                      "group_name": ""
                      }
 
-    def __init__(self, logger, client_iqn, image_list, chap, target_iqn):
+    def __init__(self, logger, client_iqn, image_list, chap, chap_mutual, target_iqn):
         """
         Instantiate an instance of an LIO client
         :param client_iqn: (str) iscsi iqn string
         :param image_list: (list) list of rbd images (pool/image) to attach
                            to this client or list of tuples (disk, lunid)
         :param chap: (str) chap credentials in the format 'user/password'
+        :param chap_mutual: (str) chap_mutual credentials in the format 'user/password'
         :param target_iqn: (str) target iqn string
         :return:
         """
@@ -66,6 +67,7 @@ class GWClient(GWObject):
                 self.requested_images = image_list
 
         self.chap = chap                        # parameters for auth
+        self.chap_mutual = chap_mutual          # parameters for mutual auth
         self.mutual = ''
         self.tpgauth = ''
         self.metadata = {}
@@ -235,6 +237,7 @@ class GWClient(GWObject):
         for client_iqn in target_config['clients']:
             client_metadata = target_config['clients'][client_iqn]
             client_chap = CHAP(client_metadata['auth']['chap'])
+            client_chap_mutual = CHAP(client_metadata['auth']['chap_mutual'])
 
             image_list = client_metadata['luns'].keys()
 
@@ -243,11 +246,17 @@ class GWClient(GWObject):
                 raise CephiSCSIError("Unable to decode password for {}. "
                                      "CHAP error: {}".format(client_iqn,
                                                              client_chap.error_msg))
+            chap_mutual_str = client_chap_mutual.chap_str
+            if client_chap_mutual.error:
+                raise CephiSCSIError("Unable to decode password for {}. "
+                                     "CHAP_MUTUAL error: {}".format(client_iqn,
+                                                                    client_chap.error_msg))
 
             client = GWClient(logger,
                               client_iqn,
                               image_list,
                               chap_str,
+                              chap_mutual_str,
                               target_iqn)
 
             client.manage('present')  # ensure the client exists
@@ -266,71 +275,91 @@ class GWClient(GWObject):
 
         tpg.set_attribute('authentication', '0')
 
-    def configure_auth(self, auth_type, credentials):
+    def configure_auth(self, chap_credentials, chap_mutual_credentials):
         """
         Attempt to configure authentication for the client
         :return:
         """
 
-        chap_enabled = False
-        if '/' in credentials:
-            client_username, client_password = credentials.split('/', 1)
-            chap_enabled = True
-        elif not credentials:
+        auth_enabled = False
+        if '/' in chap_credentials:
+            client_username, client_password = chap_credentials.split('/', 1)
+            auth_enabled = True
+        elif not chap_credentials:
             client_username = ''
             client_password = ''
-            credentials = "/"
+            chap_credentials = "/"
 
-        self.logger.debug("configuring auth {}".format(credentials))
+        if '/' in chap_mutual_credentials:
+            client_mutual_username, client_mutual_password = chap_mutual_credentials.split('/', 1)
+            auth_enabled = True
+        elif not chap_mutual_credentials:
+            client_mutual_username = ''
+            client_mutual_password = ''
+            chap_mutual_credentials = "/"
 
-        if auth_type == 'chap':
+        self.logger.debug("configuring auth chap={}, chap_mutual={}".format(
+            chap_credentials, chap_mutual_credentials))
 
-            acl_credentials = "{}/{}".format(self.acl.chap_userid,
-                                             self.acl.chap_password)
+        acl_credentials = "{}/{}".format(self.acl.chap_userid,
+                                         self.acl.chap_password)
+        acl_mutual_credentials = "{}/{}".format(self.acl.chap_mutual_userid,
+                                                self.acl.chap_mutual_password)
 
-            # if the credentials match... nothing to do
-            if credentials == acl_credentials:
-                return
-            else:
-                # credentials defined on the ACL don't match parms passed from
-                # caller so update the acl definition
-                try:
-                    if auth_type == 'chap':
-                        self.logger.debug("Updating the ACL")
-                        self.acl.chap_userid = client_username
-                        self.acl.chap_password = client_password
+        try:
+            self.logger.debug("Updating the ACL")
+            if chap_credentials != acl_credentials:
+                self.acl.chap_userid = client_username
+                self.acl.chap_password = client_password
 
-                        new_chap = CHAP(credentials)
-                        self.logger.debug("chap object set to: {},{},{},{}".format(
-                            new_chap.chap_str, new_chap.user, new_chap.password,
-                            new_chap.password_str))
+                new_chap = CHAP(chap_credentials)
+                self.logger.debug("chap object set to: {},{},{},{}".format(
+                    new_chap.chap_str, new_chap.user, new_chap.password,
+                    new_chap.password_str))
 
-                        new_chap.chap_str = "{}/{}".format(client_username,
-                                                           client_password)
-                        if new_chap.error:
-                            self.error = True
-                            self.error_msg = new_chap.error_msg
-                            return
-
-                        if chap_enabled:
-                            self.tpg.set_attribute('authentication', '1')
-                        else:
-                            self.try_disable_auth(self.tpg)
-
-                        self.logger.debug("Updating config object meta data")
-                        self.metadata['auth']['chap'] = new_chap.chap_str
-
-                except RTSLibError as err:
+                new_chap.chap_str = "{}/{}".format(client_username,
+                                                   client_password)
+                if new_chap.error:
                     self.error = True
-                    self.error_msg = ("Unable to configure {} authentication "
-                                      "for {} - ".format(auth_type,
-                                                         self.iqn,
-                                                         err))
-                    self.logger.error("Client.configure_auth) failed to set "
-                                      "{} credentials for {}".format(auth_type,
-                                                                     self.iqn))
-                else:
-                    self.change_count += 1
+                    self.error_msg = new_chap.error_msg
+                    return
+
+            if chap_mutual_credentials != acl_mutual_credentials:
+                self.acl.chap_mutual_userid = client_mutual_username
+                self.acl.chap_mutual_password = client_mutual_password
+
+                new_chap_mutual = CHAP(chap_mutual_credentials)
+                self.logger.debug("chap mutual object set to: {},{},{},{}".format(
+                    new_chap_mutual.chap_str, new_chap_mutual.user, new_chap_mutual.password,
+                    new_chap_mutual.password_str))
+
+                new_chap_mutual.chap_str = "{}/{}".format(client_mutual_username,
+                                                          client_mutual_password)
+                if new_chap_mutual.error:
+                    self.error = True
+                    self.error_msg = new_chap_mutual.error_msg
+                    return
+
+            if auth_enabled:
+                self.tpg.set_attribute('authentication', '1')
+            else:
+                self.try_disable_auth(self.tpg)
+
+            self.logger.debug("Updating config object meta data")
+            if chap_credentials != acl_credentials:
+                self.metadata['auth']['chap'] = new_chap.chap_str
+            if chap_mutual_credentials != acl_mutual_credentials:
+                self.metadata['auth']['chap_mutual'] = new_chap_mutual.chap_str
+
+        except RTSLibError as err:
+            self.error = True
+            self.error_msg = ("Unable to configure authentication "
+                              "for {} - ".format(self.iqn,
+                                                 err))
+            self.logger.error("(Client.configure_auth) failed to set "
+                              "credentials for {}".format(self.iqn))
+        else:
+            self.change_count += 1
 
     def _add_lun(self, image, lun):
         """
@@ -492,8 +521,16 @@ class GWClient(GWObject):
                     self.error = True
                     self.error_msg = config_chap.error_msg
                     return
+                # extract the chap_mutual_str from the config object entry
+                config_chap_mutual = CHAP(self.metadata['auth']['chap_mutual'])
+                chap_mutual_str = config_chap_mutual.chap_str
+                if config_chap_mutual.error:
+                    self.error = True
+                    self.error_msg = config_chap_mutual.error_msg
+                    return
 
                 if self.chap == chap_str and \
+                   self.chap_mutual == chap_mutual_str and \
                    config_image_list == sorted(self.requested_images):
                     self.commit_enabled = False
             else:
@@ -531,12 +568,11 @@ class GWClient(GWObject):
                                       "for {}".format(bad_images, self.iqn))
                     return
 
-            # if '/' in self.chap:
-            if self.chap == '':
+            if self.chap == '' and self.chap_mutual == '':
                 self.logger.warning("(main) client '{}' configured without"
                                     " security".format(self.iqn))
 
-            self.configure_auth('chap', self.chap)
+            self.configure_auth(self.chap, self.chap_mutual)
             if self.error:
                 return
 

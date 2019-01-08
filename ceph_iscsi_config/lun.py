@@ -449,7 +449,14 @@ class LUN(GWObject):
                     raise CephiSCSIError("Password decode issue : "
                                          "{}".format(client_chap.error_msg))
 
-                client = GWClient(self.logger, client_iqn, image_list, chap_str, target_iqn)
+                client_chap_mutual = CHAP(client_metadata['auth']['chap_mutual'])
+                chap_mutual_str = client_chap_mutual.chap_str
+                if client_chap_mutual.error:
+                    raise CephiSCSIError("Password decode issue : "
+                                         "{}".format(client_chap_mutual.error_msg))
+
+                client = GWClient(self.logger, client_iqn, image_list, chap_str,
+                                  chap_mutual_str, target_iqn)
                 client.manage('present')
                 if client.error:
                     client_err = "LUN mapping failed {} - {}".format(client_iqn,
