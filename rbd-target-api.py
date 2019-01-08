@@ -33,7 +33,7 @@ from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
                                      ip_addresses, gen_file_hash, valid_rpm,
-                                     CephiSCSIError)
+                                     format_lio_yes_no, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway, valid_client,
                          get_remote_gateways, valid_snapshot_name,
@@ -1854,6 +1854,38 @@ def hostgroup(target_iqn, group_name):
             return jsonify(message="Delete of group '{}'"
                                    " failed : {}".format(group_name,
                                                          api.response.json()['message'])), 400
+
+
+@app.route('/api/settings', methods=['GET'])
+@requires_restricted_auth
+def get_settings():
+    """
+    List settings.
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/settings
+    """
+
+    target_default_controls = {}
+    settings_list = GWTarget.SETTINGS
+    for k in settings_list:
+        default_val = getattr(settings.config, k, None)
+        if k in settings.Settings.LIO_YES_NO_SETTINGS:
+            default_val = format_lio_yes_no(default_val)
+        target_default_controls[k] = default_val
+
+    disk_default_controls = {}
+    for k in LUN.SETTINGS:
+        default_val = getattr(settings.config, k, None)
+        disk_default_controls[k] = default_val
+
+    return jsonify({
+        'target_default_controls': target_default_controls,
+        'disk_default_controls': disk_default_controls,
+        'config': {
+            'minimum_gateways': settings.config.minimum_gateways
+        }
+    }), 200
 
 
 @app.route('/api/_hostgroup/<target_iqn>/<group_name>', methods=['GET', 'PUT', 'DELETE'])
