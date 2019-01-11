@@ -597,7 +597,7 @@ class GWTarget(GWObject):
 
                     ip_list = target_config['ip_list']
                     ip_list.remove(gw_ip)
-                    if len(ip_list) > 0:
+                    if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
                         config.update_item('targets', self.iqn, target_config)
                     else:
                         # no more portals in the list, so delete the target
