@@ -147,6 +147,10 @@ class ChapTest(unittest.TestCase):
                 "wwn": "4fc1071d-7e2f-4df0-95c8-925a617e2d62"
             }
         },
+        "discovery_auth": {
+            "chap": "",
+            "chap_mutual": ""
+        },
         "epoch": 19,
         "gateways": {
             "node1": {

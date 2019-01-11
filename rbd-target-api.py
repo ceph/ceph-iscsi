@@ -26,6 +26,7 @@ from flask import Flask, jsonify, request
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.group import Group
 from ceph_iscsi_config.lun import RBDDev, LUN
@@ -1368,6 +1369,73 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
         resp_code = activate_resp_code
 
     return resp_text, resp_code
+
+
+@app.route('/api/discoveryauth', methods=['PUT'])
+@requires_restricted_auth
+def discoveryauth():
+    """
+    Coordinate discovery authentication changes across each gateway node
+    The following parameters are needed to manage discovery auth
+    :param chap: (str) chap string of the form username/password or ''
+            username is 8-64 chars long containing any alphanumeric in
+                [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+            password is 12-16 chars long containing any alphanumeric in
+                [0-9a-zA-Z] and '@' '-' '_'
+    :param chap_mutual: (str) chap string of the form username/password or ''
+            username is 8-64 chars long containing any alphanumeric in
+                [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+            password is 12-16 chars long containing any alphanumeric in
+                [0-9a-zA-Z] and '@' '-' '_'
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d chap=''
+        -X PUT https://192.168.122.69:5000/api/discoveryauth
+    curl --insecure --user admin:admin -d chap=dmin1234/admin12345678
+        -X PUT https://192.168.122.69:5000/api/discoveryauth
+    """
+
+    chap = request.form.get('chap')
+    chap_mutual = request.form.get('chap_mutual')
+
+    # Validate request
+    error_msg = Discovery.validate_discovery_auth(chap, chap_mutual)
+    if error_msg:
+        logger.error("BAD discovery auth request from {} - {}".format(
+            request.remote_addr, error_msg))
+        return jsonify(message=error_msg), 400
+
+    # Apply to all gateways
+    api_vars = {"chap": chap,
+                "chap_mutual": chap_mutual}
+    gateways = config.config['gateways'].keys()
+    resp_text, resp_code = call_api(gateways, '_discoveryauth', '',
+                                    http_method='put',
+                                    api_vars=api_vars)
+
+    # Update the configuration
+    Discovery.set_discovery_auth_config(chap, chap_mutual, config)
+    config.commit("retain")
+
+    return jsonify(message="discovery auth {}".format(resp_text)), \
+        resp_code
+
+
+@app.route('/api/_discoveryauth/', methods=['PUT'])
+@requires_restricted_auth
+def _discoveryauth():
+    """
+    Manage discovery authentication credentials on the local gateway
+    Internal Use ONLY
+    **RESTRICTED**
+    """
+
+    chap = request.form['chap']
+    chap_mutual = request.form['chap_mutual']
+
+    Discovery.set_discovery_auth_lio(chap, chap_mutual)
+
+    return jsonify(message='OK'), 200
 
 
 @app.route('/api/clients/<target_iqn>', methods=['GET'])

@@ -14,6 +14,7 @@ from ceph_iscsi_config.utils import (normalize_ip_address, normalize_ip_literal,
                                      ip_addresses, this_host, format_lio_yes_no,
                                      CephiSCSIError, CephiSCSIInval)
 from ceph_iscsi_config.common import Config
+from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.gateway_object import GWObject
@@ -289,6 +290,7 @@ class GWTarget(GWObject):
                 if self.error:
                     self.logger.critical("Unable to create the TPG for {} "
                                          "- {}".format(ip, self.error_msg))
+
             self.update_tpg_controls()
 
         except RTSLibError as err:
@@ -485,6 +487,9 @@ class GWTarget(GWObject):
                 # return to caller, with error state set
                 return
 
+            Discovery.set_discovery_auth_lio(config.config['discovery_auth']['chap'],
+                                             config.config['discovery_auth']['chap_mutual'])
+
             target_config = config.config["targets"][self.iqn]
             gateway_group = config.config["gateways"].keys()
             if "ip_list" not in target_config:
@@ -566,6 +571,9 @@ class GWTarget(GWObject):
                 }
                 config.add_item("targets", self.iqn, seed_target)
                 config.commit()
+
+                Discovery.set_discovery_auth_lio(config.config['discovery_auth']['chap'],
+                                                 config.config['discovery_auth']['chap_mutual'])
 
         elif mode == 'clearconfig':
             # Called by API from CLI clearconfig command

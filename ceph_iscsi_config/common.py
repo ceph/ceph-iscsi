@@ -52,6 +52,8 @@ class Config(object):
     seed_config = {"disks": {},
                    "gateways": {},
                    "targets": {},
+                   "discovery_auth": {'chap': '',
+                                      'chap_mutual': ''},
                    "version": 4,
                    "epoch": 0,
                    "created": '',
@@ -197,6 +199,10 @@ class Config(object):
                 'controls': self.config['controls'],
                 'ip_list': self.config['gateways']['ip_list']
             }
+            self.add_item('discovery_auth', None, {
+                'chap': '',
+                'chap_mutual': ''
+            })
             self.add_item("targets", None, {})
             self.add_item("targets", iqn, target)
             self.update_item("targets", iqn, target)

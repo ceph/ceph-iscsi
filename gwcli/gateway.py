@@ -72,7 +72,7 @@ class ISCSIRoot(UIRoot):
             else:
                 self.target.gateway_group = {}
 
-            self.target.refresh(self.config['targets'])
+            self.target.refresh(self.config['targets'], self.config['discovery_auth'])
 
             self.ceph.refresh()
 
@@ -165,6 +165,7 @@ class ISCSITargets(UIGroup):
     def __init__(self, parent):
         UIGroup.__init__(self, 'iscsi-targets', parent)
         self.gateway_group = {}
+        self.auth = None
 
     def ui_command_create(self, target_iqn):
         """
@@ -302,10 +303,62 @@ class ISCSITargets(UIGroup):
 
         self.logger.info('ok')
 
-    def refresh(self, targets):
+    def ui_command_discovery_auth(self, chap=None, chap_mutual=None):
+        """
+        Discovery authentication can be set to use CHAP/CHAP_MUTUAL by supplying
+        strings of the form <username>/<password>
+
+        Specifying 'nochap' will remove discovery authentication.
+
+        e.g.
+        auth chap=username/password chap_mutual=username/password
+
+        """
+
+        self.logger.warn("discovery chap={}, chap_mutual={}".format(chap, chap_mutual))
+
+        self.logger.debug("CMD: /iscsi discovery_auth")
+
+        if not chap:
+            self.logger.error("To set or reset discovery authentication, specify either "
+                              "chap=<user>/<password> [chap_mutual]=<user>/<password> or nochap")
+            return
+
+        if chap == 'nochap':
+            chap = ''
+        if not chap_mutual:
+            chap_mutual = ''
+
+        self.logger.debug("discovery auth to be set to chap='{}', chap_mutual='{}'".format(
+            chap, chap_mutual))
+
+        api_vars = {"chap": chap, "chap_mutual": chap_mutual}
+        discoveryauth_api = ('{}://localhost:{}/api/'
+                             'discoveryauth'.format(self.http_mode,
+                                                    settings.config.api_port))
+        api = APIRequest(discoveryauth_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code == 200:
+            self._set_auth(chap, chap_mutual)
+            self.logger.info('ok')
+        else:
+            self.logger.error("Error: {}".format(response_message(api.response, self.logger)))
+            return
+
+    def _set_auth(self, chap, chap_mutual):
+        if chap_mutual != '':
+            self.auth = "CHAP_MUTUAL"
+        elif chap != '':
+            self.auth = "CHAP"
+        else:
+            self.auth = None
+
+    def refresh(self, targets, discovery_auth):
 
         self.logger.debug("Refreshing gateway & client information")
         self.reset()
+        self._set_auth(discovery_auth['chap'], discovery_auth['chap_mutual'])
         for target_iqn, target in targets.items():
             tgt = Target(target_iqn, self)
             tgt.controls = target['controls']
@@ -315,7 +368,7 @@ class ISCSITargets(UIGroup):
             tgt.client_group.load(target['clients'])
 
     def summary(self):
-        return "Targets: {}".format(len(self.children)), None
+        return "DiscoveryAuth: {}, Targets: {}".format(self.auth, len(self.children)), None
 
 
 class Target(UINode):
