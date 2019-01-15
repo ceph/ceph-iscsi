@@ -46,7 +46,6 @@ class GWClient(GWObject):
         :return:
         """
 
-        self.iqn = client_iqn
         self.target_iqn = target_iqn
         self.lun_lookup = {}        # only used for hostgroup based definitions
         self.requested_images = []
@@ -87,10 +86,12 @@ class GWClient(GWObject):
         self.error_msg = ''
 
         try:
-            normalize_wwn(['iqn'], client_iqn)
+            client_iqn, iqn_type = normalize_wwn(['iqn'], client_iqn)
         except RTSLibError as err:
             self.error = True
-            self.error_msg = "Invalid client name for iSCSI - {}".format(err)
+            self.error_msg = "Invalid iSCSI client name - {}".format(err)
+
+        self.iqn = client_iqn
 
         # Validate the images list doesn't contain duplicate entries
         dup_images = set([rbd for rbd in image_list

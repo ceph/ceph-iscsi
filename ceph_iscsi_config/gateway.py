@@ -5,7 +5,7 @@ import os
 from rtslib_fb.target import Target, TPG, NetworkPortal, LUN
 from rtslib_fb.fabric import ISCSIFabricModule
 from rtslib_fb import root
-from rtslib_fb.utils import RTSLibError
+from rtslib_fb.utils import RTSLibError, normalize_wwn
 from rtslib_fb.alua import ALUATargetPortGroup
 
 import ceph_iscsi_config.settings as settings
@@ -56,6 +56,11 @@ class GWTarget(GWObject):
         self.enable_portal = enable_portal  # boolean to trigger portal IP creation
         self.logger = logger                # logger object
 
+        try:
+            iqn, iqn_type = normalize_wwn(['iqn'], iqn)
+        except RTSLibError as err:
+            self.error = True
+            self.error_msg = "Invalid iSCSI target name - {}".format(err)
         self.iqn = iqn
 
         # Ensure IPv6 addresses are in the normalized address (not literal) format
