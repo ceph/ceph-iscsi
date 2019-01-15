@@ -69,11 +69,14 @@ class Clients(UIGroup):
                               "iSCSI".format(client_iqn))
             return
 
+        target_iqn = self.parent.name
+
         # Issue the API call to create the client
         client_api = ('{}://localhost:{}/api/'
-                      'client/{}'.format(self.http_mode,
-                                         settings.config.api_port,
-                                         client_iqn))
+                      'client/{}/{}'.format(self.http_mode,
+                                            settings.config.api_port,
+                                            target_iqn,
+                                            client_iqn))
 
         self.logger.debug("Client CREATE for {}".format(client_iqn))
         api = APIRequest(client_api)
@@ -114,11 +117,14 @@ class Clients(UIGroup):
                               "iSCSI".format(client_iqn))
             return
 
+        target_iqn = self.parent.name
+
         client_api = ('{}://{}:{}/api/'
-                      'client/{}'.format(self.http_mode,
-                                         "localhost",
-                                         settings.config.api_port,
-                                         client_iqn))
+                      'client/{}/{}'.format(self.http_mode,
+                                            "localhost",
+                                            settings.config.api_port,
+                                            target_iqn,
+                                            client_iqn))
         api = APIRequest(client_api)
         api.delete()
 
@@ -198,11 +204,13 @@ class Clients(UIGroup):
             return
 
         for client in self.children:
-            client.set_auth(chap)
+            client.set_auth(chap, None)
 
     def summary(self):
         chap_enabled = False
         chap_disabled = False
+        chap_mutual_enabled = False
+        chap_mutual_disabled = False
         status = False
         # initiator name based ACL is the default with the current kernel
         # settings.
@@ -214,13 +222,22 @@ class Clients(UIGroup):
             else:
                 chap_enabled = True
 
-            if chap_enabled and chap_disabled:
+            if client.auth['chap_mutual'] == 'None':
+                chap_mutual_disabled = True
+            else:
+                chap_mutual_enabled = True
+
+            if chap_enabled and chap_disabled or \
+                    chap_mutual_enabled and chap_mutual_disabled:
                 auth_stat_str = "MISCONFIG"
                 status = False
                 break
 
         if auth_stat_str != "MISCONFIG":
-            if chap_enabled:
+            if chap_mutual_enabled:
+                auth_stat_str = "CHAP_MUTUAL"
+                status = True
+            elif chap_enabled:
                 auth_stat_str = "CHAP"
                 status = True
 
@@ -257,7 +274,7 @@ class Client(UINode):
         for k, v in client_settings.items():
             self.__setattr__(k, v)
 
-        # decode the password if necessary
+        # decode the chap password if necessary
         if 'chap' in self.auth:
             self.chap = CHAP(self.auth['chap'])
 
@@ -267,6 +284,17 @@ class Client(UINode):
                 self.auth['chap'] = "None"
         else:
             self.auth['chap'] = "None"
+
+        # decode the chap_mutual password if necessary
+        if 'chap_mutual' in self.auth:
+            self.chap_mutual = CHAP(self.auth['chap_mutual'])
+
+            if self.chap_mutual.chap_str != '':
+                self.auth['chap_mutual'] = self.chap_mutual.chap_str
+            else:
+                self.auth['chap_mutual'] = "None"
+        else:
+            self.auth['chap_mutual'] = "None"
 
         self.refresh_luns()
 
@@ -301,10 +329,12 @@ class Client(UINode):
         auth_text = "Auth: None"
         status = False
 
-        if 'chap' in self.auth:
-            if self.auth['chap'] != 'None':
-                auth_text = "Auth: CHAP"
-                status = True
+        if 'chap_mutual' in self.auth and self.auth['chap_mutual'] != 'None':
+            auth_text = "Auth: CHAP_MUTUAL"
+            status = True
+        elif 'chap' in self.auth and self.auth['chap'] != 'None':
+            auth_text = "Auth: CHAP"
+            status = True
 
         msg.append(auth_text)
 
@@ -313,13 +343,15 @@ class Client(UINode):
 
         return ", ".join(msg), status
 
-    def set_auth(self, chap=None):
+    def set_auth(self, chap=None, chap_mutual=None):
+
+        self.logger.warn("chap={}, chap_mutual={}".format(chap, chap_mutual))
 
         self.logger.debug("CMD: ../hosts/<client_iqn> auth *")
 
         if not chap:
             self.logger.error("To set or reset authentication, specify either "
-                              "chap=<user>/<password> or nochap")
+                              "chap=<user>/<password> [chap_mutual]=<user>/<password> or nochap")
             return
 
         if chap == 'nochap':
@@ -334,15 +366,28 @@ class Client(UINode):
                     "supported characters")
                 return
 
-        self.logger.debug(
-            "CHAP to be set to '{}' for '{}'".format(chap, self.client_iqn))
+        if not chap_mutual:
+            chap_mutual = ''
+        else:
+            if '/' not in chap_mutual:
+                self.logger.error(
+                    "CHAP_MUTUAL format is invalid - must be a <username>/<password> "
+                    "format. Use 'help auth' to show the correct syntax and "
+                    "supported characters")
+                return
 
-        api_vars = {"chap": chap}
+        self.logger.debug("auth to be set to chap='{}', chap_mutual='{}' for '{}'".format(
+            chap, chap_mutual, self.client_iqn))
+
+        target_iqn = self.parent.parent.name
+
+        api_vars = {"chap": chap, "chap_mutual": chap_mutual}
 
         clientauth_api = ('{}://localhost:{}/api/'
-                          'clientauth/{}'.format(self.http_mode,
-                                                 settings.config.api_port,
-                                                 self.client_iqn))
+                          'clientauth/{}/{}'.format(self.http_mode,
+                                                    settings.config.api_port,
+                                                    target_iqn,
+                                                    self.client_iqn))
 
         api = APIRequest(clientauth_api, data=api_vars)
         api.put()
@@ -353,6 +398,10 @@ class Client(UINode):
                 self.auth['chap'] = chap
             else:
                 self.auth['chap'] = "None"
+            if chap_mutual != '':
+                self.auth['chap_mutual'] = chap_mutual
+            else:
+                self.auth['chap_mutual'] = "None"
 
             self.logger.info('ok')
 
@@ -362,13 +411,13 @@ class Client(UINode):
                                                              self.logger)))
             return
 
-    def ui_command_auth(self, chap=None):
+    def ui_command_auth(self, chap=None, chap_mutual=None):
         """
-        Client authentication can be set to use CHAP by supplying the
-        a string of the form <username>/<password>
+        Client authentication can be set to use CHAP/CHAP_MUTUAL by supplying
+        strings of the form <username>/<password>
 
         e.g.
-        auth chap=username/password
+        auth chap=username/password chap_mutual=username/password
 
         username ... the username is 8-64 character string. Each character
                      may either be an alphanumeric or use one of the following
@@ -393,7 +442,7 @@ class Client(UINode):
 
         if not chap:
             self.logger.error("To set authentication, specify "
-                              "chap=<user>/<password>")
+                              "chap=<user>/<password> [chap_mutual]=<user>/<password>")
             return
 
         if chap == 'nochap':
@@ -402,7 +451,7 @@ class Client(UINode):
                               "the hosts node within gwcli.")
             return
 
-        self.set_auth(chap)
+        self.set_auth(chap, chap_mutual)
 
     @staticmethod
     def get_srtd_names(lun_list):
@@ -492,6 +541,18 @@ class Client(UINode):
                                   "client ".format(disk))
                 return
 
+        mapped_disks = [mapped_disk.name
+                        for mapped_disk in self.parent.parent.target_disks.children]
+        if disk not in mapped_disks:
+            rc = self.parent.parent.target_disks.add_disk(disk, None)
+            if rc == 0:
+                self.logger.debug("disk auto-map successful")
+            else:
+                self.logger.error("disk auto-map failed({}), try "
+                                  "using the /iscsi-target/<iqn>/disks add "
+                                  "command".format(rc))
+                return
+
         # At this point we are either in add/remove mode, with a valid disk
         # to act upon
         self.logger.debug("Client '{}' update - {} disk "
@@ -499,12 +560,15 @@ class Client(UINode):
                                       action,
                                       disk))
 
+        target_iqn = self.parent.parent.name
+
         api_vars = {"disk": disk}
 
         clientlun_api = ('{}://localhost:{}/api/'
-                         'clientlun/{}'.format(self.http_mode,
-                                               settings.config.api_port,
-                                               self.client_iqn))
+                         'clientlun/{}/{}'.format(self.http_mode,
+                                                  settings.config.api_port,
+                                                  target_iqn,
+                                                  self.client_iqn))
 
         api = APIRequest(clientlun_api, data=api_vars)
         if action == 'add':

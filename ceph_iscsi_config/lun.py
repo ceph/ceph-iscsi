@@ -80,6 +80,9 @@ class RBDDev(object):
 
                     try:
                         rbd_inst.remove(ioctx, self.image)
+                    except rbd.ImageNotFound:
+                        rbd_deleted = True
+                        break
                     except rbd.ImageBusy:
                         # catch and ignore the busy state - rbd probably still mapped on
                         # another gateway, so we keep trying
@@ -241,7 +244,6 @@ class LUN(GWObject):
         # only uses shortname so it needs to be converted to shortname format
         self.allocating_host = allocating_host.split('.')[0]
 
-        self.owner = ''     # gateway that owns the preferred path for this LUN
         self.error = False
         self.error_msg = ''
         self.num_changes = 0
@@ -257,16 +259,7 @@ class LUN(GWObject):
 
     def _validate_request(self):
 
-        # Before we start make sure that the target host is actually
-        # defined to the config
-        if self.allocating_host not in self.config.config['gateways'].keys():
-            self.logger.critical("Owning host is not valid, please provide a "
-                                 "valid gateway name for this rbd image")
-            self.error = True
-            self.error_msg = ("host name given for {} is not a valid gateway"
-                              " name, listed in the config".format(self.image))
-
-        elif not rados_pool(pool=self.pool):
+        if not rados_pool(pool=self.pool):
             # Could create the pool, but a fat finger moment in the config
             # file would mean rbd images get created and mapped, and then need
             # correcting. Better to exit if the pool doesn't exist
@@ -274,30 +267,67 @@ class LUN(GWObject):
             self.error_msg = ("Pool '{}' does not exist. Unable to "
                               "continue".format(self.pool))
 
-    def remove_lun(self):
-
+    def remove_lun(self, preserve_image):
         this_host = gethostname().split('.')[0]
         self.logger.info("LUN deletion request received, rbd removal to be "
                          "performed by {}".format(self.allocating_host))
 
-        # First ensure the LUN is not allocated to a client
-        clients = self.config.config['clients']
-        lun_in_use = False
-        for iqn in clients:
-            client_luns = clients[iqn]['luns'].keys()
+        # First ensure the LUN is not in use
+        for target_iqn, target in self.config.config['targets'].items():
+            if self.config_key in target['disks']:
+                self.error = True
+                self.error_msg = ("Unable to delete {} - allocated to "
+                                  "{}".format(self.config_key,
+                                              target_iqn))
+
+                self.logger.warning(self.error_msg)
+                return
+
+        # Check that the LUN is in LIO - if not there is nothing to do for
+        # this request
+        lun = self.lio_stg_object()
+        if lun:
+            # Now we know the request is for a LUN in LIO, and it's not masked
+            # to a client
+            self.remove_dev_from_lio()
+            if self.error:
+                return
+
+        rbd_image = RBDDev(self.image, '0G', self.pool)
+
+        if this_host == self.allocating_host:
+            # by using the allocating host we ensure the delete is not
+            # issue by several hosts when initiated through ansible
+            if not preserve_image:
+                rbd_image.delete()
+                if rbd_image.error:
+                    self.error = True
+                    self.error_msg = ("Unable to delete the underlying rbd "
+                                      "image {}".format(self.config_key))
+                    return
+
+            # remove the definition from the config object
+            self.config.del_item('disks', self.config_key)
+
+            self.config.commit()
+
+    def unmap_lun(self, target_iqn):
+        this_host = gethostname().split('.')[0]
+        self.logger.info("LUN unmap request received, config commit to be "
+                         "performed by {}".format(self.allocating_host))
+
+        target_config = self.config.config['targets'][target_iqn]
+
+        # First ensure the LUN is not in use
+        clients = target_config['clients']
+        for client_iqn in clients:
+            client_luns = clients[client_iqn]['luns'].keys()
             if self.config_key in client_luns:
-                lun_in_use = True
-                break
-
-        if lun_in_use:
-            # this will fail the ansible task for this lun/host
-            self.error = True
-            self.error_msg = ("Unable to delete {} - allocated to "
-                              "{}".format(self.config_key,
-                                          iqn))
-
-            self.logger.warning(self.error_msg)
-            return
+                self.error = True
+                self.error_msg = ("Unable to delete {} - allocated to {}"
+                                  .format(self.config_key, client_iqn))
+                self.logger.warning(self.error_msg)
+                return
 
         # Check that the LUN is in LIO - if not there is nothing to do for
         # this request
@@ -311,24 +341,15 @@ class LUN(GWObject):
         if self.error:
             return
 
-        rbd_image = RBDDev(self.image, '0G', self.pool)
-
         if this_host == self.allocating_host:
             # by using the allocating host we ensure the delete is not
             # issue by several hosts when initiated through ansible
-            rbd_image.delete()
-            if rbd_image.error:
-                self.error = True
-                self.error_msg = ("Unable to delete the underlying rbd "
-                                  "image {}".format(self.config_key))
-                return
+
+            target_config['disks'].remove(self.config_key)
+            self.config.update_item("targets", target_iqn, target_config)
 
             # determine which host was the path owner
             disk_owner = self.config.config['disks'][self.config_key]['owner']
-
-            #
-            # remove the definition from the config object
-            self.config.del_item('disks', self.config_key)
 
             # update the active_luns count for gateway that owned this
             # lun
@@ -340,6 +361,32 @@ class LUN(GWObject):
                                         disk_owner,
                                         gw_metadata)
 
+            disk_metadata = self.config.config['disks'][self.config_key]
+            if 'owner' in disk_metadata:
+                del disk_metadata['owner']
+                self.logger.debug("{} owner deleted".format(self.config_key))
+            self.config.update_item("disks", self.config_key, disk_metadata)
+
+            self.config.commit()
+
+    def map_lun(self, target_iqn, owner, disk):
+        this_host = gethostname().split('.')[0]
+
+        target_config = self.config.config['targets'][target_iqn]
+        disk_metadata = self.config.config['disks'][disk]
+        disk_metadata['owner'] = owner
+        self.config.update_item("disks", disk, disk_metadata)
+
+        target_config['disks'].append(disk)
+        self.config.update_item("targets", target_iqn, target_config)
+
+        gateway_dict = self.config.config['gateways'][owner]
+        gateway_dict['active_luns'] += 1
+        self.config.update_item('gateways', owner, gateway_dict)
+
+        LUN.define_luns(self.logger, self.config, None)
+
+        if this_host == self.allocating_host:
             self.config.commit()
 
     def manage(self, desired_state):
@@ -391,58 +438,68 @@ class LUN(GWObject):
                 raise CephiSCSIError("LUN activate failure - {}".format(self.error_msg))
 
         # re-add LUN to target
-        iqn = self.config.config['gateways']['iqn']
-        ip_list = self.config.config['gateways']['ip_list']
+        local_gw = this_host()
+        targets_items = [item for item in self.config.config['targets'].items()
+                         if self.config_key in item[1]['disks'] and local_gw in item[1]['portals']]
+        for target_iqn, target in targets_items:
+            ip_list = target['ip_list']
 
-        # Add the mapping for the lun to ensure the block device is
-        # present on all TPG's
-        gateway = GWTarget(self.logger, iqn, ip_list)
+            # Add the mapping for the lun to ensure the block device is
+            # present on all TPG's
+            gateway = GWTarget(self.logger, target_iqn, ip_list)
 
-        gateway.manage('map')
-        if gateway.error:
-            raise CephiSCSIError("LUN mapping failed - {}".format(gateway.error_msg))
+            gateway.manage('map')
+            if gateway.error:
+                raise CephiSCSIError("LUN mapping failed - {}".format(gateway.error_msg))
 
-        # re-map LUN to hosts
-        client_err = ''
-        for client_iqn in self.config.config['clients']:
-            client_metadata = self.config.config['clients'][client_iqn]
-            if client_metadata.get('group_name', ''):
-                continue
+            # re-map LUN to hosts
+            client_err = ''
+            for client_iqn in target['clients']:
+                client_metadata = target['clients'][client_iqn]
+                if client_metadata.get('group_name', ''):
+                    continue
 
-            image_list = client_metadata['luns'].keys()
-            if self.config_key not in image_list:
-                continue
+                image_list = client_metadata['luns'].keys()
+                if self.config_key not in image_list:
+                    continue
 
-            client_chap = CHAP(client_metadata['auth']['chap'])
-            chap_str = client_chap.chap_str
-            if client_chap.error:
-                raise CephiSCSIError("Password decode issue : "
-                                     "{}".format(client_chap.error_msg))
+                client_chap = CHAP(client_metadata['auth']['chap'])
+                chap_str = client_chap.chap_str
+                if client_chap.error:
+                    raise CephiSCSIError("Password decode issue : "
+                                         "{}".format(client_chap.error_msg))
 
-            client = GWClient(self.logger, client_iqn, image_list, chap_str)
-            client.manage('present')
-            if client.error:
-                client_err = "LUN mapping failed {} - {}".format(client_iqn,
-                                                                 client.error_msg)
+                client_chap_mutual = CHAP(client_metadata['auth']['chap_mutual'])
+                chap_mutual_str = client_chap_mutual.chap_str
+                if client_chap_mutual.error:
+                    raise CephiSCSIError("Password decode issue : "
+                                         "{}".format(client_chap_mutual.error_msg))
 
-        # re-map LUN to host groups
-        for group_name in self.config.config['groups']:
-            host_group = self.config.config['groups'][group_name]
-            members = host_group.get('members')
-            disks = host_group.get('disks').keys()
-            if self.config_key not in disks:
-                continue
+                client = GWClient(self.logger, client_iqn, image_list, chap_str,
+                                  chap_mutual_str, target_iqn)
+                client.manage('present')
+                if client.error:
+                    client_err = "LUN mapping failed {} - {}".format(client_iqn,
+                                                                     client.error_msg)
 
-            group = Group(self.logger, group_name, members, disks)
-            group.apply()
-            if group.error:
-                client_err = "LUN mapping failed {} - {}".format(group_name,
-                                                                 group.error_msg)
+            # re-map LUN to host groups
+            for group_name in target['groups']:
+                host_group = target['groups'][group_name]
+                members = host_group.get('members')
+                disks = host_group.get('disks').keys()
+                if self.config_key not in disks:
+                    continue
 
-        if client_err:
-            raise CephiSCSIError(client_err)
+                group = Group(self.logger, target_iqn, group_name, members, disks)
+                group.apply()
+                if group.error:
+                    client_err = "LUN mapping failed {} - {}".format(group_name,
+                                                                     group.error_msg)
 
-    def allocate(self):
+            if client_err:
+                raise CephiSCSIError(client_err)
+
+    def allocate(self, keep_dev_in_lio=True):
         self.logger.debug("LUN.allocate starting, listing rbd devices")
         disk_list = RBDDev.rbd_list(pool=self.pool)
         self.logger.debug("rados pool '{}' contains the following - "
@@ -554,27 +611,22 @@ class LUN(GWObject):
 
                     # lun is now in LIO, time for some housekeeping :P
                     wwn = lun._get_wwn()
-                    self.owner = LUN.set_owner(self.config.config['gateways'])
-                    self.logger.debug("{} owner will be {}".format(self.image,
-                                                                   self.owner))
+
+                    if not keep_dev_in_lio:
+                        self.remove_dev_from_lio()
+                        if self.error:
+                            return
 
                     disk_attr = {"wwn": wwn,
                                  "image": self.image,
-                                 "owner": self.owner,
                                  "pool": self.pool,
+                                 "allocating_host": self.allocating_host,
                                  "pool_id": rbd_image.pool_id,
                                  "controls": self.controls}
 
                     self.config.update_item('disks',
                                             self.config_key,
                                             disk_attr)
-
-                    gateway_dict = self.config.config['gateways'][self.owner]
-                    gateway_dict['active_luns'] += 1
-
-                    self.config.update_item('gateways',
-                                            self.owner,
-                                            gateway_dict)
 
                     self.logger.debug("(LUN.allocate) registered '{}' with "
                                       "wwn '{}' with the config "
@@ -867,13 +919,6 @@ class LUN(GWObject):
                 return ("at least one rbd image(s) with that name/prefix is "
                         "already defined")
 
-            gateways_defined = len([key for key in config['gateways']
-                                   if isinstance(config['gateways'][key],
-                                                 dict)])
-            if gateways_defined < settings.config.minimum_gateways:
-                return ("disks can not be added until at least {} gateways "
-                        "are defined".format(settings.config.minimum_gateways))
-
         if mode in ["resize", "delete", "reconfigure"]:
             # disk must exist in the config
             if disk_key not in config['disks']:
@@ -904,44 +949,44 @@ class LUN(GWObject):
         if mode == 'delete':
 
             # disk must *not* be allocated to a client in the config
+            mapped_list = []
             allocation_list = []
-            for client_iqn in config['clients']:
-                client_metadata = config['clients'][client_iqn]
-                if disk_key in client_metadata['luns']:
-                    allocation_list.append(client_iqn)
+            for target_iqn, target in config['targets'].items():
+                if disk_key in target['disks']:
+                    mapped_list.append(target_iqn)
+                for client_iqn in target['clients']:
+                    client_metadata = target['clients'][client_iqn]
+                    if disk_key in client_metadata['luns']:
+                        allocation_list.append(client_iqn)
 
             if allocation_list:
                 return ("Unable to delete {}. Allocated "
                         "to: {}".format(disk_key,
                                         ','.join(allocation_list)))
 
+            if mapped_list:
+                return ("Unable to delete {}. Mapped "
+                        "to: {}".format(disk_key,
+                                        ','.join(mapped_list)))
+
         return 'ok'
 
     @staticmethod
-    def set_owner(gateways):
+    def get_owner(gateways, portals):
         """
         Determine the gateway in the configuration with the lowest number of
         active LUNs. This gateway is then selected as the owner for the
         primary path of the current LUN being processed
         :param gateways: gateway dict returned from the RADOS configuration
                object
+        :param portals: portal dict returned from the RADOS configuration
+               object
         :return: specific gateway hostname (str) that should provide the
                active path for the next LUN
         """
 
-        # Gateways contains simple attributes and dicts. The dicts define the
-        # gateways settings, so first we extract only the dicts within the
-        # main gateways dict
-        gw_nodes = {key: gateways[key] for key in gateways
-                    if isinstance(gateways[key], dict)}
-        gw_items = gw_nodes.items()
-
-        # first entry is the lowest number of active_luns
-        gw_items = sorted(gw_items, key=lambda x: (x[1]['active_luns']))
-
-        # 1st tuple is gw with lowest active_luns, so return the 1st
-        # element which is the hostname
-        return gw_items[0][0]
+        return sorted(portals.keys(),
+                      key=lambda x: (gateways[x]['active_luns']))[0]
 
     @staticmethod
     def define_luns(logger, config, gateway):
@@ -979,39 +1024,48 @@ class LUN(GWObject):
                                   if disk_key.startswith(pool + '.')]
                     for disk_key in pool_disks:
 
-                        pool, image_name = disk_key.split('.')
+                        is_lun_mapped = False
+                        for _, target_config in config.config['targets'].items():
+                            if local_gw in target_config['portals'] \
+                                    and disk_key in target_config['disks']:
+                                is_lun_mapped = True
+                                break
+                        if is_lun_mapped:
+                            pool, image_name = disk_key.split('.')
 
-                        try:
-                            with rbd.Image(ioctx, image_name) as rbd_image:
-                                RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
+                            try:
+                                with rbd.Image(ioctx, image_name) as rbd_image:
+                                    RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
 
-                                lun = LUN(logger, pool, image_name,
-                                          rbd_image.size(), local_gw)
-                                if lun.error:
-                                    raise CephiSCSIError("Error defining rbd "
-                                                         "image {}".format(disk_key))
+                                    lun = LUN(logger, pool, image_name,
+                                              rbd_image.size(), local_gw)
+                                    if lun.error:
+                                        raise CephiSCSIError("Error defining rbd "
+                                                             "image {}".format(disk_key))
 
-                                lun.allocate()
-                                if lun.error:
-                                    raise CephiSCSIError("Error unable to "
-                                                         "register  {} with "
-                                                         "LIO - {}".format(disk_key,
-                                                                           lun.error_msg))
+                                    lun.allocate()
 
-                        except rbd.ImageNotFound:
-                            raise CephiSCSIError("Disk '{}' defined to the "
-                                                 "config, but image '{}' can "
-                                                 "not be found in '{}' "
-                                                 "pool".format(disk_key,
-                                                               image_name,
-                                                               pool))
+                                    if lun.error:
+                                        raise CephiSCSIError("Error unable to "
+                                                             "register  {} with "
+                                                             "LIO - {}".format(disk_key,
+                                                                               lun.error_msg))
 
-        # Gateway Mapping : Map the LUN's registered to all tpg's within the
-        # LIO target
-        gateway.manage('map')
-        if gateway.error:
-            raise CephiSCSIError("Error mapping the LUNs to the tpg's within "
-                                 "the iscsi Target")
+                            except rbd.ImageNotFound:
+                                raise CephiSCSIError("Disk '{}' defined to the "
+                                                     "config, but image '{}' can "
+                                                     "not be found in '{}' "
+                                                     "pool".format(disk_key,
+                                                                   image_name,
+                                                                   pool))
+
+        if gateway:
+            # Gateway Mapping : Map the LUN's registered to all tpg's within the
+            # LIO target
+            gateway.manage('map')
+            if gateway.error:
+                raise CephiSCSIError("Error mapping the LUNs to the tpg's within "
+                                     "the iscsi Target")
 
 
 def rados_pool(conf=None, pool='rbd'):

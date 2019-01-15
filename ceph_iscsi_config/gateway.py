@@ -14,6 +14,7 @@ from ceph_iscsi_config.utils import (normalize_ip_address, normalize_ip_literal,
                                      ip_addresses, this_host, format_lio_yes_no,
                                      CephiSCSIError, CephiSCSIInval)
 from ceph_iscsi_config.common import Config
+from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.gateway_object import GWObject
@@ -95,8 +96,7 @@ class GWTarget(GWObject):
         self.tpg_list = []
 
         try:
-            # We only support global target/tpg controls.
-            super(GWTarget, self).__init__('controls', '', logger,
+            super(GWTarget, self).__init__('targets', iqn, logger,
                                            GWTarget.SETTINGS)
         except CephiSCSIError as err:
             self.error = True
@@ -200,18 +200,18 @@ class GWTarget(GWObject):
         :return: None
         """
         # check that there aren't any disks or clients in the configuration
-        lio_root = root.RTSRoot()
-
-        disk_count = len([disk for disk in lio_root.storage_objects])
         clients = []
+        disks = set()
         for tpg in self.tpg_list:
             tpg_clients = [node for node in tpg._list_node_acls()]
             clients += tpg_clients
+            disks.update([lun.storage_object.name for lun in tpg.luns])
         client_count = len(clients)
+        disk_count = len(disks)
 
         if disk_count > 0 or client_count > 0:
             self.error = True
-            self.error_msg = ("Clients({}) and disks({}) must be removed"
+            self.error_msg = ("Clients({}) and disks({}) must be removed "
                               "before the gateways".format(client_count,
                                                            disk_count))
             return
@@ -290,6 +290,7 @@ class GWTarget(GWObject):
                 if self.error:
                     self.logger.critical("Unable to create the TPG for {} "
                                          "- {}".format(ip, self.error_msg))
+
             self.update_tpg_controls()
 
         except RTSLibError as err:
@@ -357,8 +358,10 @@ class GWTarget(GWObject):
             # this is being run during boot so the NP is not setup yet.
             return
 
+        target_config = config.config["targets"][self.iqn]
+
         is_owner = False
-        if config.config["gateways"][owning_gw]["portal_ip_address"] == tpg_ip_address:
+        if target_config['portals'][owning_gw]["portal_ip_address"] == tpg_ip_address:
             is_owner = True
 
         try:
@@ -375,7 +378,7 @@ class GWTarget(GWObject):
             # someone mapped a LU then unmapped it without deleting the
             # stg_object, or we are reloading the config.
             alua_tpg = ALUATargetPortGroup(stg_object, group_name)
-            if alua_tpg.tpg_id != tpg.tag:
+            if alua_tpg.tg_pt_gp_id != tpg.tag:
                 # ports and owner were rearranged. Not sure we support that.
                 raise CephiSCSIInval("Existing ALUA group tag for group {} "
                                      "in invalid state.\n".format(group_name))
@@ -401,9 +404,12 @@ class GWTarget(GWObject):
         """
 
         lio_root = root.RTSRoot()
+        target_config = config.config["targets"][self.iqn]
+        target_stg_object = [stg_object for stg_object in lio_root.storage_objects
+                             if stg_object.name in target_config['disks']]
 
         # process each storage object added to the gateway, and map to the tpg
-        for stg_object in lio_root.storage_objects:
+        for stg_object in target_stg_object:
 
             for tpg in self.tpg_list:
                 self.logger.debug("processing tpg{}".format(tpg.tag))
@@ -481,52 +487,51 @@ class GWTarget(GWObject):
                 # return to caller, with error state set
                 return
 
+            Discovery.set_discovery_auth_lio(config.config['discovery_auth']['chap'],
+                                             config.config['discovery_auth']['chap_mutual'])
+
+            target_config = config.config["targets"][self.iqn]
             gateway_group = config.config["gateways"].keys()
-
-            # this action could be carried out by multiple nodes concurrently,
-            # but since the value is the same (i.e all gateway nodes use the
-            # same iqn) it's not worth worrying about!
-            if "iqn" not in gateway_group:
+            if "ip_list" not in target_config:
+                target_config['ip_list'] = self.gateway_ip_list
+                config.update_item("targets", self.iqn, target_config)
                 self.config_updated = True
-                config.add_item("gateways",
-                                "iqn",
-                                initial_value=self.iqn)
 
-            if "ip_list" not in gateway_group:
-                self.config_updated = True
-                config.add_item("gateways",
-                                "ip_list",
-                                initial_value=self.gateway_ip_list)
-
-            if self.controls != config.config.get('controls', {}):
-                config.set_item('controls', '', self.controls.copy())
+            if self.controls != target_config.get('controls', {}):
+                target_config['controls'] = self.controls.copy()
+                config.update_item("targets", self.iqn, target_config)
                 self.config_updated = True
 
             if local_gw not in gateway_group:
-                inactive_portal_ip = list(self.gateway_ip_list)
-                inactive_portal_ip.remove(self.active_portal_ip)
-                gateway_metadata = {"portal_ip_address": self.active_portal_ip,
-                                    "iqn": self.iqn,
-                                    "active_luns": 0,
-                                    "tpgs": len(self.tpg_list),
-                                    "inactive_portal_ips": inactive_portal_ip,
-                                    "gateway_ip_list": self.gateway_ip_list}
-
+                gateway_metadata = {"active_luns": 0}
                 config.add_item("gateways", local_gw)
                 config.update_item("gateways", local_gw, gateway_metadata)
-                config.update_item("gateways", "ip_list", self.gateway_ip_list)
+                self.config_updated = True
+
+            if local_gw not in target_config['portals']:
+                inactive_portal_ip = list(self.gateway_ip_list)
+                inactive_portal_ip.remove(self.active_portal_ip)
+
+                portal_metadata = {"tpgs": len(self.tpg_list),
+                                   "gateway_ip_list": self.gateway_ip_list,
+                                   "portal_ip_address": self.active_portal_ip,
+                                   "inactive_portal_ips": inactive_portal_ip}
+                target_config['portals'][local_gw] = portal_metadata
+                target_config['ip_list'] = self.gateway_ip_list
+                config.update_item("targets", self.iqn, target_config)
                 self.config_updated = True
             else:
                 # gateway already defined, so check that the IP list it has
                 # matches the current request
-                gw_details = config.config['gateways'][local_gw]
-                if gw_details['gateway_ip_list'] != self.gateway_ip_list:
+                portal_details = target_config['portals'][local_gw]
+                if portal_details['gateway_ip_list'] != self.gateway_ip_list:
                     inactive_portal_ip = list(self.gateway_ip_list)
                     inactive_portal_ip.remove(self.active_portal_ip)
-                    gw_details['tpgs'] = len(self.tpg_list)
-                    gw_details['gateway_ip_list'] = self.gateway_ip_list
-                    gw_details['inactive_portal_ips'] = inactive_portal_ip
-                    config.update_item('gateways', local_gw, gw_details)
+                    portal_details['gateway_ip_list'] = self.gateway_ip_list
+                    portal_details['tpgs'] = len(self.tpg_list)
+                    portal_details['inactive_portal_ips'] = inactive_portal_ip
+                    target_config['portals'][local_gw] = portal_details
+                    config.update_item("targets", self.iqn, target_config)
                     self.config_updated = True
 
             if self.config_updated:
@@ -557,14 +562,18 @@ class GWTarget(GWObject):
             else:
                 # create the target
                 self.create_target()
-                current_iqn = config.config['gateways'].get('iqn', '')
+                seed_target = {
+                    'disks': [],
+                    'clients': {},
+                    'portals': {},
+                    'groups': {},
+                    'controls': {}
+                }
+                config.add_item("targets", self.iqn, seed_target)
+                config.commit()
 
-                # First gateway asked to create the target will update the
-                # config object
-                if not current_iqn:
-
-                    config.add_item("gateways", "iqn", initial_value=self.iqn)
-                    config.commit()
+                Discovery.set_discovery_auth_lio(config.config['discovery_auth']['chap'],
+                                                 config.config['discovery_auth']['chap_mutual'])
 
         elif mode == 'clearconfig':
             # Called by API from CLI clearconfig command
@@ -572,23 +581,36 @@ class GWTarget(GWObject):
                 self.load_config()
             else:
                 self.error = True
-                self.error_msg = "IQN provided does not exist"
+                self.error_msg = "Target {} does not exist on {}".format(self.iqn, local_gw)
+                return
 
+            target_config = config.config["targets"][self.iqn]
             self.clear_config()
 
             if not self.error:
-                gw_ip = config.config['gateways'][local_gw]['portal_ip_address']
-
-                config.del_item('gateways', local_gw)
-
-                ip_list = config.config['gateways']['ip_list']
-                ip_list.remove(gw_ip)
-                if len(ip_list) > 0:
-                    config.update_item('gateways', 'ip_list', ip_list)
+                if len(target_config['portals']) == 0:
+                    config.del_item('targets', self.iqn)
                 else:
-                    # no more gateways in the list, so delete remaining items
-                    config.del_item('gateways', 'ip_list')
-                    config.del_item('gateways', 'iqn')
-                    config.del_item('gateways', 'created')
+                    gw_ip = target_config['portals'][local_gw]['portal_ip_address']
+
+                    target_config['portals'].pop(local_gw)
+
+                    ip_list = target_config['ip_list']
+                    ip_list.remove(gw_ip)
+                    if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
+                        config.update_item('targets', self.iqn, target_config)
+                    else:
+                        # no more portals in the list, so delete the target
+                        config.del_item('targets', self.iqn)
+
+                    remove_gateway = True
+                    for _, target in config.config["targets"].items():
+                        if local_gw in target['portals']:
+                            remove_gateway = False
+                            break
+
+                    if remove_gateway:
+                        # gateway is no longer used, so delete it
+                        config.del_item('gateways', local_gw)
 
                 config.commit()

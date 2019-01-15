@@ -74,19 +74,23 @@ class Disks(UIGroup):
                 break
             else:
                 pool, image = rbd_name.split('.')
+                disk_meta[rbd_name] = {}
                 with cluster_ioctx.open_ioctx(pool) as ioctx:
-                    with rbd.Image(ioctx, image) as rbd_image:
-                        size = rbd_image.size()
-                        features = rbd_image.features()
-                        snapshots = list(rbd_image.list_snaps())
+                    try:
+                        with rbd.Image(ioctx, image) as rbd_image:
+                            size = rbd_image.size()
+                            features = rbd_image.features()
+                            snapshots = list(rbd_image.list_snaps())
 
-                        self.scan_mutex.acquire()
-                        disk_meta[rbd_name] = {
-                            "size": size,
-                            "features": features,
-                            "snapshots": snapshots
-                        }
-                        self.scan_mutex.release()
+                            self.scan_mutex.acquire()
+                            disk_meta[rbd_name] = {
+                                "size": size,
+                                "features": features,
+                                "snapshots": snapshots
+                            }
+                            self.scan_mutex.release()
+                    except rbd.ImageNotFound:
+                        pass
 
     def refresh(self, disk_info):
         """
@@ -145,15 +149,50 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_create(self, pool=None, image=None, size=None, count=1,
-                          **attributes):
+    def ui_command_attach(self, pool=None, image=None):
+        """
+        Create a LUN and assign to the gateway(s)
+        (RBD image must exist).
+
+        The attach command supports two request formats;
+
+        Long format  : attach pool=<name> image=<name>
+        Short format : attach pool.image
+
+        e.g.
+        attach pool=rbd image=testimage
+        attach rbd.testimage
+
+        The syntax of each parameter is as follows;
+        pool  : Pool and image name may contain a-z, A-Z, 0-9, '_', or '-'
+        image   characters.
+
+        """
+
+        if pool and '.' in pool:
+            # shorthand version of the command
+            self.logger.debug("user provided pool.image format request")
+
+            pool, image = pool.split('.')
+
+        else:
+            # long format request
+            if not pool or not image:
+                self.logger.error("Invalid create: pool and image "
+                                  "parameters are needed")
+                return
+
+        self.logger.debug("CMD: /disks/ attach pool={} "
+                          "image={}".format(pool, image))
+        self.create_disk(pool=pool, image=image, create_image=False)
+
+    def ui_command_create(self, pool=None, image=None, size=None, count=1):
         """
         Create a LUN and assign to the gateway(s).
 
         The create command supports two request formats;
 
-        Long format  : create pool=<name> image=<name> size=<size> [attributes:
-                       max_data_area_mb=<buffer_size> osd_op_timeout=<seconds> ...]
+        Long format  : create pool=<name> image=<name> size=<size>
         Short format : create pool.image <size>
 
         e.g.
@@ -172,15 +211,6 @@ class Disks(UIGroup):
                 create rbd.test 1g count=5
                 -> create 5 LUNs called test1..test5 each of 1GB in size
                    from the rbd pool
-        attributes :
-        max_data_area_mb : integer, optional size of kernel data ring buffer (MiB).
-                           Default 8.
-        qfull_timeout: integer, optional time in seconds to wait for ring space.
-                       Default 5.
-        osd_op_timeout: integer, optional time in seconds to wait for a Ceph op.
-                        Default 30.
-        hw_max_sectors: integer, optional in units of 512 byte sectors reported to
-                        initiators as max IO size. Default 1024.
 
         Notes.
         1) size does not support decimal representations
@@ -221,24 +251,10 @@ class Disks(UIGroup):
                 self.logger.error("invalid count format, must be an integer")
                 return
 
-        try:
-            controls = settings.Settings.normalize_controls(attributes,
-                                                            LUN.SETTINGS)
-        except ValueError as err:
-            self.logger.error(err)
-            return
-
-        for k, v in controls.items():
-            if not v:
-                self.logger.error("Missing value for {}.".format(k))
-                return
-
         self.logger.debug("CMD: /disks/ create pool={} "
-                          "image={} size={} count={} "
-                          "controls={}".format(pool, image, size, count,
-                                               attributes))
-        self.create_disk(pool=pool, image=image, size=size, count=count,
-                         controls=attributes)
+                          "image={} size={} "
+                          "count={} ".format(pool, image, size, count))
+        self.create_disk(pool=pool, image=image, size=size, count=count)
 
     def _valid_pool(self, pool=None):
         """
@@ -266,7 +282,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    controls={}, parent=None):
+                    parent=None, create_image=True):
 
         rc = 0
 
@@ -288,10 +304,9 @@ class Disks(UIGroup):
                                                           settings.config.api_port,
                                                           disk_key)
 
-        controls_json = json.dumps(controls)
-
         api_vars = {'pool': pool, 'owner': local_gw,
-                    'count': count, 'controls': controls_json, 'mode': 'create'}
+                    'count': count, 'mode': 'create',
+                    'create_image': 'true' if create_image else 'false'}
         if size:
             api_vars['size'] = size.upper()
 
@@ -429,6 +444,20 @@ class Disks(UIGroup):
         else:
             self.logger.error("disk name provided does not exist")
 
+    def ui_command_detach(self, image_id):
+        """
+        Delete a given rbd image from the configuration but not from ceph.
+
+        > detach <disk_name>
+        e.g.
+        > detach rbd.disk_1
+
+        "disk_name" refers to the name of the disk as shown in the UI, for
+        example rbd.disk_1.
+
+        """
+        self.delete_disk(image_id, True)
+
     def ui_command_delete(self, image_id):
         """
         Delete a given rbd image from the configuration and ceph. This is a
@@ -446,6 +475,9 @@ class Disks(UIGroup):
         the rbd image is, the longer the delete will take to run.
 
         """
+        self.delete_disk(image_id, False)
+
+    def delete_disk(self, image_id, preserve_image):
 
         # Perform a quick 'sniff' test on the request
         if image_id not in [disk.image_id for disk in self.children]:
@@ -459,7 +491,10 @@ class Disks(UIGroup):
 
         local_gw = this_host()
 
-        api_vars = {'purge_host': local_gw}
+        api_vars = {
+            'purge_host': local_gw,
+            'preserve_image': 'true' if preserve_image else 'false'
+        }
 
         disk_api = '{}://{}:{}/api/disk/{}'.format(self.http_mode,
                                                    local_gw,
@@ -550,6 +585,7 @@ class Disk(UINode):
         self.size_h = ''
         self.features = 0
         self.feature_list = []
+        self.snapshots = []
         self.controls = {}
         self.control_values = {}
         self.ceph_cluster = self.parent.parent.ceph.local_ceph.name
@@ -570,6 +606,7 @@ class Disk(UINode):
         else:
             # size and features have been passed in from the Disks.refresh
             # method
+            self.exists = True
             self.size = size
             self.size_h = human_size(self.size)
             self.features = features
@@ -584,6 +621,8 @@ class Disk(UINode):
     def _apply_config(self, image_config):
         # set the remaining attributes based on the fields in the dict
         disk_map = self.parent.disk_info
+        if 'owner' not in image_config:
+            self.__setattr__('owner', '')
         for k, v in image_config.items():
             disk_map[self.image_id][k] = v
             self.__setattr__(k, v)
@@ -596,6 +635,9 @@ class Disk(UINode):
                 self.control_values[k] = "{} (override)".format(val)
 
     def summary(self):
+        if not self.exists:
+            return 'NOT FOUND', False
+
         msg = [self.image, "({})".format(self.size_h)]
 
         return " ".join(msg), True
@@ -646,12 +688,16 @@ class Disk(UINode):
         self.logger.debug("Refreshing image metadata")
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
-                with rbd.Image(ioctx, self.image) as rbd_image:
-                    self.size = rbd_image.size()
-                    self.size_h = human_size(self.size)
-                    self.features = rbd_image.features()
-                    self.feature_list = self._get_features()
-                    self._parse_snapshots(list(rbd_image.list_snaps()))
+                try:
+                    with rbd.Image(ioctx, self.image) as rbd_image:
+                        self.exists = True
+                        self.size = rbd_image.size()
+                        self.size_h = human_size(self.size)
+                        self.features = rbd_image.features()
+                        self.feature_list = self._get_features()
+                        self._parse_snapshots(list(rbd_image.list_snaps()))
+                except rbd.ImageNotFound:
+                    self.exists = False
 
     # def get_meta_data_krbd(self):
     #     """
@@ -689,6 +735,12 @@ class Disk(UINode):
     def reconfigure(self, attribute, value):
         controls = {attribute: value}
         controls_json = json.dumps(controls)
+
+        ui_root = self.get_ui_root()
+        disk = ui_root.disks.disk_lookup[self.image_id]
+        if not disk.owner:
+            self.logger.error("Cannot reconfigure until disk assigned to target")
+            return
 
         local_gw = this_host()
 
@@ -873,3 +925,100 @@ class Disk(UINode):
         name: snapshot name
         """
         self.snapshot(action, name)
+
+
+class TargetDisks(UIGroup):
+    help_intro = '''
+                 The target disks section shows the disks that are mapped
+                 to this target.
+
+                 Disks may be added or deleted using the add/delete command,
+                 but the same disk cannot be mapped to multiple targets.
+                 '''
+
+    def __init__(self, parent):
+        UIGroup.__init__(self, 'disks', parent)
+        self.http_mode = self.parent.http_mode
+        self.target_iqn = self.parent.name
+
+    def load(self, disks):
+        for disk in disks:
+            TargetDisk(self, disk)
+
+    def ui_command_add(self, disk=None):
+        self.add_disk(disk)
+
+    def add_disk(self, disk, success_msg='ok'):
+        rc = 0
+        api_vars = {"disk": disk}
+        targetdisk_api = ('{}://localhost:{}/api/'
+                          'targetlun/{}'.format(self.http_mode,
+                                                settings.config.api_port,
+                                                self.target_iqn))
+        api = APIRequest(targetdisk_api, data=api_vars)
+        api.put()
+        if api.response.status_code == 200:
+            config = get_config()
+            owner = config['disks'][disk]['owner']
+            ui_root = self.get_ui_root()
+            disk = ui_root.disks.disk_lookup[disk]
+            disk.owner = owner
+            self.logger.debug("- Disk '{}' owner updated to {}"
+                              .format(disk, owner))
+            TargetDisk(self, disk.name)
+            self.logger.debug("- TargetDisk '{}' added".format(disk))
+            if success_msg:
+                self.logger.info(success_msg)
+        else:
+            self.logger.error("Failed - {}".format(response_message(api.response,
+                                                                    self.logger)))
+            rc = 1
+        return rc
+
+    def ui_command_delete(self, disk=None):
+        self.delete_disk(disk)
+
+    def delete_disk(self, disk):
+        rc = 0
+        api_vars = {"disk": disk}
+        targetdisk_api = ('{}://localhost:{}/api/'
+                          'targetlun/{}'.format(self.http_mode,
+                                                settings.config.api_port,
+                                                self.target_iqn))
+        api = APIRequest(targetdisk_api, data=api_vars)
+        api.delete()
+        if api.response.status_code == 200:
+            target_disk = [target_disk for target_disk in self.children
+                           if target_disk.name == disk][0]
+            self.remove_child(target_disk)
+            self.logger.debug("- TargetDisk '{}' deleted".format(disk))
+            ui_root = self.get_ui_root()
+            disk = ui_root.disks.disk_lookup[disk]
+            disk.owner = ''
+            self.logger.debug("- Disk '{}' owner deleted".format(disk))
+            self.logger.info('ok')
+        else:
+            self.logger.error("Failed - {}".format(response_message(api.response,
+                                                                    self.logger)))
+            rc = 1
+        return rc
+
+    def summary(self):
+        return "Disks: {}".format(len(self.children)), None
+
+
+class TargetDisk(UINode):
+    help_intro = '''
+                 Represents a disk that is mapped to the target.
+                 '''
+
+    display_attributes = ['name', 'owner']
+
+    def __init__(self, parent, name):
+        UINode.__init__(self, name, parent)
+        ui_root = self.get_ui_root()
+        disk = ui_root.disks.disk_lookup[name]
+        self.owner = disk.owner
+
+    def summary(self):
+        return "Owner: {}".format(self.owner), True

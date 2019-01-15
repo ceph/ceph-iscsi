@@ -54,10 +54,9 @@ class Gateway(LIO):
     def drop_target(self, this_host):
         if this_host in self.config.config['gateways']:
 
-            iqn = self.config.config['gateways'][this_host]['iqn']
-
             lio_root = root.RTSRoot()
             for tgt in lio_root.targets:
-                if tgt.wwn == iqn:
+                if tgt.wwn in self.config.config['targets'] \
+                        and this_host in self.config.config['targets'][tgt.wwn]['portals']:
                     tgt.delete()
                     self.changed = True

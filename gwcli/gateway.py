@@ -5,16 +5,15 @@ import threading
 
 from gwcli.node import UIGroup, UINode, UIRoot
 from gwcli.hostgroup import HostGroups
-from gwcli.storage import Disks
+from gwcli.storage import Disks, TargetDisks
 from gwcli.client import Clients
 from gwcli.utils import (this_host, response_message, GatewayAPIError,
-                         GatewayError, APIRequest, console_message, valid_iqn)
+                         GatewayError, APIRequest, console_message, valid_iqn,
+                         get_config)
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
 from ceph_iscsi_config.gateway import GWTarget
-
-import rtslib_fb.root as root
 
 from gwcli.ceph import CephGroup
 
@@ -56,7 +55,7 @@ class ISCSIRoot(UIRoot):
 
         self.disks = Disks(self)
         self.ceph = CephGroup(self)
-        self.target = ISCSITarget(self)
+        self.target = ISCSITargets(self)
 
     def refresh(self):
         self.config = self._get_config()
@@ -73,17 +72,7 @@ class ISCSIRoot(UIRoot):
             else:
                 self.target.gateway_group = {}
 
-            if 'controls' in self.config:
-                self.target.controls = self.config['controls']
-            else:
-                self.target.controls = {}
-
-            if 'clients' in self.config:
-                self.target.client_group = self.config['clients']
-            else:
-                self.target.client_group = {}
-
-            self.target.refresh()
+            self.target.refresh(self.config['targets'], self.config['discovery_auth'])
 
             self.ceph.refresh()
 
@@ -140,7 +129,7 @@ class ISCSIRoot(UIRoot):
             return
 
         current_config = self._get_config()
-        if not current_config.get('gateways'):
+        if not current_config.get('targets'):
             self.logger.error("Export requested, but the config is empty")
             return
 
@@ -162,7 +151,7 @@ class ISCSIRoot(UIRoot):
         console_message("2ndary API IP's    : {}".format(display_ips))
 
 
-class ISCSITarget(UIGroup):
+class ISCSITargets(UIGroup):
     help_intro = '''
                  The iscsi-target group defines the ISCSI Target that the
                  group of gateways will be known as by iSCSI initiators (clients).
@@ -174,34 +163,19 @@ class ISCSITarget(UIGroup):
                  '''
 
     def __init__(self, parent):
-        UIGroup.__init__(self, 'iscsi-target', parent)
+        UIGroup.__init__(self, 'iscsi-targets', parent)
         self.gateway_group = {}
-        self.client_group = {}
+        self.auth = None
 
     def ui_command_create(self, target_iqn):
         """
         Create an iSCSI target. This target is defined across all gateway nodes,
         providing the client with a single 'image' for iscsi discovery.
-
-        Only ONE iSCSI target is supported, at this time.
         """
 
         self.logger.debug("CMD: /iscsi create {}".format(target_iqn))
 
-        defined_targets = [tgt.name for tgt in self.children]
-        if len(defined_targets) > 0:
-            self.logger.error("Only ONE iscsi target image is supported")
-            return
-
-        # We need LIO to be empty, so check there aren't any targets defined
-        local_lio = root.RTSRoot()
-        current_target_names = [tgt.wwn for tgt in local_lio.targets]
-        if current_target_names:
-            self.logger.error("Local LIO instance already has LIO configured "
-                              "with a target - unable to continue")
-            return
-
-        # OK - this request is valid, but is the IQN usable?
+        # is the IQN usable?
         if not valid_iqn(target_iqn):
             self.logger.error("IQN name '{}' is not valid for "
                               "iSCSI".format(target_iqn))
@@ -221,13 +195,40 @@ class ISCSITarget(UIGroup):
         if api.response.status_code == 200:
             self.logger.info('ok')
             # create the target entry in the UI tree
-            Target(target_iqn, self)
+            target_exists = len([target for target in self.children
+                                 if target.name == target_iqn]) > 0
+            if not target_exists:
+                Target(target_iqn, self)
         else:
             self.logger.error("Failed to create the target on the local node")
 
             raise GatewayAPIError("iSCSI target creation failed - "
                                   "{}".format(response_message(api.response,
                                                                self.logger)))
+
+    def ui_command_delete(self, target_iqn):
+        """
+        Delete an iSCSI target.
+        """
+
+        self.logger.debug("CMD: /iscsi delete {}".format(target_iqn))
+
+        gw_api = ('{}://localhost:{}/api/'
+                  'target/{}'.format(self.http_mode,
+                                     settings.config.api_port,
+                                     target_iqn))
+
+        api = APIRequest(gw_api)
+        api.delete()
+
+        if api.response.status_code == 200:
+            self.logger.info('ok')
+            # delete the target entry from the UI tree
+            target_object = [target for target in self.children
+                             if target.name == target_iqn][0]
+            self.remove_child(target_object)
+        else:
+            self.logger.error("Failed - {}".format(response_message(api.response, self.logger)))
 
     def ui_command_clearconfig(self, confirm=None):
         """
@@ -251,58 +252,37 @@ class ISCSITarget(UIGroup):
 
         # get a new copy of the config dict over the local API
         # check that there aren't any disks or client listed
-        local_api = ("{}://localhost:{}/api/"
-                     "config".format(self.http_mode,
-                                     settings.config.api_port))
+        current_config = get_config()
+        for target_iqn, target in current_config['targets'].items():
+            num_clients = len(target['clients'].keys())
+            if num_clients > 0:
+                self.logger.error("{} - Clients({}) must be removed first"
+                                  " before clearing the gateway "
+                                  "configuration".format(target_iqn,
+                                                         num_clients))
+                return
 
-        api = APIRequest(local_api)
-        api.get()
-
-        if api.response.status_code != 200:
-            self.logger.error("Unable to get fresh copy of the configuration")
-            raise GatewayAPIError
-
-        try:
-            current_config = api.response.json()
-        except Exception:
-            self.logger.error("Malformed REST API response")
-            raise GatewayAPIError
-
-        num_clients = len(current_config['clients'].keys())
         num_disks = len(current_config['disks'].keys())
-
-        if num_clients > 0 or num_disks > 0:
-            self.logger.error("Clients({}) and Disks({}) must be removed first"
+        if num_disks > 0:
+            self.logger.error("Disks({}) must be removed first"
                               " before clearing the gateway "
-                              "configuration".format(num_clients,
-                                                     num_disks))
+                              "configuration".format(num_disks))
             return
 
-        self.clear_config(current_config['gateways'])
+        for target_iqn, target in current_config['targets'].items():
+            target_config = current_config['targets'][target_iqn]
 
-    def clear_config(self, gateway_group):
+            self.clear_config(target_config['portals'], target_iqn)
 
-        # we need to process the gateways, leaving the local machine until
-        # last to ensure we don't fall foul of the api auth check
-        gw_list = [gw_name for gw_name in gateway_group
-                   if isinstance(gateway_group[gw_name], dict)]
-
-        this_gw = this_host()
-        if this_gw not in gw_list:
-            self.logger.warning("Executor({}) must be in gateway list: "
-                                "{}".format(this_gw, gw_list))
-            return
-
-        gw_list.remove(this_gw)
-        gw_list.append(this_gw)
+    def clear_config(self, gw_list, target_iqn):
 
         for gw_name in gw_list:
 
             gw_api = ('{}://{}:{}/api/'
-                      '_gateway/{}'.format(self.http_mode,
-                                           gw_name,
-                                           settings.config.api_port,
-                                           gw_name))
+                      '_target/{}'.format(self.http_mode,
+                                          gw_name,
+                                          settings.config.api_port,
+                                          target_iqn))
 
             api = APIRequest(gw_api)
             api.delete()
@@ -318,23 +298,77 @@ class ISCSITarget(UIGroup):
         self.reset()
 
         # remove any bookmarks stored in the prefs.bin file
-        del self.shell.prefs['bookmarks']
+        if 'bookmarks' in self.shell.prefs:
+            del self.shell.prefs['bookmarks']
 
         self.logger.info('ok')
 
-    def refresh(self):
+    def ui_command_discovery_auth(self, chap=None, chap_mutual=None):
+        """
+        Discovery authentication can be set to use CHAP/CHAP_MUTUAL by supplying
+        strings of the form <username>/<password>
+
+        Specifying 'nochap' will remove discovery authentication.
+
+        e.g.
+        auth chap=username/password chap_mutual=username/password
+
+        """
+
+        self.logger.warn("discovery chap={}, chap_mutual={}".format(chap, chap_mutual))
+
+        self.logger.debug("CMD: /iscsi discovery_auth")
+
+        if not chap:
+            self.logger.error("To set or reset discovery authentication, specify either "
+                              "chap=<user>/<password> [chap_mutual]=<user>/<password> or nochap")
+            return
+
+        if chap == 'nochap':
+            chap = ''
+        if not chap_mutual:
+            chap_mutual = ''
+
+        self.logger.debug("discovery auth to be set to chap='{}', chap_mutual='{}'".format(
+            chap, chap_mutual))
+
+        api_vars = {"chap": chap, "chap_mutual": chap_mutual}
+        discoveryauth_api = ('{}://localhost:{}/api/'
+                             'discoveryauth'.format(self.http_mode,
+                                                    settings.config.api_port))
+        api = APIRequest(discoveryauth_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code == 200:
+            self._set_auth(chap, chap_mutual)
+            self.logger.info('ok')
+        else:
+            self.logger.error("Error: {}".format(response_message(api.response, self.logger)))
+            return
+
+    def _set_auth(self, chap, chap_mutual):
+        if chap_mutual != '':
+            self.auth = "CHAP_MUTUAL"
+        elif chap != '':
+            self.auth = "CHAP"
+        else:
+            self.auth = None
+
+    def refresh(self, targets, discovery_auth):
 
         self.logger.debug("Refreshing gateway & client information")
         self.reset()
-        if 'iqn' in self.gateway_group:
-            tgt = Target(self.gateway_group['iqn'], self)
-            tgt.controls = self.controls
+        self._set_auth(discovery_auth['chap'], discovery_auth['chap_mutual'])
+        for target_iqn, target in targets.items():
+            tgt = Target(target_iqn, self)
+            tgt.controls = target['controls']
 
-            tgt.gateway_group.load(self.gateway_group)
-            tgt.client_group.load(self.client_group)
+            tgt.gateway_group.load(target['portals'])
+            tgt.target_disks.load(target['disks'])
+            tgt.client_group.load(target['clients'])
 
     def summary(self):
-        return "Targets: {}".format(len(self.children)), None
+        return "DiscoveryAuth: {}, Targets: {}".format(self.auth, len(self.children)), None
 
 
 class Target(UINode):
@@ -356,6 +390,7 @@ class Target(UINode):
         self.gateway_group = GatewayGroup(self)
         self.client_group = Clients(self)
         self.host_groups = HostGroups(self)
+        self.target_disks = TargetDisks(self)
 
     def _get_controls(self):
         return self._controls.copy()
@@ -477,12 +512,9 @@ class GatewayGroup(UIGroup):
         return len([gw for gw in self.children
                     if gw.state != 'UP'])
 
-    def load(self, gateway_group):
-        # define the host entries from the gateway_group dict
-        gateway_list = [gw for gw in gateway_group
-                        if isinstance(gateway_group[gw], dict)]
-        for gateway_name in gateway_list:
-            Gateway(self, gateway_name, gateway_group[gateway_name])
+    def load(self, portal_group):
+        for gateway_name in portal_group:
+            Gateway(self, gateway_name, portal_group[gateway_name])
 
         self.check_gateways()
 
@@ -590,12 +622,14 @@ class GatewayGroup(UIGroup):
                               " over API - sync aborted, restart rbd-target-gw"
                               " on {} to sync".format(gateway_name))
 
+        target_iqn = self.parent.name
+        target_config = config['targets'][target_iqn]
         if nosync:
             sync_text = "sync skipped"
         else:
             sync_text = ("sync'ing {} disk(s) and "
-                         "{} client(s)".format(len(config['disks']),
-                                               len(config['clients'])))
+                         "{} client(s)".format(len(target_config['disks']),
+                                               len(target_config['clients'])))
         if skipchecks == 'true':
             self.logger.warning("OS version/package checks have been bypassed")
 
@@ -604,7 +638,7 @@ class GatewayGroup(UIGroup):
         gw_api = '{}://{}:{}/api'.format(self.http_mode,
                                          "localhost",
                                          settings.config.api_port)
-        gw_rqst = gw_api + '/gateway/{}'.format(gateway_name)
+        gw_rqst = gw_api + '/gateway/{}/{}'.format(target_iqn, gateway_name)
         gw_vars = {"nosync": nosync,
                    "skipchecks": skipchecks,
                    "ip_address": ip_address}
@@ -630,8 +664,9 @@ class GatewayGroup(UIGroup):
                                         settings.config.api_port))
 
         config = self.parent.parent.parent._get_config(endpoint=new_gw_endpoint)
-        gw_config = config['gateways'][gateway_name]
-        Gateway(self, gateway_name, gw_config)
+        target_config = config['targets'][target_iqn]
+        portal_config = target_config['portals'][gateway_name]
+        Gateway(self, gateway_name, portal_config)
 
         self.logger.info('ok')
 
@@ -657,7 +692,6 @@ class Gateway(UINode):
                           "gateway_ip_list",
                           "portal_ip_address",
                           "inactive_portal_ips",
-                          "active_luns",
                           "tpgs",
                           "service_state"]
 

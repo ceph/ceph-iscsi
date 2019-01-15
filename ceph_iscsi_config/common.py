@@ -51,9 +51,10 @@ class Config(object):
 
     seed_config = {"disks": {},
                    "gateways": {},
-                   "clients": {},
-                   "groups": {},
-                   "version": 3,
+                   "targets": {},
+                   "discovery_auth": {'chap': '',
+                                      'chap_mutual': ''},
+                   "version": 4,
                    "epoch": 0,
                    "created": '',
                    "updated": ''
@@ -80,6 +81,7 @@ class Config(object):
 
         if self.init_config():
             self.config = self.get_config()
+            self._upgrade_config()
             self.changed = False
 
     def _read_config_object(self, ioctx):
@@ -153,6 +155,64 @@ class Config(object):
         cfg_dict = json.loads(cfg_data)
 
         return cfg_dict
+
+    def _upgrade_config(self):
+        if self.config['version'] >= Config.seed_config['version']:
+            return
+
+        if self.config['version'] <= 2:
+            self.add_item("groups", element_name=None, initial_value={})
+            self.update_item("version", element_name=None, element_value=3)
+
+        if self.config['version'] == 3:
+            iqn = self.config['gateways']['iqn']
+            gateways = {}
+            portals = {}
+            for host, gateway_v3 in self.config['gateways'].items():
+                if isinstance(gateway_v3, dict):
+                    portal = gateway_v3
+                    portal.pop('iqn')
+                    active_luns = portal.pop('active_luns')
+                    updated = portal.pop('updated', None)
+                    created = portal.pop('created', None)
+                    gateway = {
+                        'active_luns': active_luns
+                    }
+                    if created:
+                        gateway['created'] = created
+                    if updated:
+                        gateway['updated'] = updated
+                    gateways[host] = gateway
+                    portals[host] = portal
+            for _, client in self.config['clients'].items():
+                client.pop('created', None)
+                client.pop('updated', None)
+                client['auth']['chap_mutual'] = ''
+            for _, group in self.config['groups'].items():
+                group.pop('created', None)
+                group.pop('updated', None)
+            target = {
+                'disks': list(self.config['disks'].keys()),
+                'clients': self.config['clients'],
+                'portals': portals,
+                'groups': self.config['groups'],
+                'controls': self.config['controls'],
+                'ip_list': self.config['gateways']['ip_list']
+            }
+            self.add_item('discovery_auth', None, {
+                'chap': '',
+                'chap_mutual': ''
+            })
+            self.add_item("targets", None, {})
+            self.add_item("targets", iqn, target)
+            self.update_item("targets", iqn, target)
+            self.del_item('controls', None)
+            self.del_item('clients', None)
+            self.del_item('groups', None)
+            self.update_item("gateways", None, gateways)
+            self.update_item("version", None, 4)
+
+        self.commit("retain")
 
     def init_config(self):
         try:
@@ -238,6 +298,7 @@ class Config(object):
     def refresh(self):
         self.logger.debug("config refresh - current config is {}".format(self.config))
         self.config = self.get_config()
+        self._upgrade_config()
 
     def add_item(self, cfg_type, element_name=None, initial_value=None):
         now = get_time()
@@ -276,7 +337,10 @@ class Config(object):
 
     def del_item(self, cfg_type, element_name):
         self.changed = True
-        del self.config[cfg_type][element_name]
+        if element_name:
+            del self.config[cfg_type][element_name]
+        else:
+            del self.config[cfg_type]
         self.logger.debug("(Config.del_item) config updated to {}".format(self.config))
 
         txn = ConfigTransaction(cfg_type, element_name, 'delete')
@@ -341,7 +405,10 @@ class Config(object):
                     current_config[txn.type] = txn.item_content
 
             elif txn.action == 'delete':
-                del current_config[txn.type][txn.item_name]
+                if txn.item_name:
+                    del current_config[txn.type][txn.item_name]
+                else:
+                    del current_config[txn.type]
             else:
                 self.error = True
                 self.error_msg = "Unknown transaction type ({}} encountered in " \

@@ -236,14 +236,13 @@ def portals_active():
     return get_tpgs() > 0
 
 
-def define_gateway():
+def define_gateway(target_iqn, gw_ip_list):
     """
     define the iSCSI target and tpgs
+    :param target_iqn: (str) target iqn
+    :param gw_ip_list: (list) gateway ip list
     :return: (object) gateway object
     """
-
-    gw_ip_list = config.config['gateways'].get('ip_list', None)
-    gw_iqn = config.config['gateways'].get('iqn', None)
 
     # Gateway Definition : Handle the creation of the Target/TPG(s) and Portals
     # Although we create the tpgs, we flick the enable_portal flag off so the
@@ -256,7 +255,7 @@ def define_gateway():
     # boot time request
 
     gateway = GWTarget(logger,
-                       gw_iqn,
+                       target_iqn,
                        gw_ip_list,
                        enable_portal=portals_active())
     if gateway.error:
@@ -268,6 +267,20 @@ def define_gateway():
              "{}".format(gateway.error_msg))
 
     return gateway
+
+
+def define_gateways(local_gw):
+    """
+    define the list of iSCSI targets and tpgs
+    :param local_gw: (str) local gateway hostname
+    :return: (list) gateway objects
+    """
+    gateways = []
+    for iqn, target in config.config['targets'].items():
+        if local_gw in target['portals']:
+            gw = define_gateway(iqn, target.get('ip_list', None))
+            gateways.append(gw)
+    return gateways
 
 
 def apply_config():
@@ -287,7 +300,7 @@ def apply_config():
 
     # first check to see if we have any entries to handle - if not, there is
     # no work to do..
-    if "gateways" not in config.config:
+    if "targets" not in config.config:
         logger.info("Configuration is empty - nothing to define to LIO")
         config_loading = False
         return
@@ -301,29 +314,32 @@ def apply_config():
     portals_already_active = portals_active()
 
     logger.info("Processing Gateway configuration")
-    gateway = define_gateway()
+    gateways = define_gateways(local_gw)
 
     logger.info("Processing LUN configuration")
-    try:
-        LUN.define_luns(logger, config, gateway)
-    except CephiSCSIError as err:
-            halt("Could not define LUNs: {}".format(err))
+    for gateway in gateways:
 
-    logger.info("Processing client configuration")
-    try:
-        GWClient.define_clients(logger, config)
-    except CephiSCSIError as err:
-        halt("Could not define clients: {}".format(err))
+        try:
+            LUN.define_luns(logger, config, gateway)
+        except CephiSCSIError as err:
+                halt("{} - Could not define LUNs: {}".format(gateway.iqn, err))
 
-    if not portals_already_active:
-        # The tpgs, luns and clients are all defined, but the active tpg
-        # doesn't have an IP bound to it yet (due to the enable_portals=False
-        # setting above)
-        logger.info("Adding the IP to the enabled tpg, allowing iSCSI logins")
-        gateway.enable_active_tpg(config)
-        if gateway.error:
-            halt("Error enabling the IP with the active TPG: {}".format(
-                 gateway.error_msg))
+        logger.info("{} - Processing client configuration".format(gateway.iqn))
+        try:
+            GWClient.define_clients(logger, config, gateway.iqn)
+        except CephiSCSIError as err:
+            halt("Could not define clients: {}".format(err))
+
+        if not portals_already_active:
+            # The tpgs, luns and clients are all defined, but the active tpg
+            # doesn't have an IP bound to it yet (due to the enable_portals=False
+            # setting above)
+            logger.info("{} - Adding the IP to the enabled tpg, allowing iSCSI "
+                        "logins".format(gateway.iqn))
+            gateway.enable_active_tpg(config)
+            if gateway.error:
+                halt("{} - Error enabling the IP with the active TPG: {}".format(
+                    gateway.iqn, gateway.error_msg))
 
     config_loading = False
 

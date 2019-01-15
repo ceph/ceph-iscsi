@@ -49,12 +49,16 @@ class HostGroups(UIGroup):
 
     def load(self):
 
+        target_iqn = self.parent.name
+
         for child in self.children:
             self.delete(child)
 
-        groups = self.get_ui_root().config['groups']
-        for group_name in groups:
-            HostGroup(self, group_name, groups[group_name])
+        if target_iqn in self.get_ui_root().config['targets']:
+            target_config = self.get_ui_root().config['targets'][target_iqn]
+            groups = target_config['groups']
+            for group_name in groups:
+                HostGroup(self, group_name, groups[group_name])
 
     @property
     def groups(self):
@@ -83,12 +87,15 @@ class HostGroups(UIGroup):
                               "characters".format(HostGroups.group_name_length))
             return
 
+        target_iqn = self.parent.name
+
         # this is a new group
         group_api = ('{}://{}:{}/api/hostgroup/'
-                     '{}'.format(self.http_mode,
-                                 "localhost",
-                                 settings.config.api_port,
-                                 group_name))
+                     '{}/{}'.format(self.http_mode,
+                                    "localhost",
+                                    settings.config.api_port,
+                                    target_iqn,
+                                    group_name))
 
         api = APIRequest(group_api)
         api.put()
@@ -122,12 +129,15 @@ class HostGroups(UIGroup):
             self.logger.error("Group '{}' does not exist".format(group_name))
             return
 
+        target_iqn = self.parent.name
+
         # OK, so the group exists...
         group_api = ('{}://{}:{}/api/hostgroup/'
-                     '{}'.format(self.http_mode,
-                                 "localhost",
-                                 settings.config.api_port,
-                                 group_name))
+                     '{}/{}'.format(self.http_mode,
+                                    "localhost",
+                                    settings.config.api_port,
+                                    target_iqn,
+                                    group_name))
 
         api = APIRequest(group_api)
         api.delete()
@@ -144,7 +154,9 @@ class HostGroups(UIGroup):
 
     def delete(self, child):
 
-        client_group = child._get_client_group()
+        target_iqn = self.parent.name
+
+        client_group = child._get_client_group(target_iqn)
         client_map = client_group.client_map
         group_clients = [client_iqn for client_iqn in client_map
                          if client_map[client_iqn].group_name == child.name]
@@ -204,8 +216,10 @@ class HostGroup(UIGroup):
                               "host add|remove <client_iqn>")
             return
 
+        target_iqn = self.parent.parent.name
+
         # basic checks
-        client_group = self._get_client_group()
+        client_group = self._get_client_group(target_iqn)
         client_map = client_group.client_map
         if client_iqn not in client_map:
             self.logger.error("'{}' is not managed by a "
@@ -225,10 +239,11 @@ class HostGroup(UIGroup):
 
         # Basic checks passed, hand-off to the API now
         group_api = ('{}://{}:{}/api/hostgroup/'
-                     '{}'.format(self.http_mode,
-                                 "localhost",
-                                 settings.config.api_port,
-                                 self.name))
+                     '{}/{}'.format(self.http_mode,
+                                    "localhost",
+                                    settings.config.api_port,
+                                    target_iqn,
+                                    self.name))
 
         api_vars = {"action": action,
                     "members": client_iqn}
@@ -247,7 +262,7 @@ class HostGroup(UIGroup):
         self.logger.debug("Updating the UI")
         if action == 'add':
             HostGroupMember(self, 'host', client_iqn)
-            self.update_clients_UI([client_iqn])
+            self.update_clients_UI([client_iqn], target_iqn)
 
         elif action == 'remove':
             child = [child for child in self.children
@@ -257,9 +272,10 @@ class HostGroup(UIGroup):
         self.logger.info('ok')
 
     def delete(self, child):
+        target_iqn = self.parent.parent.name
 
         if child.member_type == 'host':
-            client_group = self._get_client_group()
+            client_group = self._get_client_group(target_iqn)
             client = client_group.client_map[child.name]
             client.group_name = ''
 
@@ -279,6 +295,8 @@ class HostGroup(UIGroup):
             self.logger.error("Invalid request - must be "
                               "disk add|remove <disk_image>")
             return
+
+        target_iqn = self.parent.parent.name
 
         # simple sanity checks
         # 1. does the disk exist in the configuration
@@ -301,12 +319,25 @@ class HostGroup(UIGroup):
                                   "group".format(disk_name))
                 return
 
+        mapped_disks = [mapped_disk.name
+                        for mapped_disk in self.parent.parent.target_disks.children]
+        if disk_name not in mapped_disks:
+            rc = self.parent.parent.target_disks.add_disk(disk_name, None)
+            if rc == 0:
+                self.logger.debug("disk auto-map successful")
+            else:
+                self.logger.error("disk auto-map failed({}), try "
+                                  "using the /iscsi-target/<iqn>/disks add "
+                                  "command".format(rc))
+                return
+
         # Basic checks passed, hand-off to the API
         group_api = ('{}://{}:{}/api/hostgroup/'
-                     '{}'.format(self.http_mode,
-                                 "localhost",
-                                 settings.config.api_port,
-                                 self.name))
+                     '{}/{}'.format(self.http_mode,
+                                    "localhost",
+                                    settings.config.api_port,
+                                    target_iqn,
+                                    self.name))
 
         api_vars = {"action": action,
                     "disks": disk_name}
@@ -329,7 +360,7 @@ class HostGroup(UIGroup):
                      if child.name == disk_name][0]
             self.delete(child)
 
-        self.update_clients_UI(self.members)
+        self.update_clients_UI(self.members, target_iqn)
 
         self.logger.info('ok')
 
@@ -343,20 +374,19 @@ class HostGroup(UIGroup):
         return [child.name for child in self.children
                 if child.member_type == 'disk']
 
-    def _get_client_group(self):
+    def _get_client_group(self, target_iqn):
         ui_root = self.get_ui_root()
-        # we only support one target, so take the first child
-        iscsi_target = list(ui_root.target.children)[0]
-
+        iscsi_target = [t for t in list(ui_root.target.children)
+                        if t.name == target_iqn][0]
         return iscsi_target.client_group
 
-    def update_clients_UI(self, client_list):
+    def update_clients_UI(self, client_list, target_iqn):
         self.logger.debug("rereading the config object")
         root = self.get_ui_root()
         config = root._get_config()
-        clients = config['clients']
+        clients = config['targets'][target_iqn]['clients']
 
-        client_group = self._get_client_group()     # Clients Object
+        client_group = self._get_client_group(target_iqn)     # Clients Object
         clients_to_update = [client for client in client_group.children
                              if client.name in client_list]
 
