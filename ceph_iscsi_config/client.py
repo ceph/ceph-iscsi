@@ -231,7 +231,7 @@ class GWClient(GWObject):
             client_metadata = config.config['clients'][client_iqn]
             client_chap = CHAP(client_metadata['auth']['chap'])
 
-            image_list = client_metadata['luns'].keys()
+            image_list = list(client_metadata['luns'].keys())
 
             chap_str = client_chap.chap_str
             if client_chap.error:
