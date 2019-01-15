@@ -369,6 +369,26 @@ class LUN(GWObject):
 
             self.config.commit()
 
+    def map_lun(self, target_iqn, owner, disk):
+        this_host = gethostname().split('.')[0]
+
+        target_config = self.config.config['targets'][target_iqn]
+        disk_metadata = self.config.config['disks'][disk]
+        disk_metadata['owner'] = owner
+        self.config.update_item("disks", disk, disk_metadata)
+
+        target_config['disks'].append(disk)
+        self.config.update_item("targets", target_iqn, target_config)
+
+        gateway_dict = self.config.config['gateways'][owner]
+        gateway_dict['active_luns'] += 1
+        self.config.update_item('gateways', owner, gateway_dict)
+
+        LUN.define_luns(self.logger, self.config, None)
+
+        if this_host == self.allocating_host:
+            self.config.commit()
+
     def manage(self, desired_state):
 
         self.logger.debug("LUN.manage request for {}, desired state "
@@ -1039,12 +1059,13 @@ class LUN(GWObject):
                                                                    image_name,
                                                                    pool))
 
-        # Gateway Mapping : Map the LUN's registered to all tpg's within the
-        # LIO target
-        gateway.manage('map')
-        if gateway.error:
-            raise CephiSCSIError("Error mapping the LUNs to the tpg's within "
-                                 "the iscsi Target")
+        if gateway:
+            # Gateway Mapping : Map the LUN's registered to all tpg's within the
+            # LIO target
+            gateway.manage('map')
+            if gateway.error:
+                raise CephiSCSIError("Error mapping the LUNs to the tpg's within "
+                                     "the iscsi Target")
 
 
 def rados_pool(conf=None, pool='rbd'):

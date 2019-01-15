@@ -680,6 +680,11 @@ def target_disk(target_iqn=None):
         logger.warning("disk add request failed: {}".format(msg))
         return jsonify(message=msg), 400
 
+    try:
+        gateways = get_remote_gateways(target_config['portals'], logger)
+    except CephiSCSIError as err:
+        return jsonify(message="{}".format(err)), 400
+    local_gw = this_host()
     disk = request.form.get('disk')
 
     if request.method == 'PUT':
@@ -702,22 +707,14 @@ def target_disk(target_iqn=None):
 
         owner = LUN.get_owner(config.config['gateways'], target_config['portals'])
         logger.debug("{} owner will be {}".format(disk, owner))
-        disk_metadata = config.config['disks'][disk]
-        disk_metadata['owner'] = owner
-        config.update_item("disks", disk, disk_metadata)
 
-        target_config['disks'].append(disk)
-        config.update_item("targets", target_iqn, target_config)
-
-        gateway_dict = config.config['gateways'][owner]
-        gateway_dict['active_luns'] += 1
-        config.update_item('gateways', owner, gateway_dict)
-
-        # To keep the connection used by the ConfigWatcher
-        config.commit("retain")
-
-        api_vars = {'disk': disk}
-        gateways = target_config.get('ip_list', [])
+        api_vars = {
+            'disk': disk,
+            'owner': owner,
+            'allocating_host': local_gw
+        }
+        # process local gateway first
+        gateways.insert(0, local_gw)
         resp_text, resp_code = call_api(gateways, '_targetlun',
                                         '{}'.format(target_iqn),
                                         http_method='put',
@@ -741,18 +738,13 @@ def target_disk(target_iqn=None):
             if disk in group['disks']:
                 return jsonify(message="Disk {} belongs to group "
                                        "{}".format(disk, group_name)), 400
-        local_gw = this_host()
-        if local_gw not in target_config['portals']:
-            return jsonify(message="{} cannot be used to perform this operation "
-                                   "because it is not defined within target "
-                                   "gateways".format(local_gw)), 400
 
         api_vars = {
             'disk': disk,
             'purge_host': local_gw
         }
-        gateways = [key for key in config.config['gateways']
-                    if isinstance(config.config['gateways'][key], dict)]
+        # process other gateways first
+        gateways.append(local_gw)
         resp_text, resp_code = call_api(gateways, '_targetlun',
                                         '{}'.format(target_iqn),
                                         http_method='delete',
@@ -774,6 +766,7 @@ def _target_disk(target_iqn=None):
     """
 
     disk = request.form.get('disk')
+    pool, image = disk.split('.', 1)
 
     if request.method == 'PUT':
         target_config = config.config['targets'][target_iqn]
@@ -787,15 +780,26 @@ def _target_disk(target_iqn=None):
                          "{}".format(gateway.error_msg))
             return jsonify(message="LUN map failed"), 500
 
-        # Add the mapping for the lun to ensure the block device is
-        # present on all TPG's
+        owner = request.form.get('owner')
+        allocating_host = request.form.get('allocating_host')
 
-        logger.info("Syncing LUN configuration")
-        try:
-            LUN.define_luns(logger, config, gateway)
-        except CephiSCSIError as err:
-            return jsonify(message="Failed to sync LUNs on gateway. "
-                                   "Err {}.".format(err)), 500
+        lun = LUN(logger,
+                  pool,
+                  image,
+                  0,
+                  allocating_host)
+
+        if lun.error:
+            logger.error("Error initializing the LUN : "
+                         "{}".format(lun.error_msg))
+            return jsonify(message="Error establishing LUN instance"), 500
+
+        lun.map_lun(target_iqn, owner, disk)
+        if lun.error:
+            status_code = 400 if lun.error_msg else 500
+            logger.error("LUN add failed : {}".format(lun.error_msg))
+            return jsonify(message="Failed to add the LUN - "
+                                   "{}".format(lun.error_msg)), status_code
 
         logger.info("Syncing TPG to LUN mapping")
         gateway.manage('map')
@@ -808,7 +812,6 @@ def _target_disk(target_iqn=None):
 
         purge_host = request.form['purge_host']
         logger.debug("delete request for disk image '{}'".format(disk))
-        pool, image = disk.split('.', 1)
 
         lun = LUN(logger,
                   pool,
@@ -817,7 +820,6 @@ def _target_disk(target_iqn=None):
                   purge_host)
 
         if lun.error:
-            # problem defining the LUN instance
             logger.error("Error initializing the LUN : "
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
@@ -829,7 +831,7 @@ def _target_disk(target_iqn=None):
             return jsonify(message="Failed to remove the LUN - "
                                    "{}".format(lun.error_msg)), status_code
 
-        config.refresh()
+    config.refresh()
 
     return jsonify(message="LUN mapped"), 200
 
