@@ -247,6 +247,12 @@ def target(target_iqn=None):
         -X PUT http://192.168.122.69:5000/api/target/iqn.2003-01.com.redhat.iscsi-gw0
     """
 
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
+
     if request.method == 'PUT':
         mode = request.form.get('mode', None)
         if mode not in [None, 'reconfigure']:
@@ -482,6 +488,12 @@ def gateways(target_iqn=None):
         http://192.168.122.69:5000/api/gateways/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
+
     target_config = config.config['targets'][target_iqn]
     if request.method == 'GET':
         return jsonify(target_config['portals']), 200
@@ -510,6 +522,12 @@ def gateway(target_iqn=None, gateway_name=None):
     # running config to the new host. The downside is that this sync task
     # could take a while if there are 100's of disks/clients. Future work should
     # aim to make this synchronisation of the new gateway an async task
+
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
 
     ip_address = request.form.get('ip_address')
     nosync = request.form.get('nosync', 'false')
@@ -669,6 +687,12 @@ def target_disk(target_iqn=None):
     curl --insecure --user admin:admin -d disk=rbd.new2_1
         -X PUT https://192.168.122.69:5000/api/targetlun/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
+
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
 
     target_config = config.config['targets'][target_iqn]
 
@@ -1453,6 +1477,12 @@ def get_clients(target_iqn=None):
         https://192.168.122.69:5000/api/clients/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
+
     target_config = config.config['targets'][target_iqn]
     client_list = target_config['clients'].keys()
     response = {"clients": client_list}
@@ -1518,6 +1548,18 @@ def clientauth(target_iqn, client_iqn):
     curl --insecure --user admin:admin -d chap=dmin1234/admin12345678
         -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
     """
+
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
+
+    try:
+        client_iqn, iqn_type = normalize_wwn(['iqn'], client_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(client_iqn, err)
+        return jsonify(message=err_str), 500
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
     target_config = config.config['targets'][target_iqn]
@@ -1594,6 +1636,18 @@ def clientlun(target_iqn, client_iqn):
     curl --insecure --user admin:admin -d disk=rbd.new2_1
         -X PUT https://192.168.122.69:5000/api/clientlun/iqn.2017-08.org.ceph:iscsi-gw0
     """
+
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
+
+    try:
+        client_iqn, iqn_type = normalize_wwn(['iqn'], client_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(client_iqn, err)
+        return jsonify(message=err_str), 500
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
     target_config = config.config['targets'][target_iqn]
@@ -1701,6 +1755,18 @@ def client(target_iqn, client_iqn):
 
     method = {"PUT": 'create',
               "DELETE": 'delete'}
+
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
+
+    try:
+        client_iqn, iqn_type = normalize_wwn(['iqn'], client_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(client_iqn, err)
+        return jsonify(message=err_str), 500
 
     # http_mode = 'https' if settings.config.api_secure else 'http'
     target_config = config.config['targets'][target_iqn]
@@ -1827,6 +1893,12 @@ def hostgroups(target_iqn=None):
         http://192.168.122.69:5000/api/hostgroups/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
 
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
+
     target_config = config.config['targets'][target_iqn]
     if request.method == 'GET':
         return jsonify({"groups": target_config['groups'].keys()}), 200
@@ -1854,6 +1926,12 @@ def hostgroup(target_iqn, group_name):
     """
     http_mode = 'https' if settings.config.api_secure else 'http'
     valid_hostgroup_actions = ['add', 'remove']
+
+    try:
+        target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+    except RTSLibError as err:
+        err_str = "Invalid iqn {} - {}".format(target_iqn, err)
+        return jsonify(message=err_str), 500
 
     target_config = config.config['targets'][target_iqn]
     try:
