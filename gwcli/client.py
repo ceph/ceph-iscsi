@@ -2,13 +2,14 @@
 
 from gwcli.node import UIGroup, UINode
 
-from gwcli.utils import response_message, valid_iqn, APIRequest
+from gwcli.utils import response_message, APIRequest
 
 from ceph_iscsi_config.client import CHAP
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import human_size
 
 import rtslib_fb.root as root
+from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 # this ignores the warning issued when verify=False is used
 from requests.packages import urllib3
@@ -64,7 +65,9 @@ class Clients(UIGroup):
         cli_seed = {"luns": {}, "auth": {}}
 
         # is the IQN usable?
-        if not valid_iqn(client_iqn):
+        try:
+            client_iqn, iqn_type = normalize_wwn(['iqn'], client_iqn)
+        except RTSLibError:
             self.logger.error("IQN name '{}' is not valid for "
                               "iSCSI".format(client_iqn))
             return
@@ -112,7 +115,9 @@ class Clients(UIGroup):
         self.logger.debug("Client DELETE for {}".format(client_iqn))
 
         # is the IQN usable?
-        if not valid_iqn(client_iqn):
+        try:
+            client_iqn, iqn_type = normalize_wwn(['iqn'], client_iqn)
+        except RTSLibError:
             self.logger.error("IQN name '{}' is not valid for "
                               "iSCSI".format(client_iqn))
             return

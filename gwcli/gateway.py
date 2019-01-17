@@ -8,14 +8,15 @@ from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks, TargetDisks
 from gwcli.client import Clients
 from gwcli.utils import (this_host, response_message, GatewayAPIError,
-                         GatewayError, APIRequest, console_message, valid_iqn,
-                         get_config)
+                         GatewayError, APIRequest, console_message, get_config)
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
 from ceph_iscsi_config.gateway import GWTarget
 
 from gwcli.ceph import CephGroup
+
+from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 # FIXME - code is using a self signed cert common across all gateways
 # the embedded urllib3 package will issue warnings when ssl cert validation is
@@ -176,7 +177,9 @@ class ISCSITargets(UIGroup):
         self.logger.debug("CMD: /iscsi create {}".format(target_iqn))
 
         # is the IQN usable?
-        if not valid_iqn(target_iqn):
+        try:
+            target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+        except RTSLibError:
             self.logger.error("IQN name '{}' is not valid for "
                               "iSCSI".format(target_iqn))
             return
@@ -212,6 +215,13 @@ class ISCSITargets(UIGroup):
         """
 
         self.logger.debug("CMD: /iscsi delete {}".format(target_iqn))
+
+        try:
+            target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
+        except RTSLibError:
+            self.logger.error("IQN name '{}' is not valid for "
+                              "iSCSI".format(target_iqn))
+            return
 
         gw_api = ('{}://localhost:{}/api/'
                   'target/{}'.format(self.http_mode,
