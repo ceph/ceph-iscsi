@@ -517,6 +517,7 @@ def gateway(target_iqn=None, gateway_name=None):
 
     # first confirm that the request is actually valid, if not return a 400
     # error with the error description
+    config.refresh()
     current_config = config.config
 
     if skipchecks.lower() == 'true':
