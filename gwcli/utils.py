@@ -61,21 +61,6 @@ def get_config():
     return {}
 
 
-def valid_iqn(iqn):
-    """
-    confirm whether the given iqn is in an acceptable format
-    :param iqn: (str) iqn name to check
-    :return: (bool) True if iqn is valid for iSCSI
-    """
-
-    try:
-        normalize_wwn(['iqn'], iqn)
-    except RTSLibError:
-        return False
-
-    return True
-
-
 def valid_gateway(target_iqn, gw_name, gw_ip, config):
     """
     validate the request for a new gateway
@@ -250,7 +235,9 @@ def valid_client(**kwargs):
 
     if mode == 'create':
         # iqn must be valid
-        if not valid_iqn(client_iqn):
+        try:
+            normalize_wwn(['iqn'], client_iqn)
+        except RTSLibError:
             return ("Invalid IQN name for iSCSI")
 
         # iqn must not already exist
