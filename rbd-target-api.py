@@ -2110,6 +2110,7 @@ def _hostgroup(target_iqn, group_name):
         grp = Group(logger, target_iqn, group_name)
         grp.purge()
         if not grp.error:
+            config.refresh()
             return jsonify(message="Group '{}' removed".format(group_name)), 200
         else:
             return jsonify(message=grp.error_msg), 400
