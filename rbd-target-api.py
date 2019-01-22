@@ -474,6 +474,7 @@ def get_config():
     """
 
     if request.method == 'GET':
+        config.refresh()
         return jsonify(config.config), 200
 
 
