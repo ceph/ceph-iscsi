@@ -599,6 +599,7 @@ def _gateway(target_iqn=None, gateway_name=None):
     :param gateway_name: (str) gateway name, normally the DNS name
     **RESTRICTED**
     """
+    config.refresh()
     target_config = config.config['targets'][target_iqn]
 
     if request.method == 'GET':
