@@ -412,14 +412,21 @@ class GWTarget(GWObject):
         target_config = config.config["targets"][self.iqn]
         target_stg_object = [stg_object for stg_object in lio_root.storage_objects
                              if stg_object.name in target_config['disks']]
+        
+        # a dict, key with tpg and storage object name
+        tpg_stg_object_dict = {}
+        for tpg in self.tpg_list:
 
+             for l in tpg.luns:
+                tpg_stg_object_dict[str(tpg.tag) + '-' + l.storage_object.name] = l.storage_object.name
+        
         # process each storage object added to the gateway, and map to the tpg
         for stg_object in target_stg_object:
 
             for tpg in self.tpg_list:
                 self.logger.debug("processing tpg{}".format(tpg.tag))
 
-                if not self.lun_mapped(tpg, stg_object):
+                if not tpg_stg_object_dict.has_key(str(tpg.tag) + "-" + stg_object.name):
                     self.logger.debug("{} needed mapping to "
                                       "tpg{}".format(stg_object.name,
                                                      tpg.tag))
@@ -443,22 +450,6 @@ class GWTarget(GWObject):
                         self.error = True
                         self.error_msg = err
                         return
-
-    def lun_mapped(self, tpg, storage_object):
-        """
-        Check to see if a given storage object (i.e. block device) is already
-        mapped to the gateway's TPG
-        :param storage_object: storage object to look for
-        :return: boolean - is the storage object mapped or not
-        """
-
-        mapped_state = False
-        for l in tpg.luns:
-            if l.storage_object.name == storage_object.name:
-                mapped_state = True
-                break
-
-        return mapped_state
 
     def delete(self):
         self.target.delete()
