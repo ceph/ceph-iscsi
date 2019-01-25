@@ -2301,7 +2301,7 @@ def pre_reqs_errors():
         # check rpm versions are OK
         for rpm in required_rpms:
             if not valid_rpm(rpm):
-                logger.error("RPM check for {} failed")
+                logger.error("RPM check for {} failed".format(rpm['name']))
                 errors_found.append("{} rpm must be installed at >= "
                                     "{}-{}".format(rpm['name'],
                                                    rpm['version'],
