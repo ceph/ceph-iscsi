@@ -71,6 +71,8 @@ class RBDDev(object):
         """
 
         rbd_deleted = False
+        extra_error_info = ''
+
         with rados.Rados(conffile=settings.config.cephconf) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 rbd_inst = rbd.RBD()
@@ -87,6 +89,9 @@ class RBDDev(object):
                         # catch and ignore the busy state - rbd probably still mapped on
                         # another gateway, so we keep trying
                         pass
+                    except rbd.ImageHasSnapshots:
+                        extra_error_info = " - Image has snapshots"
+                        break
                     else:
                         rbd_deleted = True
                         break
@@ -98,6 +103,10 @@ class RBDDev(object):
                     return
                 else:
                     self.error = True
+                    self.error_msg = ("Unable to delete the underlying rbd "
+                                      "image {}".format(self.image))
+                    if extra_error_info:
+                        self.error_msg += extra_error_info
 
     def rbd_size(self):
         """
@@ -302,8 +311,7 @@ class LUN(GWObject):
                 rbd_image.delete()
                 if rbd_image.error:
                     self.error = True
-                    self.error_msg = ("Unable to delete the underlying rbd "
-                                      "image {}".format(self.config_key))
+                    self.error_msg = rbd_image.error_msg
                     return
 
             # remove the definition from the config object

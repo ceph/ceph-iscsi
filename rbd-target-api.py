@@ -1171,8 +1171,9 @@ def _disk(image_id):
             else:
                 status_code = 500
 
-            logger.error("LUN remove failed : {}".format(lun.error_msg))
-            return jsonify(message="Failed to remove the LUN"), status_code
+            error_msg = "Failed to remove the LUN - {}".format(lun.error_msg)
+            logger.error(error_msg)
+            return jsonify(message=error_msg), status_code
 
         config.refresh()
 
