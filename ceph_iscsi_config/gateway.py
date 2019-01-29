@@ -412,21 +412,22 @@ class GWTarget(GWObject):
         target_config = config.config["targets"][self.iqn]
         target_stg_object = [stg_object for stg_object in lio_root.storage_objects
                              if stg_object.name in target_config['disks']]
-        
+
         # a dict, key with tpg and storage object name
         tpg_stg_object_dict = {}
         for tpg in self.tpg_list:
 
-             for l in tpg.luns:
-                tpg_stg_object_dict[str(tpg.tag) + '-' + l.storage_object.name] = l.storage_object.name
-        
+            for l in tpg.luns:
+                tpg_stg_object_dict[str(tpg.tag) + "-"
+                 + l.storage_object.name] = l.storage_object.name
+
         # process each storage object added to the gateway, and map to the tpg
         for stg_object in target_stg_object:
 
             for tpg in self.tpg_list:
                 self.logger.debug("processing tpg{}".format(tpg.tag))
 
-                if not tpg_stg_object_dict.has_key(str(tpg.tag) + "-" + stg_object.name):
+                if str(tpg.tag) + "-" + stg_object.name not in tpg_stg_object_dict:
                     self.logger.debug("{} needed mapping to "
                                       "tpg{}".format(stg_object.name,
                                                      tpg.tag))
