@@ -323,6 +323,7 @@ class GWTarget(GWObject):
             self.target = [tgt for tgt in lio_root.targets
                            if tgt.wwn == self.iqn][0]
 
+            self.tpg_list = []
             # there could/should be multiple tpg's for the target
             for tpg in self.target.tpgs:
                 self.tpg_list.append(tpg)
@@ -418,8 +419,8 @@ class GWTarget(GWObject):
         for tpg in self.tpg_list:
 
             for l in tpg.luns:
-                tpg_stg_object_dict[str(tpg.tag) + "-"
-                 + l.storage_object.name] = l.storage_object.name
+                key = str(tpg.tag) + "-" + l.storage_object.name
+                tpg_stg_object_dict[key] = l.storage_object.name
 
         # process each storage object added to the gateway, and map to the tpg
         for stg_object in target_stg_object:
