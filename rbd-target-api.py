@@ -726,7 +726,8 @@ def target_disk(target_iqn=None):
 
         pool, image_name = disk.split('.')
         try:
-            rbd_image = RBDDev(image_name, 0, pool)
+            backstore = config.config['disks'][disk]
+            rbd_image = RBDDev(image_name, 0, backstore, pool)
             size = rbd_image.current_size
             logger.debug("{} size is {}".format(disk, size))
         except rbd.ImageNotFound:
@@ -794,6 +795,7 @@ def _target_disk(target_iqn=None):
 
     disk = request.form.get('disk')
     pool, image = disk.split('.', 1)
+    backstore = config.config['disks'][disk]['backstore']
 
     if request.method == 'PUT':
         target_config = config.config['targets'][target_iqn]
@@ -814,7 +816,8 @@ def _target_disk(target_iqn=None):
                   pool,
                   image,
                   0,
-                  allocating_host)
+                  allocating_host,
+                  backstore)
 
         if lun.error:
             logger.error("Error initializing the LUN : "
@@ -844,7 +847,8 @@ def _target_disk(target_iqn=None):
                   pool,
                   image,
                   0,
-                  purge_host)
+                  purge_host,
+                  backstore)
 
         if lun.error:
             logger.error("Error initializing the LUN : "
@@ -905,6 +909,7 @@ def disk(image_id):
     :param controls: (JSON dict) valid control overrides
     :param preserve_image: (bool) do NOT delete RBD image
     :param create_image: (bool) create RBD image if not exists
+    :param backstore: (str) lio backstore
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
@@ -929,6 +934,11 @@ def disk(image_id):
 
     # Initial disk creation is done only on local host and this host
     mode = request.form.get('mode')
+    if mode == 'create':
+        backstore = request.form.get('backstore', LUN.DEFAULT_BACKSTORE)
+    else:
+        backstore = config.config['disks'][image_id]['backstore']
+
     gateways = []
     if mode != 'create':
         try:
@@ -949,7 +959,7 @@ def disk(image_id):
         if 'controls' in request.form:
             try:
                 controls = _parse_controls(request.form['controls'],
-                                           LUN.SETTINGS)
+                                           LUN.SETTINGS[backstore])
             except ValueError as err:
                 logger.error("Unexpected or invalid {} controls".format(mode))
                 return jsonify(message="Unexpected or invalid controls - "
@@ -960,14 +970,14 @@ def disk(image_id):
 
         disk_usable = LUN.valid_disk(config, logger, pool=pool,
                                      image=image_name, size=size, mode=mode,
-                                     count=count, controls=controls)
+                                     count=count, controls=controls, backstore=backstore)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
         create_image = request.form.get('create_image') == 'true'
         if not create_image or not size:
             try:
-                rbd_image = RBDDev(image_name, 0, pool)
+                rbd_image = RBDDev(image_name, 0, backstore, pool)
                 size = rbd_image.current_size
             except rbd.ImageNotFound:
                 if not create_image:
@@ -977,7 +987,7 @@ def disk(image_id):
                                            "image"), 400
 
         if mode == 'reconfigure':
-            resp_text, resp_code = lun_reconfigure(image_id, controls)
+            resp_text, resp_code = lun_reconfigure(image_id, controls, backstore)
             if resp_code == 200:
                 return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
             else:
@@ -993,7 +1003,7 @@ def disk(image_id):
                                                                      sfx)
 
             api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
-                        'mode': mode}
+                        'mode': mode, 'backstore': backstore}
             if 'controls' in request.form:
                 api_vars['controls'] = request.form['controls']
 
@@ -1013,14 +1023,15 @@ def disk(image_id):
         # this is a DELETE request
         pool_name, image_name = image_id.split('.')
         disk_usable = LUN.valid_disk(config, logger, mode='delete',
-                                     pool=pool_name, image=image_name)
+                                     pool=pool_name, image=image_name, backstore=backstore)
 
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
         api_vars = {
             'purge_host': local_gw,
-            'preserve_image': request.form['preserve_image']
+            'preserve_image': request.form['preserve_image'],
+            'backstore': backstore
         }
 
         # process other gateways first
@@ -1062,12 +1073,15 @@ def _disk(image_id):
 
         pool_name, image_name = image_id.split('.', 1)
         mode = request.form['mode']
-
+        if mode == 'create':
+            backstore = request.form['backstore']
+        else:
+            backstore = config.config['disks'][image_id]['backstore']
         controls = {}
         if 'controls' in request.form:
             try:
                 controls = _parse_controls(request.form['controls'],
-                                           LUN.SETTINGS)
+                                           LUN.SETTINGS[backstore])
             except ValueError as err:
                 logger.error("Unexpected or invalid {} controls".format(mode))
                 return jsonify(message="Unexpected or invalid controls - "
@@ -1085,7 +1099,8 @@ def _disk(image_id):
                       str(request.form['pool']),
                       image_name,
                       str(request.form['size']),
-                      str(request.form['owner']))
+                      str(request.form['owner']),
+                      backstore)
             if lun.error:
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
@@ -1110,9 +1125,9 @@ def _disk(image_id):
             if not disk:
                 return jsonify(message="rbd image {} not "
                                        "found".format(image_id)), 404
-
+            backstore = disk['backstore']
             # calculate required values for LUN object
-            rbd_image = RBDDev(image_name, 0, pool_name)
+            rbd_image = RBDDev(image_name, 0, backstore, pool_name)
             size = rbd_image.current_size
             if not size:
                 logger.error("LUN size unknown - {}".format(image_id))
@@ -1123,7 +1138,7 @@ def _disk(image_id):
                 logger.error("LUN owner not defined - {}".format(msg))
                 return jsonify(message="LUN {} failure - {}".format(mode, msg)), 400
 
-            lun = LUN(logger, pool_name, image_name, size, disk['owner'])
+            lun = LUN(logger, pool_name, image_name, size, disk['owner'], backstore)
             if mode == 'deactivate':
                 try:
                     lun.deactivate()
@@ -1150,12 +1165,14 @@ def _disk(image_id):
         preserve_image = request.form['preserve_image'] == 'true'
         logger.debug("delete request for disk image '{}'".format(image_id))
         pool, image = image_id.split('.', 1)
+        backstore = config.config['disks'][image_id]['backstore']
 
         lun = LUN(logger,
                   pool,
                   image,
                   0,
-                  purge_host)
+                  purge_host,
+                  backstore)
 
         if lun.error:
             # problem defining the LUN instance
@@ -1180,7 +1197,7 @@ def _disk(image_id):
         return jsonify(message="LUN removed"), 200
 
 
-def lun_reconfigure(image_id, controls):
+def lun_reconfigure(image_id, controls, backstore):
     logger.debug("lun reconfigure request")
 
     config.refresh()
@@ -1207,10 +1224,10 @@ def lun_reconfigure(image_id, controls):
 
     pool_name, image_name = image_id.split('.', 1)
 
-    rbd_image = RBDDev(image_name, 0, pool_name)
+    rbd_image = RBDDev(image_name, 0, backstore, pool_name)
     size = rbd_image.current_size
 
-    lun = LUN(logger, pool_name, image_name, size, disk['owner'])
+    lun = LUN(logger, pool_name, image_name, size, disk['owner'], disk['backstore'])
 
     for k, v in controls.items():
         setattr(lun, k, v)
@@ -2051,13 +2068,17 @@ def get_settings():
         target_default_controls[k] = default_val
 
     disk_default_controls = {}
-    for k in LUN.SETTINGS:
-        default_val = getattr(settings.config, k, None)
-        disk_default_controls[k] = default_val
+    for backstore, ks in LUN.SETTINGS.items():
+        disk_default_controls[backstore] = {}
+        for k in ks:
+            default_val = getattr(settings.config, k, None)
+            disk_default_controls[backstore][k] = default_val
 
     return jsonify({
         'target_default_controls': target_default_controls,
         'disk_default_controls': disk_default_controls,
+        'backstores': LUN.BACKSTORES,
+        'default_backstore': LUN.DEFAULT_BACKSTORE,
         'config': {
             'minimum_gateways': settings.config.minimum_gateways
         }
