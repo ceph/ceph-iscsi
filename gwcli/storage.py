@@ -945,7 +945,7 @@ class TargetDisks(UIGroup):
         for disk in disks:
             TargetDisk(self, disk)
 
-    def ui_command_add(self, disk=None):
+    def ui_command_add(self, disk):
         self.add_disk(disk)
 
     def add_disk(self, disk, success_msg='ok'):
@@ -975,7 +975,7 @@ class TargetDisks(UIGroup):
             rc = 1
         return rc
 
-    def ui_command_delete(self, disk=None):
+    def ui_command_delete(self, disk):
         self.delete_disk(disk)
 
     def delete_disk(self, disk):
