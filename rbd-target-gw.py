@@ -322,7 +322,7 @@ def apply_config():
         try:
             LUN.define_luns(logger, config, gateway)
         except CephiSCSIError as err:
-                halt("{} - Could not define LUNs: {}".format(gateway.iqn, err))
+            halt("{} - Could not define LUNs: {}".format(gateway.iqn, err))
 
         logger.info("{} - Processing client configuration".format(gateway.iqn))
         try:

@@ -201,7 +201,7 @@ class RBDDev(object):
 
                 if rbd_image.features() & RBDDev.required_features() != \
                         RBDDev.required_features():
-                        valid_state = False
+                    valid_state = False
 
         return valid_state
 
