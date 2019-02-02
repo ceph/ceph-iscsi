@@ -1,6 +1,4 @@
-#!/usr/bin/python -u
-# NB the python environment is using unbuffered mode (-u), so any "print"
-# statements will appear in the syslog 'immediately'
+#!/usr/bin/python
 
 import signal
 import logging
