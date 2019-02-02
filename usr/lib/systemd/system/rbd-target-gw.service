@@ -8,6 +8,7 @@ Wants=network-online.target tcmu-runner.service
 [Service]
 LimitNOFILE=1048576
 LimitNPROC=1048576
+Environment=PYTHONUNBUFFERED=TRUE
 EnvironmentFile=-/etc/sysconfig/ceph
 Type=simple
 User=root
