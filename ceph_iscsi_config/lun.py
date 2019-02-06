@@ -272,7 +272,8 @@ class LUN(GWObject):
         ]
     }
 
-    def __init__(self, logger, pool, image, size, allocating_host, backstore):
+    def __init__(self, logger, pool, image, size, allocating_host,
+                 backstore, backstore_object_name):
         self.logger = logger
         self.image = image
         self.pool = pool
@@ -284,6 +285,7 @@ class LUN(GWObject):
         # only uses shortname so it needs to be converted to shortname format
         self.allocating_host = allocating_host.split('.')[0]
         self.backstore = backstore
+        self.backstore_object_name = backstore_object_name
 
         self.error = False
         self.error_msg = ''
@@ -672,7 +674,8 @@ class LUN(GWObject):
                                  "allocating_host": self.allocating_host,
                                  "pool_id": rbd_image.pool_id,
                                  "controls": self.controls,
-                                 "backstore": self.backstore}
+                                 "backstore": self.backstore,
+                                 "backstore_object_name": self.backstore_object_name}
 
                     self.config.update_item('disks',
                                             self.config_key,
@@ -804,7 +807,7 @@ class LUN(GWObject):
 
     def lio_stg_object(self):
         try:
-            return lookup_storage_object(self.config_key, self.backstore)
+            return lookup_storage_object(self.backstore_object_name, self.backstore)
         except RTSLibError as err:
             self.logger.debug("lio stg lookup failed {}".format(err))
             return None
@@ -859,7 +862,7 @@ class LUN(GWObject):
             if (settings.config.cephconf != '/etc/ceph/ceph.conf'):
                 cfgstring += ";conf={}".format(settings.config.cephconf)
 
-            new_lun = UserBackedStorageObject(name=self.config_key,
+            new_lun = UserBackedStorageObject(name=self.backstore_object_name,
                                               config=cfgstring,
                                               size=self.size_bytes,
                                               wwn=in_wwn, control=control_string)
@@ -892,7 +895,7 @@ class LUN(GWObject):
         # remove the device from all tpgs
         for t in lio_root.tpgs:
             for lun in t.luns:
-                if lun.storage_object.name == self.config_key:
+                if lun.storage_object.name == self.backstore_object_name:
                     try:
                         lun.delete()
                     except Exception as e:
@@ -1109,9 +1112,11 @@ class LUN(GWObject):
                                 with rbd.Image(ioctx, image_name) as rbd_image:
                                     RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
 
-                                    backstore = config.config['disks'][disk_key]['backstore']
-                                    lun = LUN(logger, pool, image_name,
-                                              rbd_image.size(), local_gw, backstore)
+                                    disk_config = config.config['disks'][disk_key]
+                                    backstore = disk_config['backstore']
+                                    backstore_object_name = disk_config['backstore_object_name']
+                                    lun = LUN(logger, pool, image_name, rbd_image.size(),
+                                              local_gw, backstore, backstore_object_name)
                                     if lun.error:
                                         raise CephiSCSIError("Error defining rbd "
                                                              "image {}".format(disk_key))

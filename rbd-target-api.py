@@ -796,7 +796,9 @@ def _target_disk(target_iqn=None):
 
     disk = request.form.get('disk')
     pool, image = disk.split('.', 1)
-    backstore = config.config['disks'][disk]['backstore']
+    disk_config = config.config['disks'][disk]
+    backstore = disk_config['backstore']
+    backstore_object_name = disk_config['backstore_object_name']
 
     if request.method == 'PUT':
         target_config = config.config['targets'][target_iqn]
@@ -820,7 +822,8 @@ def _target_disk(target_iqn=None):
                   image,
                   size,
                   allocating_host,
-                  backstore)
+                  backstore,
+                  backstore_object_name)
 
         if lun.error:
             logger.error("Error initializing the LUN : "
@@ -845,7 +848,8 @@ def _target_disk(target_iqn=None):
                   image,
                   0,
                   purge_host,
-                  backstore)
+                  backstore,
+                  backstore_object_name)
 
         if lun.error:
             logger.error("Error initializing the LUN : "
@@ -1072,8 +1076,11 @@ def _disk(image_id):
         mode = request.form['mode']
         if mode == 'create':
             backstore = request.form['backstore']
+            backstore_object_name = '{}.{}'.format(str(request.form['pool']), image_name)
         else:
-            backstore = config.config['disks'][image_id]['backstore']
+            disk_config = config.config['disks'][image_id]
+            backstore = disk_config['backstore']
+            backstore_object_name = disk_config['backstore_object_name']
         controls = {}
         if 'controls' in request.form:
             try:
@@ -1097,7 +1104,8 @@ def _disk(image_id):
                       image_name,
                       str(request.form['size']),
                       str(request.form['owner']),
-                      backstore)
+                      backstore,
+                      backstore_object_name)
             if lun.error:
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
@@ -1123,6 +1131,7 @@ def _disk(image_id):
                 return jsonify(message="rbd image {} not "
                                        "found".format(image_id)), 404
             backstore = disk['backstore']
+            backstore_object_name = disk['backstore_object_name']
             # calculate required values for LUN object
             rbd_image = RBDDev(image_name, 0, backstore, pool_name)
             size = rbd_image.current_size
@@ -1135,7 +1144,8 @@ def _disk(image_id):
                 logger.error("LUN owner not defined - {}".format(msg))
                 return jsonify(message="LUN {} failure - {}".format(mode, msg)), 400
 
-            lun = LUN(logger, pool_name, image_name, size, disk['owner'], backstore)
+            lun = LUN(logger, pool_name, image_name, size, disk['owner'],
+                      backstore, backstore_object_name)
             if mode == 'deactivate':
                 try:
                     lun.deactivate()
@@ -1162,14 +1172,17 @@ def _disk(image_id):
         preserve_image = request.form['preserve_image'] == 'true'
         logger.debug("delete request for disk image '{}'".format(image_id))
         pool, image = image_id.split('.', 1)
-        backstore = config.config['disks'][image_id]['backstore']
+        disk_config = config.config['disks'][image_id]
+        backstore = disk_config['backstore']
+        backstore_object_name = disk_config['backstore_object_name']
 
         lun = LUN(logger,
                   pool,
                   image,
                   0,
                   purge_host,
-                  backstore)
+                  backstore,
+                  backstore_object_name)
 
         if lun.error:
             # problem defining the LUN instance
@@ -1224,7 +1237,8 @@ def lun_reconfigure(image_id, controls, backstore):
     rbd_image = RBDDev(image_name, 0, backstore, pool_name)
     size = rbd_image.current_size
 
-    lun = LUN(logger, pool_name, image_name, size, disk['owner'], disk['backstore'])
+    lun = LUN(logger, pool_name, image_name, size, disk['owner'],
+              disk['backstore'], disk['backstore_object_name'])
 
     for k, v in controls.items():
         setattr(lun, k, v)

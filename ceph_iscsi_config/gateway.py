@@ -357,7 +357,9 @@ class GWTarget(GWObject):
 
         stg_object = lun.storage_object
 
-        owning_gw = config.config['disks'][stg_object.name]['owner']
+        disk_config = [disk for _, disk in config.config['disks'].items()
+                       if disk['backstore_object_name'] == stg_object.name][0]
+        owning_gw = disk_config['owner']
         tpg = lun.parent_tpg
 
         if not tpg_ip_address:
@@ -451,9 +453,10 @@ class GWTarget(GWObject):
 
         for disk in target_config['disks']:
             backstore = config.config["disks"][disk]["backstore"]
+            backstore_object_name = config.config["disks"][disk]["backstore_object_name"]
 
             try:
-                stg_object = lookup_storage_object(disk, backstore)
+                stg_object = lookup_storage_object(backstore_object_name, backstore)
             except (RTSLibError, CephiSCSIError) as err:
                 self.logger.error("Could not map {} to LUN: {}".format(disk, err))
                 self.error = True

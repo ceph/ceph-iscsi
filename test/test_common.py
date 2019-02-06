@@ -150,6 +150,7 @@ class ChapTest(unittest.TestCase):
                 "image": "disk_1",
                 "owner": "node1",
                 "backstore": "user:rbd",
+                "backstore_object_name": "rbd.disk_1",
                 "pool": "rbd",
                 "pool_id": 7,
                 "updated": "2018/12/07 09:19:03",
@@ -242,5 +243,5 @@ class ChapTest(unittest.TestCase):
             }
         },
         "updated": "2018/12/07 09:18:13",
-        "version": 6
+        "version": 7
     }

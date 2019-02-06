@@ -107,7 +107,7 @@ class GWClient(GWObject):
             self.error = True
             self.error_msg = err
 
-    def setup_luns(self):
+    def setup_luns(self, disks_config):
         """
         Add the requested LUNs to the node ACL definition. The image list
         defined for the client is compared to the current runtime settings,
@@ -130,11 +130,12 @@ class GWClient(GWObject):
         current_map = dict(self.client_luns)
 
         for image in self.requested_images:
-            if image in self.client_luns:
-                del current_map[image]
+            backstore_object_name = disks_config[image]['backstore_object_name']
+            if backstore_object_name in self.client_luns:
+                del current_map[backstore_object_name]
                 continue
             else:
-                rc = self._add_lun(image, self.tpg_luns[image])
+                rc = self._add_lun(image, self.tpg_luns[backstore_object_name])
                 if rc != 0:
                     self.error = True
                     self.error_msg = ("{} is missing from the tpg - unable "
@@ -148,12 +149,12 @@ class GWClient(GWObject):
         # 'current_map' should be empty, if not the remaining images need
         # to be removed from the client
         if current_map:
-            for image in current_map:
-                self._del_lun_map(image)
+            for backstore_object_name in current_map:
+                self._del_lun_map(backstore_object_name, disks_config)
                 if self.error:
                     self.logger.error("(Client.setup) unable to delete {} from"
                                       " {}".format(self.iqn,
-                                                   image))
+                                                   backstore_object_name))
                     return
 
     def update_acl_controls(self):
@@ -416,14 +417,14 @@ class GWClient(GWObject):
 
         return rc
 
-    def _del_lun_map(self, image):
+    def _del_lun_map(self, backstore_object_name, disks_config):
         """
         Delete a lun from the client's ACL
-        :param image: rbd image name to remove
+        :param backstore_object_name: rbd image name to remove
         :return:
         """
 
-        lun = self.client_luns[image]['mapped_lun']
+        lun = self.client_luns[backstore_object_name]['mapped_lun']
         try:
             lun.delete()
         except RTSLibError as err:
@@ -432,11 +433,13 @@ class GWClient(GWObject):
         else:
             self.change_count += 1
 
+            disk_id = [disk_id for disk_id, disk in disks_config.items()
+                       if disk['backstore_object_name'] == backstore_object_name][0]
             # the lun entry could have been deleted by another host, so before
             # we try and delete - make sure it's in our local copy of the
             # metadata!
-            if image in self.metadata['luns']:
-                del self.metadata['luns'][image]
+            if disk_id in self.metadata['luns']:
+                del self.metadata['luns'][disk_id]
 
     def delete(self):
         """
@@ -563,10 +566,11 @@ class GWClient(GWObject):
             else:
                 # either the client didn't exist (new or boot time), or the
                 # group_name is not defined so run setup_luns for this client
-                bad_images = self.validate_images()
+                disks_config = self.current_config['disks']
+                bad_images = self.validate_images(disks_config)
                 if not bad_images:
 
-                    self.setup_luns()
+                    self.setup_luns(disks_config)
                     if self.error:
                         return
                 else:
@@ -631,7 +635,7 @@ class GWClient(GWObject):
                 self.logger.info("(main) client {} removal request, but it's"
                                  "not in LIO...skipping".format(self.iqn))
 
-    def validate_images(self):
+    def validate_images(self, disks_config):
         """
         Confirm that the images listed are actually allocated to the tpg and
         can therefore be used by a client
@@ -641,9 +645,12 @@ class GWClient(GWObject):
         tpg_lun_list = self.get_images(self.tpg).keys()
         self.logger.debug("tpg images: {}".format(tpg_lun_list))
         self.logger.debug("request images: {}".format(self.requested_images))
-        for image in self.requested_images:
-            if image not in tpg_lun_list:
-                bad_images.append(image)
+        backstore_object_names = [disk['backstore_object_name'] for disk_id, disk in disks_config.items()
+                                  if disk_id in self.requested_images]
+        self.logger.debug("backstore object names: {}".format(backstore_object_names))
+        for backstore_object_name in backstore_object_names:
+            if backstore_object_name not in tpg_lun_list:
+                bad_images.append(backstore_object_name)
 
         return bad_images
 
