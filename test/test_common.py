@@ -189,6 +189,7 @@ class ChapTest(unittest.TestCase):
                         }
                     }
                 },
+                "acl_enabled": True,
                 "controls": {
                     "immediate_data": False,
                     "nopin_response_timeout": 17
@@ -241,5 +242,5 @@ class ChapTest(unittest.TestCase):
             }
         },
         "updated": "2018/12/07 09:18:13",
-        "version": 5
+        "version": 6
     }

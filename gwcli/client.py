@@ -2,7 +2,7 @@
 
 from gwcli.node import UIGroup, UINode
 
-from gwcli.utils import response_message, APIRequest
+from gwcli.utils import response_message, APIRequest, get_config
 
 from ceph_iscsi_config.client import CHAP
 import ceph_iscsi_config.settings as settings
@@ -44,6 +44,8 @@ class Clients(UIGroup):
             self.shell.prefs.save()
             self.shell.log.debug("Bookmarked %s as %s."
                                  % (self.path, 'hosts'))
+
+        self.config = get_config()
 
     def load(self, client_info):
         for client_iqn, client_settings in client_info.items():
@@ -87,6 +89,7 @@ class Clients(UIGroup):
 
         if api.response.status_code == 200:
             Client(self, client_iqn, cli_seed)
+            self.config = get_config()
             self.logger.debug("- Client '{}' added".format(client_iqn))
             self.logger.info('ok')
 
@@ -187,29 +190,50 @@ class Clients(UIGroup):
         del self.client_map[child.client_iqn]
         self.remove_child(child)
 
-    def ui_command_auth(self, chap=None):
+    def ui_command_auth(self, action=None):
         """
-        Clear CHAP settings for all clients on the target.
+        Disable/enable ACL authentication or clear CHAP settings for all clients on the target.
 
-        Specifying 'nochap' will remove chap authentication for all clients
-        across all gateways. Initiator name based authentication will then be
-        used.
+        - disable_acl ... Disable initiator name based ACL authentication.
+
+        - enable_acl .... Enable initiator name based ACL authentication.
+
+        - nochap ........ Remove chap authentication for all clients across all gateways.
+                          Initiator name based authentication will then be used.
 
         e.g.
-        auth nochap
+        auth disable_acl
 
         """
 
-        if not chap:
-            self.logger.error("Missing auth argument. Use 'auth nochap'")
+        if not action:
+            self.logger.error("Missing auth argument. Use 'auth nochap|disable_acl|enable_acl'")
             return
 
-        if chap != 'nochap':
-            self.logger.error("Invalid auth argument. Use 'auth nochap'")
+        if action not in ['nochap', 'enable_acl', 'disable_acl']:
+            self.logger.error("Invalid auth argument. Use 'auth nochap|disable_acl|enable_acl'")
             return
 
-        for client in self.children:
-            client.set_auth(chap, None)
+        if action == 'nochap':
+            for client in self.children:
+                client.set_auth(action, None)
+        else:
+            target_iqn = self.parent.name
+            api_vars = {'action': action}
+            targetauth_api = ('{}://localhost:{}/api/'
+                              'targetauth/{}'.format(self.http_mode,
+                                                     settings.config.api_port,
+                                                     target_iqn))
+            api = APIRequest(targetauth_api, data=api_vars)
+            api.put()
+            if api.response.status_code == 200:
+                self.config = get_config()
+                self.logger.info('ok')
+            else:
+                self.logger.error("Failed to {}: "
+                                  "{}".format(action, response_message(api.response,
+                                                                       self.logger)))
+                return
 
     def summary(self):
         chap_enabled = False
@@ -217,9 +241,8 @@ class Clients(UIGroup):
         chap_mutual_enabled = False
         chap_mutual_disabled = False
         status = False
-        # initiator name based ACL is the default with the current kernel
-        # settings.
-        auth_stat_str = "None"
+        target_iqn = self.parent.name
+        auth_stat_str = "ACL" if self.config['targets'][target_iqn]['acl_enabled'] else "None"
 
         for client in self.children:
             if client.auth['chap'] == 'None':

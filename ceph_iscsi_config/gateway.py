@@ -231,6 +231,14 @@ class GWTarget(GWObject):
             self.error = True
             self.error_msg = "Unable to delete target - {}".format(err)
 
+    def update_acl(self, config):
+        target_config = config.config["targets"][self.iqn]
+        for tpg in self.tpg_list:
+            if target_config['acl_enabled']:
+                tpg.set_attribute('generate_node_acls', 0)
+            else:
+                tpg.set_attribute('generate_node_acls', 1)
+
     def create_tpg(self, ip):
 
         try:
@@ -550,6 +558,8 @@ class GWTarget(GWObject):
 
                 self.map_luns(config)
 
+                self.update_acl(config)
+
             else:
                 self.error = True
                 self.error_msg = ("Attempted to map to a gateway '{}' that "
@@ -570,6 +580,7 @@ class GWTarget(GWObject):
                 seed_target = {
                     'disks': [],
                     'clients': {},
+                    'acl_enabled': True,
                     'portals': {},
                     'groups': {},
                     'controls': {}
