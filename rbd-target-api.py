@@ -568,12 +568,13 @@ def gateway(target_iqn=None, gateway_name=None):
     gateway_ip_list = target_config.get('ip_list', [])
 
     gateway_ip_list.append(ip_address)
-    first_gateway = (len(gateway_ip_list) == 1)
 
+    gateways = list(target_config['portals'].keys())
+    first_gateway = (len(gateways) == 0)
     if first_gateway:
         gateways = ['localhost']
     else:
-        gateways = gateway_ip_list
+        gateways.append(gateway_name)
 
     api_vars = {"gateway_ip_list": ",".join(gateway_ip_list),
                 "mode": "target",
