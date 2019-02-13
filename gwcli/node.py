@@ -14,6 +14,11 @@ class UICommon(ConfigNode):
         self.logger = logging.getLogger('gwcli')
 
     def ui_command_goto(self, shortcut='/'):
+        '''
+        cd to the bookmark at shortcut.
+
+        See 'help bookmarks' for more info on bookmarks.
+        '''
         if shortcut in self.shell.prefs['bookmarks']:
             return self.ui_command_cd(self.shell.prefs['bookmarks'][shortcut])
         else:
@@ -51,8 +56,7 @@ class UINode(UIGroup):
 
     def ui_command_info(self):
         """
-        Generic handler showing the attributes of the current object
-        :return: None
+        Show the attributes of the current object.
         """
 
         text = self.get_info()
