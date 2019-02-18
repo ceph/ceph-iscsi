@@ -497,8 +497,8 @@ class Client(UINode):
         in the configuration, the cli will attempt to create it for you.
 
         e.g.
-        disk add <pool_name.image_name> <size>
-        disk remove <pool_name.image_name>
+        disk add <pool_name/image_name> <size>
+        disk remove <pool_name/image_name>
 
         Adding a disk will result in the disk occupying the client's next
         available lun id. Once allocated removing a LUN will not change the
@@ -553,9 +553,9 @@ class Client(UINode):
 
                 # a disk given here would be of the form pool.image
                 try:
-                    pool, image = disk.split('.')
+                    pool, image = disk.split('/')
                 except ValueError:
-                    self.logger.error("Invalid format. Use pool_name.disk_name")
+                    self.logger.error("Invalid format. Use pool_name/disk_name")
                     return
 
                 rc = ui_disks.create_disk(pool=pool, image=image, size=size)

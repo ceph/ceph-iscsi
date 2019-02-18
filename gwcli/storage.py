@@ -71,7 +71,7 @@ class Disks(UIGroup):
             except Queue.Empty:
                 break
             else:
-                pool, image = rbd_name.split('.')
+                pool, image = rbd_name.split('/')
                 disk_meta[rbd_name] = {}
                 with cluster_ioctx.open_ioctx(pool) as ioctx:
                     try:
@@ -155,7 +155,7 @@ class Disks(UIGroup):
         The attach command supports two request formats;
 
         Long format  : attach pool=<name> image=<name>
-        Short format : attach pool.image
+        Short format : attach pool/image
 
         e.g.
         attach pool=rbd image=testimage
@@ -167,11 +167,11 @@ class Disks(UIGroup):
 
         """
 
-        if pool and '.' in pool:
+        if pool and '/' in pool:
             # shorthand version of the command
-            self.logger.debug("user provided pool.image format request")
+            self.logger.debug("user provided pool/image format request")
 
-            pool, image = pool.split('.')
+            pool, image = pool.split('/')
 
         else:
             # long format request
@@ -191,7 +191,7 @@ class Disks(UIGroup):
         The create command supports two request formats;
 
         Long format  : create pool=<name> image=<name> size=<size>
-        Short format : create pool.image <size>
+        Short format : create pool/image <size>
 
         e.g.
         create pool=rbd image=testimage size=100g max_data_area_mb=16
@@ -218,9 +218,9 @@ class Disks(UIGroup):
         """
         # NB the text above is shown on a help create request in the CLI
 
-        if pool and '.' in pool:
+        if pool and '/' in pool:
             # shorthand version of the command
-            self.logger.debug("user provided pool.image format request")
+            self.logger.debug("user provided pool/image format request")
 
             if image:
                 if size:
@@ -231,7 +231,7 @@ class Disks(UIGroup):
                                           "({} ?)".format(size))
                         return
                 size = image
-            pool, image = pool.split('.')
+            pool, image = pool.split('/')
 
         else:
             # long format request
@@ -290,7 +290,7 @@ class Disks(UIGroup):
 
         local_gw = this_host()
 
-        disk_key = "{}.{}".format(pool, image)
+        disk_key = "{}/{}".format(pool, image)
 
         if not self._valid_pool(pool):
             return
@@ -302,7 +302,6 @@ class Disks(UIGroup):
         disk_api = '{}://localhost:{}/api/disk/{}'.format(self.http_mode,
                                                           settings.config.api_port,
                                                           disk_key)
-
         api_vars = {'pool': pool, 'owner': local_gw,
                     'count': count, 'mode': 'create',
                     'create_image': 'true' if create_image else 'false',
@@ -325,9 +324,9 @@ class Disks(UIGroup):
             for n in range(1, (int(count) + 1), 1):
 
                 if int(count) > 1:
-                    disk_key = "{}.{}{}".format(pool, image, n)
+                    disk_key = "{}/{}{}".format(pool, image, n)
                 else:
-                    disk_key = "{}.{}".format(pool, image)
+                    disk_key = "{}/{}".format(pool, image)
 
                 disk_api = ('{}://localhost:{}/api/disk/'
                             '{}'.format(self.http_mode,
@@ -392,7 +391,7 @@ class Disks(UIGroup):
         existing rbd image. Attempting to decrease the size of an
         rbd will be ignored.
 
-        image_id: disk name (pool.image format)
+        image_id: disk name (pool/image format)
         size: new size including unit suffix e.g. 300G
         """
         self.logger.debug("CMD: /disks/ resize {} {}".format(image_id,
@@ -405,13 +404,38 @@ class Disks(UIGroup):
         disk = self.disk_lookup[image_id]
         disk.resize(size)
 
+    def ui_command_snapshot(self, image_id, action, name):
+        """
+        The snapshot command allows you create, delete, and rollback
+        snapshots on an existing rbd image.
+
+        e.g.
+        snapshot pool/image create snap1
+        snapshot pool/image delete snap1
+        snapshot pool/image rollback snap1
+
+        image_id: disk name (pool/image format)
+        action: create, delete, or rollback
+        name: snapshot name
+        """
+        self.logger.debug("CMD: /disks/ snapshot {} {} {}".format(image_id,
+                                                                  action,
+                                                                  name))
+        if image_id not in self.disk_lookup:
+            self.logger.error("the disk '{}' does not exist in this "
+                              "configuration".format(image_id))
+            return
+
+        disk = self.disk_lookup[image_id]
+        disk.snapshot(action, name)
+
     def ui_command_reconfigure(self, image_id, attribute, value):
         """
         The reconfigure command allows you to tune various lun attributes.
         An empty value for an attribute resets the lun attribute to its
         default.
 
-        image_id  : disk name (pool.image format)
+        image_id  : disk name (pool/image format)
         attribute : attribute to reconfigure. supported attributes:
         value     : value of the attribute to reconfigure
 
@@ -537,7 +561,7 @@ class Disks(UIGroup):
                             ui_root.ceph.local_ceph.pools.children]
         existing_rbds = self.disk_info.keys()
 
-        storage_key = "{}.{}".format(pool, image)
+        storage_key = "{}/{}".format(pool, image)
         if not size:
             self.logger.error("Size parameter is missing")
             state = False
@@ -573,11 +597,11 @@ class Disk(UINode):
         Create a disk entry under the Disks subtree
         :param parent: parent object (instance of the Disks class)
         :param image_id: key used in the config object for this rbd image
-               (pool.image_name) - str
+               (pool/image_name) - str
         :param image_config: meta data for this image
         :return:
         """
-        self.pool, self.rbd_image = image_id.split('.', 1)
+        self.pool, self.rbd_image = image_id.split('/', 1)
 
         UINode.__init__(self, image_id, parent)
 
@@ -844,10 +868,11 @@ class Disk(UINode):
 
         self.logger.debug("Issuing snapshot {} request".format(action))
         disk_api = ('{}://localhost:{}/api/'
-                    'disksnap/{}/{}'.format(self.http_mode,
-                                            settings.config.api_port,
-                                            self.image_id,
-                                            name))
+                    'disksnap/{}/{}/{}'.format(self.http_mode,
+                                               settings.config.api_port,
+                                               self.pool,
+                                               self.rbd_image,
+                                               name))
 
         if action == 'delete':
             api = APIRequest(disk_api)
@@ -881,53 +906,6 @@ class Disk(UINode):
         if pool:
             # update the pool commit numbers
             pool._calc_overcommit()
-
-    def ui_command_resize(self, size):
-        """
-        The resize command allows you to increase the size of an
-        existing rbd image. Attempting to decrease the size of an
-        rbd will be ignored.
-
-        size: new size including unit suffix e.g. 300G
-
-        """
-
-        self.resize(size)
-
-    def ui_command_reconfigure(self, attribute, value):
-        """
-        The reconfigure command allows you to tune various lun attributes.
-        An empty value for an attribute resets the lun attribute to its
-        default.
-
-        attribute : attribute to reconfigure. supported attributes:
-        value     : value of the attribute to reconfigure
-
-        See the create command help for a list of attributes that can be
-        reconfigured.
-
-        e.g.
-        set max_data_area_mb
-          - reconfigure attribute=max_data_area_mb value=128
-        reset max_data_area_mb to default
-          - reconfigure attribute=max_data_area_mb value=
-        """
-        self.reconfigure(attribute, value)
-
-    def ui_command_snapshot(self, action, name):
-        """
-        The snapshot command allows you create, delete, and rollback
-        snapshots on an existing rbd image.
-
-        e.g.
-        snapshot create snap1
-        snapshot delete snap1
-        snapshot rollback snap1
-
-        action: create, delete, or rollback
-        name: snapshot name
-        """
-        self.snapshot(action, name)
 
 
 class TargetDisks(UIGroup):

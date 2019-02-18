@@ -19,7 +19,7 @@ class Group(object):
         :param target_iqn: (str) target iqn
         :param group_name: (str) group name
         :param members: (list) iscsi IQN's of the clients
-        :param disks: (list) disk names of the format pool.image
+        :param disks: (list) disk names of the format pool/image
         """
 
         self.logger = logger

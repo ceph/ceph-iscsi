@@ -279,7 +279,7 @@ class LUN(GWObject):
         self.pool = pool
         self.pool_id = 0
         self.size_bytes = convert_2_bytes(size)
-        self.config_key = '{}.{}'.format(self.pool, self.image)
+        self.config_key = '{}/{}'.format(self.pool, self.image)
 
         # the allocating host could be fqdn or shortname - but the config
         # only uses shortname so it needs to be converted to shortname format
@@ -957,7 +957,7 @@ class LUN(GWObject):
 
         config = ceph_iscsi_config.config
 
-        disk_key = "{}.{}".format(kwargs['pool'], kwargs['image'])
+        disk_key = "{}/{}".format(kwargs['pool'], kwargs['image'])
 
         if mode in ['create', 'resize']:
 
@@ -971,11 +971,11 @@ class LUN(GWObject):
             if len(config['disks']) >= 256:
                 return "Disk limit of 256 reached."
 
-            disk_regex = re.compile(r"^[a-zA-Z0-9\-_]+$")
+            disk_regex = re.compile(r"^[a-zA-Z0-9\-_\.]+$")
             if not disk_regex.search(kwargs['pool']):
-                return "Invalid pool name (use alphanumeric, '_', or '-' characters)"
+                return "Invalid pool name (use alphanumeric, '_', '.', or '-' characters)"
             if not disk_regex.search(kwargs['image']):
-                return "Invalid image name (use alphanumeric, '_', or '-' characters)"
+                return "Invalid image name (use alphanumeric, '_', '.', or '-' characters)"
 
             if kwargs['count'].isdigit():
                 if not 1 <= int(kwargs['count']) <= 10:
@@ -1064,6 +1064,29 @@ class LUN(GWObject):
                       key=lambda x: (gateways[x]['active_luns']))[0]
 
     @staticmethod
+    def _backstore_object_name_exists(disks_config, backstore_object_name_exists):
+        return len([disk for _, disk in disks_config.items()
+                    if disk['backstore_object_name'] == backstore_object_name_exists]) > 0
+
+    @staticmethod
+    def get_backstore_object_name(pool, image, disks_config):
+        """
+        Determine the backstore storage object name based on the pool name,
+        image name, and existing storage object names to avoid conflicts
+        :param pool: pool name
+        :param image: image name
+        :param disks_config: disks configuration from `gateway.conf`
+        :return: the backstore storage object name to be used
+        """
+        base_name = '{}.{}'.format(pool, image)
+        candidate = base_name
+        counter = 0
+        while LUN._backstore_object_name_exists(disks_config, candidate):
+            counter += 1
+            candidate = '{}.{}'.format(base_name, counter)
+        return candidate
+
+    @staticmethod
     def define_luns(logger, config, gateway):
         """
         define the disks in the config to LIO
@@ -1096,7 +1119,7 @@ class LUN(GWObject):
                 with cluster.open_ioctx(pool) as ioctx:
 
                     pool_disks = [disk_key for disk_key in srtd_disks
-                                  if disk_key.startswith(pool + '.')]
+                                  if disk_key.startswith(pool + '/')]
                     for disk_key in pool_disks:
 
                         is_lun_mapped = False
@@ -1106,7 +1129,7 @@ class LUN(GWObject):
                                 is_lun_mapped = True
                                 break
                         if is_lun_mapped:
-                            pool, image_name = disk_key.split('.')
+                            pool, image_name = disk_key.split('/')
 
                             try:
                                 with rbd.Image(ioctx, image_name) as rbd_image:

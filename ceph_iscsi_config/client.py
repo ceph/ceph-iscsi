@@ -48,7 +48,7 @@ class GWClient(GWObject):
         self.lun_lookup = {}        # only used for hostgroup based definitions
         self.requested_images = []
 
-        # image_list is normally a list of strings (pool.image_name) but
+        # image_list is normally a list of strings (pool/image_name) but
         # group processing forces a specific lun id allocation to masked disks
         # in this scenario the image list is a tuple
         if image_list:
@@ -645,7 +645,8 @@ class GWClient(GWObject):
         tpg_lun_list = self.get_images(self.tpg).keys()
         self.logger.debug("tpg images: {}".format(tpg_lun_list))
         self.logger.debug("request images: {}".format(self.requested_images))
-        backstore_object_names = [disk['backstore_object_name'] for disk_id, disk in disks_config.items()
+        backstore_object_names = [disk['backstore_object_name'] for disk_id, disk
+                                  in disks_config.items()
                                   if disk_id in self.requested_images]
         self.logger.debug("backstore object names: {}".format(backstore_object_names))
         for backstore_object_name in backstore_object_names:

@@ -40,7 +40,7 @@ class ChapTest(unittest.TestCase):
             config.config['targets'][iqn]['created'] = '2018/12/07 09:19:01'
             config.config['targets'][iqn]['updated'] = '2018/12/07 09:19:02'
 
-            disk = 'rbd.disk_1'
+            disk = 'rbd/disk_1'
             self.assertGreater(config.config['disks'][disk]['updated'],
                                self.gateway_conf_latest['disks'][disk]['updated'])
             config.config['disks'][disk]['updated'] = '2018/12/07 09:19:03'
@@ -142,7 +142,7 @@ class ChapTest(unittest.TestCase):
     gateway_conf_latest = {
         "created": "2018/12/07 09:18:03",
         "disks": {
-            "rbd.disk_1": {
+            "rbd/disk_1": {
                 "controls": {
                     "qfull_timeout": 18
                 },
@@ -184,7 +184,7 @@ class ChapTest(unittest.TestCase):
                         },
                         "group_name": "mygroup",
                         "luns": {
-                            "rbd.disk_1": {
+                            "rbd/disk_1": {
                                 "lun_id": 0
                             }
                         }
@@ -197,12 +197,12 @@ class ChapTest(unittest.TestCase):
                 },
                 "created": "2018/12/07 09:19:01",
                 "disks": [
-                    "rbd.disk_1"
+                    "rbd/disk_1"
                 ],
                 "groups": {
                     "mygroup": {
                         "disks": {
-                            "rbd.disk_1": {
+                            "rbd/disk_1": {
                                 "lun_id": 0
                             }
                         },

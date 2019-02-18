@@ -226,9 +226,36 @@ class Config(object):
             self.update_item("version", None, 6)
 
         if self.config['version'] == 6:
+            new_disks = {}
+            old_disks = []
             for disk_id, disk in self.config['disks'].items():
                 disk['backstore_object_name'] = disk_id
-                self.update_item("disks", disk_id, disk)
+                new_disk_id = disk_id.replace('.', '/')
+                new_disks[new_disk_id] = disk
+                old_disks.append(disk_id)
+            for old_disk_id in old_disks:
+                self.del_item('disks', old_disk_id)
+            for new_disk_id, new_disk in new_disks.items():
+                self.add_item("disks", new_disk_id, new_disk)
+            for iqn, target in self.config['targets'].items():
+                new_disk_ids = []
+                for disk_id in target['disks']:
+                    new_disk_id = disk_id.replace('.', '/')
+                    new_disk_ids.append(new_disk_id)
+                target['disks'] = new_disk_ids
+                for _, client in target['clients'].items():
+                    new_luns = {}
+                    for lun_id, lun in client['luns'].items():
+                        new_lun_id = lun_id.replace('.', '/')
+                        new_luns[new_lun_id] = lun
+                    client['luns'] = new_luns
+                for _, group in target['groups'].items():
+                    new_group_disks = {}
+                    for group_disk_id, group_disk in group['disks'].items():
+                        new_group_disk_id = group_disk_id.replace('.', '/')
+                        new_group_disks[new_group_disk_id] = group_disk
+                        group['disks'] = new_group_disks
+                self.update_item("targets", iqn, target)
             self.update_item("version", None, 7)
 
         self.commit("retain")

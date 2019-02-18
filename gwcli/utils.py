@@ -310,7 +310,7 @@ def valid_client(**kwargs):
 
         if 'image_list' not in parms_passed:
             return ("Disk changes require 'image_list' to be set, containing"
-                    " a comma separated str of rbd images (pool.image)")
+                    " a comma separated str of rbd images (pool/image)")
 
         rqst_disks = set(kwargs['image_list'].split(','))
         mapped_disks = set(target_config['clients'][client_iqn]['luns'].keys())
