@@ -1962,7 +1962,7 @@ def hostgroup(target_iqn, group_name):
         if group_name in target_config['groups']:
             host_group = target_config['groups'].get(group_name)
             current_members = host_group.get('members')
-            current_disks = host_group.get('disks').keys()
+            current_disks = list(host_group.get('disks').keys())
         else:
             current_members = []
             current_disks = []
