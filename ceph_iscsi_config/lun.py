@@ -12,6 +12,7 @@ from rtslib_fb.utils import RTSLibError
 
 import ceph_iscsi_config.settings as settings
 
+from ceph_iscsi_config.backstore import USER_RBD
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      valid_size, get_pool_id, ip_addresses,
                                      get_pools, get_rbd_size, this_host,
@@ -26,13 +27,26 @@ __author__ = 'pcuzner@redhat.com'
 
 class RBDDev(object):
 
-    rbd_feature_list = ['RBD_FEATURE_LAYERING', 'RBD_FEATURE_EXCLUSIVE_LOCK',
-                        'RBD_FEATURE_OBJECT_MAP', 'RBD_FEATURE_FAST_DIFF',
-                        'RBD_FEATURE_DEEP_FLATTEN']
+    rbd_feature_list = {
+        USER_RBD: [
+            'RBD_FEATURE_LAYERING',
+            'RBD_FEATURE_EXCLUSIVE_LOCK',
+            'RBD_FEATURE_OBJECT_MAP',
+            'RBD_FEATURE_FAST_DIFF',
+            'RBD_FEATURE_DEEP_FLATTEN'
+        ]
+    }
 
-    def __init__(self, image, size, pool='rbd'):
+    required_features_list = {
+        USER_RBD: [
+            'RBD_FEATURE_EXCLUSIVE_LOCK'
+        ]
+    }
+
+    def __init__(self, image, size, backstore, pool='rbd'):
         self.image = image
         self.size_bytes = convert_2_bytes(size)
+        self.backstore = backstore
         self.pool = pool
         self.pool_id = get_pool_id(pool_name=self.pool)
         self.error = False
@@ -53,7 +67,7 @@ class RBDDev(object):
                     rbd_inst.create(ioctx,
                                     self.image,
                                     self.size_bytes,
-                                    features=RBDDev.supported_features(),
+                                    features=RBDDev.supported_features(self.backstore),
                                     old_format=False)
 
                 except (rbd.ImageExists, rbd.InvalidArgument) as err:
@@ -199,32 +213,37 @@ class RBDDev(object):
             ioctx = cluster.open_ioctx(self.pool)
             with rbd.Image(ioctx, self.image) as rbd_image:
 
-                if rbd_image.features() & RBDDev.required_features() != \
-                        RBDDev.required_features():
+                if rbd_image.features() & RBDDev.required_features(self.backstore) != \
+                        RBDDev.required_features(self.backstore):
                     valid_state = False
 
         return valid_state
 
     @classmethod
-    def supported_features(cls):
+    def supported_features(cls, backstore):
         """
         Return an int representing the supported features for LIO export
         :return: int
         """
         # build the required feature settings into an int
         feature_int = 0
-        for feature in RBDDev.rbd_feature_list:
+        for feature in RBDDev.rbd_feature_list[backstore]:
             feature_int += getattr(rbd, feature)
 
         return feature_int
 
     @classmethod
-    def required_features(cls):
+    def required_features(cls, backstore):
         """
         Return an int representing the required features for LIO export
         :return: int
         """
-        return rbd.RBD_FEATURE_EXCLUSIVE_LOCK
+        # build the required feature settings into an int
+        feature_int = 0
+        for feature in RBDDev.required_features_list[backstore]:
+            feature_int += getattr(rbd, feature)
+
+        return feature_int
 
     current_size = property(_get_size_bytes,
                             doc="return the current size of the rbd(bytes)")
@@ -235,13 +254,22 @@ class RBDDev(object):
 
 
 class LUN(GWObject):
-    SETTINGS = [
-        "max_data_area_mb",
-        "qfull_timeout",
-        "osd_op_timeout",
-        "hw_max_sectors"]
+    BACKSTORES = [
+        USER_RBD
+    ]
 
-    def __init__(self, logger, pool, image, size, allocating_host):
+    DEFAULT_BACKSTORE = USER_RBD
+
+    SETTINGS = {
+        USER_RBD: [
+            "max_data_area_mb",
+            "qfull_timeout",
+            "osd_op_timeout",
+            "hw_max_sectors"
+        ]
+    }
+
+    def __init__(self, logger, pool, image, size, allocating_host, backstore):
         self.logger = logger
         self.image = image
         self.pool = pool
@@ -252,6 +280,7 @@ class LUN(GWObject):
         # the allocating host could be fqdn or shortname - but the config
         # only uses shortname so it needs to be converted to shortname format
         self.allocating_host = allocating_host.split('.')[0]
+        self.backstore = backstore
 
         self.error = False
         self.error_msg = ''
@@ -259,7 +288,7 @@ class LUN(GWObject):
 
         try:
             super(LUN, self).__init__('disks', self.config_key, logger,
-                                      LUN.SETTINGS)
+                                      LUN.SETTINGS[self.backstore])
         except CephiSCSIError as err:
             self.error = True
             self.error_msg = err
@@ -302,7 +331,7 @@ class LUN(GWObject):
             if self.error:
                 return
 
-        rbd_image = RBDDev(self.image, '0G', self.pool)
+        rbd_image = RBDDev(self.image, '0G', self.backstore, self.pool)
 
         if this_host == self.allocating_host:
             # by using the allocating host we ensure the delete is not
@@ -518,7 +547,7 @@ class LUN(GWObject):
                           "allocations is {}".format(this_host,
                                                      self.allocating_host))
 
-        rbd_image = RBDDev(self.image, self.size_bytes, self.pool)
+        rbd_image = RBDDev(self.image, self.size_bytes, self.backstore, self.pool)
         self.pool_id = rbd_image.pool_id
 
         # if the image required isn't defined, create it!
@@ -564,10 +593,10 @@ class LUN(GWObject):
             else:
                 # rbd image is not valid for export, so abort
                 self.error = True
+                features = ','.join(RBDDev.rbd_feature_list[self.backstore])
                 self.error_msg = ("(LUN.allocate) rbd '{}' is not compatible "
                                   "with LIO\nOnly image features {} are"
-                                  " supported".format(self.image,
-                                                      ','.join(RBDDev.rbd_feature_list)))
+                                  " supported".format(self.image, features))
                 self.logger.error(self.error_msg)
                 return
 
@@ -630,7 +659,8 @@ class LUN(GWObject):
                                  "pool": self.pool,
                                  "allocating_host": self.allocating_host,
                                  "pool_id": rbd_image.pool_id,
-                                 "controls": self.controls}
+                                 "controls": self.controls,
+                                 "backstore": self.backstore}
 
                     self.config.update_item('disks',
                                             self.config_key,
@@ -778,8 +808,29 @@ class LUN(GWObject):
         :return: LIO LUN object
         """
         self.logger.info("(LUN.add_dev_to_lio) Adding image "
-                         "'{}' to LIO".format(self.config_key))
+                         "'{}' to LIO backstore {}".format(self.config_key, self.backstore))
 
+        new_lun = None
+        if self.backstore == USER_RBD:
+            new_lun = self._add_dev_to_lio_user_rbd(in_wwn)
+
+        else:
+            raise CephiSCSIError("Error adding device to lio - "
+                                 "Unsupported backstore {}".format(self.backstore))
+
+        if new_lun:
+            self.logger.info("(LUN.add_dev_to_lio) Successfully added {}"
+                             " to LIO".format(self.config_key))
+
+        return new_lun
+
+    def _add_dev_to_lio_user_rbd(self, in_wwn=None):
+        """
+        Add an rbd device to the LIO configuration (`USER_RBD`)
+        :param in_wwn: optional wwn identifying the rbd image to clients
+        (must match across gateways)
+        :return: LIO LUN object
+        """
         # extract control parameter overrides (if any) or use default
         controls = {}
         for k in ['max_data_area_mb', 'hw_max_sectors']:
@@ -823,9 +874,6 @@ class LUN(GWObject):
             self.logger.error(self.error_msg)
             new_lun.delete()
             return None
-
-        self.logger.info("(LUN.add_dev_to_lio) Successfully added {}"
-                         " to LIO".format(self.config_key))
 
         return new_lun
 
@@ -879,6 +927,11 @@ class LUN(GWObject):
             mode = kwargs['mode']
         else:
             mode = None
+
+        backstore = kwargs['backstore']
+        if backstore not in LUN.BACKSTORES:
+            return "Invalid '{}' backstore - Supported backstores: " \
+                   "{}".format(backstore, ','.join(LUN.BACKSTORES))
 
         if mode in mode_vars:
             if not all(x in kwargs for x in mode_vars[mode]):
@@ -950,7 +1003,7 @@ class LUN(GWObject):
 
             try:
                 settings.Settings.normalize_controls(kwargs['controls'],
-                                                     LUN.SETTINGS)
+                                                     LUN.SETTINGS[backstore])
             except ValueError as err:
                 return(err)
 
@@ -1045,8 +1098,9 @@ class LUN(GWObject):
                                 with rbd.Image(ioctx, image_name) as rbd_image:
                                     RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
 
+                                    backstore = config.config['disks'][disk_key]['backstore']
                                     lun = LUN(logger, pool, image_name,
-                                              rbd_image.size(), local_gw)
+                                              rbd_image.size(), local_gw, backstore)
                                     if lun.error:
                                         raise CephiSCSIError("Error defining rbd "
                                                              "image {}".format(disk_key))

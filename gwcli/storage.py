@@ -149,7 +149,7 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_attach(self, pool=None, image=None):
+    def ui_command_attach(self, pool=None, image=None, backstore=None):
         """
         Create a LUN and assign to the gateway(s)
         (RBD image must exist).
@@ -184,9 +184,9 @@ class Disks(UIGroup):
 
         self.logger.debug("CMD: /disks/ attach pool={} "
                           "image={}".format(pool, image))
-        self.create_disk(pool=pool, image=image, create_image=False)
+        self.create_disk(pool=pool, image=image, create_image=False, backstore=backstore)
 
-    def ui_command_create(self, pool=None, image=None, size=None, count=1):
+    def ui_command_create(self, pool=None, image=None, size=None, backstore=None, count=1):
         """
         Create a LUN and assign to the gateway(s).
 
@@ -204,6 +204,7 @@ class Disks(UIGroup):
         image   characters.
         size  : integer, suffixed by the allocation unit - either m/M, g/G or
                 t/T representing the MB/GB/TB [1]
+        backstore  : lio backstore
         count : integer (default is 1)[2]. If the request provides a count=<n>
                 parameter the image name will be used as a prefix, and the count
                 used as a suffix to create multiple LUNs from the same request.
@@ -254,7 +255,7 @@ class Disks(UIGroup):
         self.logger.debug("CMD: /disks/ create pool={} "
                           "image={} size={} "
                           "count={} ".format(pool, image, size, count))
-        self.create_disk(pool=pool, image=image, size=size, count=count)
+        self.create_disk(pool=pool, image=image, size=size, count=count, backstore=backstore)
 
     def _valid_pool(self, pool=None):
         """
@@ -282,7 +283,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    parent=None, create_image=True):
+                    parent=None, create_image=True, backstore=None):
 
         rc = 0
 
@@ -306,7 +307,8 @@ class Disks(UIGroup):
 
         api_vars = {'pool': pool, 'owner': local_gw,
                     'count': count, 'mode': 'create',
-                    'create_image': 'true' if create_image else 'false'}
+                    'create_image': 'true' if create_image else 'false',
+                    'backstore': backstore}
         if size:
             api_vars['size'] = size.upper()
 
@@ -564,7 +566,7 @@ class Disks(UIGroup):
 class Disk(UINode):
 
     display_attributes = ["image", "ceph_cluster", "pool", "wwn", "size_h",
-                          "feature_list", "snapshots", "owner", "control_values"]
+                          "feature_list", "snapshots", "owner", "backstore", "control_values"]
 
     def __init__(self, parent, image_id, image_config, size=None,
                  features=None, snapshots=None):
@@ -586,6 +588,7 @@ class Disk(UINode):
         self.features = 0
         self.feature_list = []
         self.snapshots = []
+        self.backstore = image_config['backstore']
         self.controls = {}
         self.control_values = {}
         self.ceph_cluster = self.parent.parent.ceph.local_ceph.name
@@ -626,7 +629,7 @@ class Disk(UINode):
         for k, v in image_config.items():
             disk_map[self.image_id][k] = v
             self.__setattr__(k, v)
-        for k in LUN.SETTINGS:
+        for k in LUN.SETTINGS[image_config['backstore']]:
             val = self.controls.get(k)
             default_val = getattr(settings.config, k, None)
             if val is None or str(val) == str(default_val):
