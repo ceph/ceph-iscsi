@@ -965,7 +965,7 @@ def disk(image_id):
             return jsonify(message=disk_usable), 400
 
         create_image = request.form.get('create_image') == 'true'
-        if not create_image or not size:
+        if mode == 'create' and (not create_image or not size):
             try:
                 rbd_image = RBDDev(image_name, 0, pool)
                 size = rbd_image.current_size
