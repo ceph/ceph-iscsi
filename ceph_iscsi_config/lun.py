@@ -496,7 +496,7 @@ class LUN(GWObject):
                 if client_metadata.get('group_name', ''):
                     continue
 
-                image_list = client_metadata['luns'].keys()
+                image_list = list(client_metadata['luns'].keys())
                 if self.config_key not in image_list:
                     continue
 
