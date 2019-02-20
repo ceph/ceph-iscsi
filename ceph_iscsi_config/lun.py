@@ -680,7 +680,7 @@ class LUN(GWObject):
                     if self.error:
                         return
 
-                    self.commit_controls()
+                    self.update_controls()
                     self.logger.debug("(LUN.allocate) registered '{}' to LIO "
                                       "with wwn '{}' from the config "
                                       "object".format(self.image,
