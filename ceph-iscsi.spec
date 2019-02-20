@@ -75,7 +75,7 @@ performance statistics, supporting monitoring and visualisation tools like
 Grafana.
 
 %prep
-%setup -q
+%autosetup -p1
 
 %build
 %if 0%{?with_python2}
