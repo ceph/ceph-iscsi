@@ -14,6 +14,10 @@
 #
 # Please submit bugfixes or comments via http://tracker.ceph.com/
 #
+%if 0%{?rhel} == 7
+%global with_python2 1
+%endif
+
 
 Name:           ceph-iscsi
 Version:        3.0
@@ -30,6 +34,9 @@ BuildArch:      noarch
 Obsoletes:      ceph-iscsi-config
 Obsoletes:      ceph-iscsi-cli
 
+%if 0%{?with_python2}
+BuildRequires:  python2-devel
+BuildRequires:  python2-setuptools
 Requires:       python-rados >= 10.2.2
 Requires:       python-rbd >= 10.2.2
 Requires:       python-netifaces >= 0.10.4
@@ -37,9 +44,18 @@ Requires:       python-rtslib >= 2.1.fb67
 Requires:       rpm-python >= 4.11
 Requires:       python-cryptography
 Requires:       python-flask >= 0.10.1
+%else
+BuildRequires:  python3-devel
+BuildRequires:  python3-setuptools
+Requires:       python3-rados >= 10.2.2
+Requires:       python3-rbd >= 10.2.2
+Requires:       python3-netifaces >= 0.10.4
+Requires:       python3-rtslib >= 2.1.fb67
+Requires:       python3-cryptography
+Requires:       python3-flask >= 0.10.1
+Requires:       python3-rpm >= 4.11
+%endif
 
-BuildRequires:  python-devel
-BuildRequires:  python-setuptools
 BuildRequires:  systemd
 
 %description
@@ -62,10 +78,18 @@ Grafana.
 %setup -q
 
 %build
+%if 0%{?with_python2}
 %{__python2} setup.py build
+%else
+%{py3_build}
+%endif
 
 %install
+%if 0%{?with_python2}
 %{__python2} setup.py install -O1 --skip-build --root %{buildroot}  --install-scripts %{_bindir}
+%else
+%{py3_install}
+%endif
 mkdir -p %{buildroot}%{_unitdir}
 install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 install -m 0644 .%{_unitdir}/rbd-target-api.service %{buildroot}%{_unitdir}
@@ -88,7 +112,11 @@ gzip %{buildroot}%{_mandir}/man8/gwcli.8
 %license COPYING
 %doc README
 %doc iscsi-gateway.cfg_sample
+%if 0%{?with_python2}
 %{python2_sitelib}/*
+%else
+%{python3_sitelib}/*
+%endif
 %{_bindir}/gwcli
 %{_bindir}/rbd-target-gw
 %{_bindir}/rbd-target-api
