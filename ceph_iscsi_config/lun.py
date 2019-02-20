@@ -407,8 +407,6 @@ class LUN(GWObject):
             self.config.commit()
 
     def map_lun(self, target_iqn, owner, disk):
-        this_host = gethostname().split('.')[0]
-
         target_config = self.config.config['targets'][target_iqn]
         disk_metadata = self.config.config['disks'][disk]
         disk_metadata['owner'] = owner
@@ -421,10 +419,7 @@ class LUN(GWObject):
         gateway_dict['active_luns'] += 1
         self.config.update_item('gateways', owner, gateway_dict)
 
-        LUN.define_luns(self.logger, self.config, None)
-
-        if this_host == self.allocating_host:
-            self.config.commit()
+        self.allocate()
 
     def manage(self, desired_state):
 

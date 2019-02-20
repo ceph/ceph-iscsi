@@ -813,10 +813,12 @@ def _target_disk(target_iqn=None):
         owner = request.form.get('owner')
         allocating_host = request.form.get('allocating_host')
 
+        rbd_image = RBDDev(image, 0, backstore, pool)
+        size = rbd_image.current_size
         lun = LUN(logger,
                   pool,
                   image,
-                  0,
+                  size,
                   allocating_host,
                   backstore)
 
