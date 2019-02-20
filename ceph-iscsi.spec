@@ -21,7 +21,7 @@ Release:        1%{?dist}
 Group:          System/Filesystems
 Summary:        Python package providing modules for ceph iscsi gateway configuration management
 
-License:        GPL-3.0-or-later
+License:        GPLv3+
 URL:            https://github.com/ceph/ceph-iscsi
 Source0:        https://github.com/ceph/ceph-iscsi/archive/%{version}/%{name}-%{version}.tar.gz
 
