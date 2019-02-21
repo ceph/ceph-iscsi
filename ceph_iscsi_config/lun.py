@@ -43,10 +43,12 @@ class RBDDev(object):
         ]
     }
 
-    def __init__(self, image, size, backstore, pool='rbd'):
+    def __init__(self, image, size, backstore, pool=None):
         self.image = image
         self.size_bytes = convert_2_bytes(size)
         self.backstore = backstore
+        if pool is None:
+            pool = settings.config.pool
         self.pool = pool
         self.pool_id = get_pool_id(pool_name=self.pool)
         self.error = False
@@ -164,7 +166,7 @@ class RBDDev(object):
         return image_size
 
     @staticmethod
-    def rbd_list(conf=None, pool='rbd'):
+    def rbd_list(conf=None, pool=None):
         """
         return a list of rbd images in a given pool
         :param pool: pool name (str) to return a list of rbd image names for
@@ -173,6 +175,8 @@ class RBDDev(object):
 
         if conf is None:
             conf = settings.config.cephconf
+        if pool is None:
+            pool = settings.config.pool
 
         with rados.Rados(conffile=conf) as cluster:
             with cluster.open_ioctx(pool) as ioctx:
@@ -1130,7 +1134,7 @@ class LUN(GWObject):
                                      "the iscsi Target")
 
 
-def rados_pool(conf=None, pool='rbd'):
+def rados_pool(conf=None, pool=None):
     """
     determine if a given pool name is defined within the ceph cluster
     :param pool: pool name to check for (str)
@@ -1139,6 +1143,8 @@ def rados_pool(conf=None, pool='rbd'):
 
     if conf is None:
         conf = settings.config.cephconf
+    if pool is None:
+        pool = settings.config.pool
 
     with rados.Rados(conffile=conf) as cluster:
         pool_list = cluster.list_pools()

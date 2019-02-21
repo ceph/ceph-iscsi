@@ -95,6 +95,7 @@ class Settings(object):
 
     defaults = {"cluster_name": "ceph",
                 "gateway_keyring": "ceph.client.admin.keyring",
+                "pool": "rbd",
                 "time_out": 30,
                 "api_host": "::",
                 "api_port": 5000,

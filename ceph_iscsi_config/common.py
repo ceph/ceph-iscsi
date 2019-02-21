@@ -63,9 +63,11 @@ class Config(object):
 
     lock_time_limit = 30
 
-    def __init__(self, logger, cfg_name='gateway.conf', pool='rbd'):
+    def __init__(self, logger, cfg_name='gateway.conf', pool=None):
         self.logger = logger
         self.config_name = cfg_name
+        if pool is None:
+            pool = settings.config.pool
         self.pool = pool
         self.ceph = None
         self.error = False

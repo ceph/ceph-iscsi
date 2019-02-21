@@ -2374,7 +2374,7 @@ class ConfigWatcher(threading.Thread):
 
         cluster = rados.Rados(conffile=settings.config.cephconf)
         cluster.connect()
-        ioctx = cluster.open_ioctx('rbd')
+        ioctx = cluster.open_ioctx(settings.config.pool)
         while True:
             time.sleep(self.interval)
 
