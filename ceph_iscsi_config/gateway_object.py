@@ -53,7 +53,7 @@ class GWObject(object):
                     property(lambda self, k=k: self._get_control(k),
                              lambda self, v, k=k: self._set_control(k, v)))
 
-    def commit_controls(self):
+    def update_controls(self):
         committed_controls = self._get_config_controls()
 
         if self.controls != committed_controls:
@@ -64,6 +64,8 @@ class GWObject(object):
             self.config.update_item(self.cfg_type, self.cfg_type_key,
                                     updated_obj)
 
+    def commit_controls(self):
+        self.update_controls()
         self.config.commit()
         if self.config.error:
             raise CephiSCSIError(self.config.error_msg)
