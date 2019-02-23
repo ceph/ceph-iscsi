@@ -408,20 +408,26 @@ class LUN(GWObject):
 
             self.config.commit()
 
-    def map_lun(self, target_iqn, owner, disk):
-        target_config = self.config.config['targets'][target_iqn]
+    def map_lun(self, gateway, owner, disk):
+        target_config = self.config.config['targets'][gateway.iqn]
         disk_metadata = self.config.config['disks'][disk]
         disk_metadata['owner'] = owner
         self.config.update_item("disks", disk, disk_metadata)
 
         target_config['disks'].append(disk)
-        self.config.update_item("targets", target_iqn, target_config)
+        self.config.update_item("targets", gateway.iqn, target_config)
 
         gateway_dict = self.config.config['gateways'][owner]
         gateway_dict['active_luns'] += 1
         self.config.update_item('gateways', owner, gateway_dict)
 
-        self.allocate()
+        so = self.allocate()
+        if self.error:
+            raise CephiSCSIError(self.error_msg)
+
+        gateway.map_lun(self.config, so)
+        if gateway.error:
+            raise CephiSCSIError(gateway.error_msg)
 
     def manage(self, desired_state):
 
