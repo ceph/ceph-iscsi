@@ -2,7 +2,6 @@ import os
 
 from rtslib_fb.target import Target, TPG, NetworkPortal, LUN
 from rtslib_fb.fabric import ISCSIFabricModule
-from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 from rtslib_fb.alua import ALUATargetPortGroup
 
@@ -325,10 +324,7 @@ class GWTarget(GWObject):
         """
 
         try:
-
-            lio_root = root.RTSRoot()
-            self.target = [tgt for tgt in lio_root.targets
-                           if tgt.wwn == self.iqn][0]
+            self.target = Target(ISCSIFabricModule(), self.iqn, "lookup")
 
             # clear list so we can rebuild with the current values below
             if self.tpg_list:
