@@ -419,52 +419,33 @@ class GWTarget(GWObject):
         target_stg_object = [stg_object for stg_object in lio_root.storage_objects
                              if stg_object.name in target_config['disks']]
 
-        # process each storage object added to the gateway, and map to the tpg
         for stg_object in target_stg_object:
-
             for tpg in self.tpg_list:
                 self.logger.debug("processing tpg{}".format(tpg.tag))
 
-                if not self.lun_mapped(tpg, stg_object):
-                    self.logger.debug("{} needed mapping to "
-                                      "tpg{}".format(stg_object.name,
-                                                     tpg.tag))
+                lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
 
-                    lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
-
-                    try:
-                        mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
-                        self.changes_made = True
-                    except RTSLibError as err:
+                try:
+                    mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
+                    self.changes_made = True
+                except RTSLibError as err:
+                    if "already exists in configFS" not in err:
                         self.logger.error("LUN mapping failed: {}".format(err))
                         self.error = True
                         self.error_msg = err
                         return
 
-                    try:
-                        self.bind_alua_group_to_lun(config, mapped_lun)
-                    except CephiSCSIInval as err:
-                        self.logger.error("Could not bind LUN to ALUA group: "
-                                          "{}".format(err))
-                        self.error = True
-                        self.error_msg = err
-                        return
+                    # Already created. Ignore and loop to the next tpg.
+                    continue
 
-    def lun_mapped(self, tpg, storage_object):
-        """
-        Check to see if a given storage object (i.e. block device) is already
-        mapped to the gateway's TPG
-        :param storage_object: storage object to look for
-        :return: boolean - is the storage object mapped or not
-        """
-
-        mapped_state = False
-        for l in tpg.luns:
-            if l.storage_object.name == storage_object.name:
-                mapped_state = True
-                break
-
-        return mapped_state
+                try:
+                    self.bind_alua_group_to_lun(config, mapped_lun)
+                except CephiSCSIInval as err:
+                    self.logger.error("Could not bind LUN to ALUA group: "
+                                      "{}".format(err))
+                    self.error = True
+                    self.error_msg = err
+                    return
 
     def delete(self):
         self.target.delete()
