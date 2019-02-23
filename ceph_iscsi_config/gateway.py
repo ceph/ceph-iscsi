@@ -329,6 +329,10 @@ class GWTarget(GWObject):
             self.target = [tgt for tgt in lio_root.targets
                            if tgt.wwn == self.iqn][0]
 
+            # clear list so we can rebuild with the current values below
+            if self.tpg_list:
+                del self.tpg_list[:]
+
             # there could/should be multiple tpg's for the target
             for tpg in self.target.tpgs:
                 self.tpg_list.append(tpg)
