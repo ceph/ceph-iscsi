@@ -534,6 +534,14 @@ class LUN(GWObject):
                 raise CephiSCSIError(client_err)
 
     def allocate(self, keep_dev_in_lio=True):
+        """
+        Create image and add to LIO and config.
+
+        :param keep_dev_in_lio: (bool) false if the LIO so should be removed
+                                 after allocating the wwn.
+        :return: LIO storage object if successful and keep_dev_in_lio=True
+                 else None.
+        """
         self.logger.debug("LUN.allocate starting, listing rbd devices")
         disk_list = RBDDev.rbd_list(pool=self.pool)
         self.logger.debug("rados pool '{}' contains the following - "
@@ -563,7 +571,7 @@ class LUN(GWObject):
                 else:
                     self.error = True
                     self.error_msg = rbd_image.error_msg
-                    return
+                    return None
 
             else:
                 # the image isn't there, and this isn't the 'owning' host
@@ -577,7 +585,7 @@ class LUN(GWObject):
                         self.error = True
                         self.error_msg = ("(LUN.allocate) timed out waiting "
                                           "for rbd to show up")
-                        return
+                        return None
         else:
             # requested image is already defined to ceph
 
@@ -595,7 +603,7 @@ class LUN(GWObject):
                                   "with LIO\nOnly image features {} are"
                                   " supported".format(self.image, features))
                 self.logger.error(self.error_msg)
-                return
+                return None
 
         self.logger.debug("Check the rbd image size matches the request")
 
@@ -609,7 +617,7 @@ class LUN(GWObject):
                 self.logger.critical(rbd_image.error_msg)
                 self.error = True
                 self.error_msg = rbd_image.error_msg
-                return
+                return None
 
             if rbd_image.changed:
                 self.logger.info("rbd image {} resized "
@@ -639,17 +647,17 @@ class LUN(GWObject):
                 if wwn == '':
                     # disk hasn't been defined to LIO yet, it' not been defined
                     # to the config yet and this is the allocating host
-                    lun = self.add_dev_to_lio()
+                    so = self.add_dev_to_lio()
                     if self.error:
-                        return
+                        return None
 
                     # lun is now in LIO, time for some housekeeping :P
-                    wwn = lun._get_wwn()
+                    wwn = so._get_wwn()
 
                     if not keep_dev_in_lio:
                         self.remove_dev_from_lio()
                         if self.error:
-                            return
+                            return None
 
                     disk_attr = {"wwn": wwn,
                                  "image": self.image,
@@ -673,9 +681,9 @@ class LUN(GWObject):
 
                 else:
                     # config object already had wwn for this rbd image
-                    self.add_dev_to_lio(wwn)
+                    so = self.add_dev_to_lio(wwn)
                     if self.error:
-                        return
+                        return None
 
                     self.update_controls()
                     self.logger.debug("(LUN.allocate) registered '{}' to LIO "
@@ -707,13 +715,13 @@ class LUN(GWObject):
                     self.error_msg = ("(LUN.allocate) waited too long for the "
                                       "wwn information on image {} to "
                                       "arrive".format(self.image))
-                    return
+                    return None
 
                 # At this point we have a wwn from the config for this rbd
                 # image, so just add to LIO
-                self.add_dev_to_lio(wwn)
+                so = self.add_dev_to_lio(wwn)
                 if self.error:
-                    return
+                    return None
 
                 self.logger.info("(LUN.allocate) added {} to LIO using wwn "
                                  "'{}' defined by {}".format(self.image,
@@ -728,7 +736,7 @@ class LUN(GWObject):
                 self.error = True
                 self.error_msg = "Unable to sync the rbd device size with LIO"
                 self.logger.critical(self.error_msg)
-                return
+                return None
 
         self.logger.debug("config meta data for this disk is "
                           "{}".format(self.config.config['disks'][self.config_key]))
@@ -742,6 +750,10 @@ class LUN(GWObject):
             self.config.commit()
             self.error = self.config.error
             self.error_msg = self.config.error_msg
+            if self.error:
+                return None
+
+        return so
 
     def lio_size_ok(self, rbd_object, stg_object):
         """
