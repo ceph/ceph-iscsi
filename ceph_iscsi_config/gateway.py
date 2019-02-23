@@ -412,6 +412,38 @@ class GWTarget(GWObject):
                                                            tpg.tag,
                                                            alua_tpg.name))
 
+    def _map_lun(self, config, stg_object):
+        for tpg in self.tpg_list:
+            self.logger.debug("processing tpg{}".format(tpg.tag))
+
+            lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
+
+            try:
+                mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
+                self.changes_made = True
+            except RTSLibError as err:
+                if "already exists in configFS" not in err:
+                    self.logger.error("LUN mapping failed: {}".format(err))
+                    self.error = True
+                    self.error_msg = err
+                    return
+
+                # Already created. Ignore and loop to the next tpg.
+                continue
+
+            try:
+                self.bind_alua_group_to_lun(config, mapped_lun)
+            except CephiSCSIInval as err:
+                self.logger.error("Could not bind LUN to ALUA group: "
+                                  "{}".format(err))
+                self.error = True
+                self.error_msg = err
+                return
+
+    def map_lun(self, config, stg_object):
+        self.load_config()
+        self._map_lun(config, stg_object)
+
     def map_luns(self, config):
         """
         LIO will have objects already defined by the lun module,
@@ -424,32 +456,9 @@ class GWTarget(GWObject):
                              if stg_object.name in target_config['disks']]
 
         for stg_object in target_stg_object:
-            for tpg in self.tpg_list:
-                self.logger.debug("processing tpg{}".format(tpg.tag))
-
-                lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
-
-                try:
-                    mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
-                    self.changes_made = True
-                except RTSLibError as err:
-                    if "already exists in configFS" not in err:
-                        self.logger.error("LUN mapping failed: {}".format(err))
-                        self.error = True
-                        self.error_msg = err
-                        return
-
-                    # Already created. Ignore and loop to the next tpg.
-                    continue
-
-                try:
-                    self.bind_alua_group_to_lun(config, mapped_lun)
-                except CephiSCSIInval as err:
-                    self.logger.error("Could not bind LUN to ALUA group: "
-                                      "{}".format(err))
-                    self.error = True
-                    self.error_msg = err
-                    return
+            self._map_lun(config, stg_object)
+            if self.error:
+                return
 
     def delete(self):
         self.target.delete()
