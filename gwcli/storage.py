@@ -133,14 +133,18 @@ class Disks(UIGroup):
         self.logger.debug("- rbd image scan complete: {}s".format(end_time - start_time))
 
         # Load the disk configuration
-        for image_id in disk_info:
-            image_config = disk_info[image_id]
-            Disk(self,
-                 image_id=image_id,
-                 image_config=image_config,
-                 size=disk_meta[image_id].get('size', 0),
-                 features=disk_meta[image_id].get('features', 0),
-                 snapshots=disk_meta[image_id].get('snapshots', []))
+        disk_info_by_pool = self._group_disks_by_pool(disk_info)
+        for pool, pool_disks_config in disk_info_by_pool.items():
+            DiskPool(self, pool, pool_disks_config, disk_meta)
+
+    def _group_disks_by_pool(self, disks_config):
+        result = {}
+        for disk_id, disk_config in disks_config.items():
+            pool, image = disk_id.split('/')
+            if pool not in result:
+                result[pool] = []
+            result[pool].append(disk_config)
+        return result
 
     def reset(self):
         children = set(self.children)  # set of child objects
@@ -342,7 +346,15 @@ class Disks(UIGroup):
                     except Exception:
                         raise GatewayAPIError("Malformed REST API response")
 
-                    Disk(parent, disk_key, image_config)
+                    disk_pool = None
+                    for current_disk_pool in self.children:
+                        if current_disk_pool.name == pool:
+                            disk_pool = current_disk_pool
+                            break
+                    if disk_pool:
+                        Disk(disk_pool, disk_key, image_config)
+                    else:
+                        DiskPool(parent, pool, [image_config])
                     self.logger.debug("{} added to the UI".format(disk_key))
                 else:
                     raise GatewayAPIError("Unable to retrieve disk details "
@@ -403,31 +415,6 @@ class Disks(UIGroup):
 
         disk = self.disk_lookup[image_id]
         disk.resize(size)
-
-    def ui_command_snapshot(self, image_id, action, name):
-        """
-        The snapshot command allows you create, delete, and rollback
-        snapshots on an existing rbd image.
-
-        e.g.
-        snapshot pool/image create snap1
-        snapshot pool/image delete snap1
-        snapshot pool/image rollback snap1
-
-        image_id: disk name (pool/image format)
-        action: create, delete, or rollback
-        name: snapshot name
-        """
-        self.logger.debug("CMD: /disks/ snapshot {} {} {}".format(image_id,
-                                                                  action,
-                                                                  name))
-        if image_id not in self.disk_lookup:
-            self.logger.error("the disk '{}' does not exist in this "
-                              "configuration".format(image_id))
-            return
-
-        disk = self.disk_lookup[image_id]
-        disk.snapshot(action, name)
 
     def ui_command_reconfigure(self, image_id, attribute, value):
         """
@@ -503,8 +490,13 @@ class Disks(UIGroup):
 
     def delete_disk(self, image_id, preserve_image):
 
+        all_disks = []
+        for pool in self.children:
+            for disk in pool.children:
+                all_disks.append(disk)
+
         # Perform a quick 'sniff' test on the request
-        if image_id not in [disk.image_id for disk in self.children]:
+        if image_id not in [disk.image_id for disk in all_disks]:
             self.logger.error("Disk '{}' is not defined to the "
                               "configuration".format(image_id))
             return
@@ -529,9 +521,14 @@ class Disks(UIGroup):
 
         if api.response.status_code == 200:
             self.logger.debug("- rbd removed from all gateways, and deleted")
-            disk_object = [disk for disk in self.children
-                           if disk.name == image_id][0]
-            self.remove_child(disk_object)
+            disk_object = [disk for disk in all_disks
+                           if disk.image_id == image_id][0]
+            pool, _ = image_id.split('/')
+            pool_object = [pool_object for pool_object in self.children
+                           if pool_object.name == pool][0]
+            pool_object.remove_child(disk_object)
+            if len(pool_object.children) == 0:
+                self.remove_child(pool_object)
             del self.disk_info[image_id]
             del self.disk_lookup[image_id]
         else:
@@ -579,10 +576,51 @@ class Disks(UIGroup):
 
     def summary(self):
         total_bytes = 0
+        total_disks = 0
+        for pool in self.children:
+            total_disks += len(pool.children)
+            for disk in pool.children:
+                total_bytes += disk.size
+        return '{}, Disks: {}'.format(human_size(total_bytes),
+                                      total_disks), None
+
+
+class DiskPool(UIGroup):
+
+    help_intro = '''
+                 Disks within a pool.
+
+                 The capacity shown against each pool is the logical size of
+                 the rbd images, not the physical space the images are consuming
+                 within rados.
+
+                 '''
+
+    def __init__(self, parent, pool, pool_disks_config, disks_meta=None):
+        UIGroup.__init__(self, pool, parent)
+        self.pool_disks_config = pool_disks_config
+        self.disks_meta = disks_meta
+        self.refresh()
+
+    def refresh(self):
+        for pool_disk_config in self.pool_disks_config:
+            disk_id = '{}/{}'.format(pool_disk_config['pool'], pool_disk_config['image'])
+            size = self.disks_meta[disk_id].get('size', 0) if self.disks_meta else None
+            features = self.disks_meta[disk_id].get('features', 0) if self.disks_meta else None
+            snapshots = self.disks_meta[disk_id].get('snapshots', []) if self.disks_meta else None
+            Disk(self,
+                 image_id=disk_id,
+                 image_config=pool_disk_config,
+                 size=size,
+                 features=features,
+                 snapshots=snapshots)
+
+    def summary(self):
+        total_bytes = 0
         for disk in self.children:
             total_bytes += disk.size
-        return '{}, Disks: {}'.format(human_size(total_bytes),
-                                      len(self.children)), None
+        return '{} ({})'.format(self.name,
+                                human_size(total_bytes)), None
 
 
 class Disk(UINode):
@@ -603,7 +641,7 @@ class Disk(UINode):
         """
         self.pool, self.rbd_image = image_id.split('/', 1)
 
-        UINode.__init__(self, image_id, parent)
+        UINode.__init__(self, self.rbd_image, parent)
 
         self.image_id = image_id
         self.size = 0
@@ -615,14 +653,14 @@ class Disk(UINode):
         self.backstore_object_name = image_config['backstore_object_name']
         self.controls = {}
         self.control_values = {}
-        self.ceph_cluster = self.parent.parent.ceph.local_ceph.name
+        self.ceph_cluster = self.parent.parent.parent.ceph.local_ceph.name
 
-        disk_map = self.parent.disk_info
+        disk_map = self.parent.parent.disk_info
         if image_id not in disk_map:
             disk_map[image_id] = {}
 
-        if image_id not in self.parent.disk_lookup:
-            self.parent.disk_lookup[image_id] = self
+        if image_id not in self.parent.parent.disk_lookup:
+            self.parent.parent.disk_lookup[image_id] = self
 
         self._apply_config(image_config)
 
@@ -641,13 +679,13 @@ class Disk(UINode):
             self._parse_snapshots(snapshots)
 
         # update the parent's disk info map
-        disk_map = self.parent.disk_info
+        disk_map = self.parent.parent.disk_info
         disk_map[self.image_id]['size'] = self.size
         disk_map[self.image_id]['size_h'] = self.size_h
 
     def _apply_config(self, image_config):
         # set the remaining attributes based on the fields in the dict
-        disk_map = self.parent.disk_info
+        disk_map = self.parent.parent.disk_info
         if 'owner' not in image_config:
             self.__setattr__('owner', '')
         for k, v in image_config.items():
@@ -665,7 +703,7 @@ class Disk(UINode):
         if not self.exists:
             return 'NOT FOUND', False
 
-        msg = [self.image, "({})".format(self.size_h)]
+        msg = [self.image_id, "({})".format(self.size_h)]
 
         return " ".join(msg), True
 
@@ -898,7 +936,7 @@ class Disk(UINode):
         use the object model to track back from the disk to the relevant pool
         in the local ceph cluster and update the commit stats
         """
-        root = self.parent.parent
+        root = self.parent.parent.parent
         ceph_group = root.ceph
         cluster = ceph_group.local_ceph
         pool = cluster.pools.pool_lookup.get(self.pool)
@@ -906,6 +944,53 @@ class Disk(UINode):
         if pool:
             # update the pool commit numbers
             pool._calc_overcommit()
+
+    def ui_command_resize(self, size):
+        """
+        The resize command allows you to increase the size of an
+        existing rbd image. Attempting to decrease the size of an
+        rbd will be ignored.
+
+        size: new size including unit suffix e.g. 300G
+
+        """
+
+        self.resize(size)
+
+    def ui_command_reconfigure(self, attribute, value):
+        """
+        The reconfigure command allows you to tune various lun attributes.
+        An empty value for an attribute resets the lun attribute to its
+        default.
+
+        attribute : attribute to reconfigure. supported attributes:
+        value     : value of the attribute to reconfigure
+
+        See the create command help for a list of attributes that can be
+        reconfigured.
+
+        e.g.
+        set max_data_area_mb
+          - reconfigure attribute=max_data_area_mb value=128
+        reset max_data_area_mb to default
+          - reconfigure attribute=max_data_area_mb value=
+        """
+        self.reconfigure(attribute, value)
+
+    def ui_command_snapshot(self, action, name):
+        """
+        The snapshot command allows you create, delete, and rollback
+        snapshots on an existing rbd image.
+
+        e.g.
+        snapshot create snap1
+        snapshot delete snap1
+        snapshot rollback snap1
+
+        action: create, delete, or rollback
+        name: snapshot name
+        """
+        self.snapshot(action, name)
 
 
 class TargetDisks(UIGroup):
@@ -945,9 +1030,9 @@ class TargetDisks(UIGroup):
             disk = ui_root.disks.disk_lookup[disk]
             disk.owner = owner
             self.logger.debug("- Disk '{}' owner updated to {}"
-                              .format(disk, owner))
-            TargetDisk(self, disk.name)
-            self.logger.debug("- TargetDisk '{}' added".format(disk))
+                              .format(disk.image_id, owner))
+            TargetDisk(self, disk.image_id)
+            self.logger.debug("- TargetDisk '{}' added".format(disk.image_id))
             if success_msg:
                 self.logger.info(success_msg)
         else:

@@ -344,9 +344,10 @@ class RadosPool(UINode):
     def _calc_overcommit(self):
         root = self.parent.parent.parent.parent
         potential_demand = 0
-        for child in root.disks.children:
-            if child.pool == self.name:
-                potential_demand += child.size
+        for pool_child in root.disks.children:
+            if pool_child.name == self.name:
+                for image_child in pool_child.children:
+                    potential_demand += image_child.size
 
         self.commit = potential_demand
         self.overcommit_PCT = int(

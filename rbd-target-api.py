@@ -1766,7 +1766,6 @@ def clientlun(target_iqn, client_iqn):
     disk = request.form.get('disk')
 
     lun_list = list(target_config['clients'][client_iqn]['luns'].keys())
-
     if request.method == 'PUT':
         lun_list.append(disk)
     else:
@@ -1781,7 +1780,6 @@ def clientlun(target_iqn, client_iqn):
     chap_mutual_obj = CHAP(target_config['clients'][client_iqn]['auth']['chap_mutual'])
     chap_mutual = "{}/{}".format(chap_mutual_obj.user, chap_mutual_obj.password)
     image_list = ','.join(lun_list)
-
     client_usable = valid_client(mode='disk', client_iqn=client_iqn,
                                  image_list=image_list,
                                  target_iqn=target_iqn)
