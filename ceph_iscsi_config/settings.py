@@ -36,7 +36,7 @@ class Settings(object):
             if key not in settings_list:
                 raise ValueError("Supported controls: {}".format(",".join(settings_list)))
 
-            if not raw_value:
+            if raw_value in [None, '']:
                 # Use the default/reset.
                 controls[key] = None
                 continue
