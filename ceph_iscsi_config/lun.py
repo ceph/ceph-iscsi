@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import rados
 import rbd
 import re

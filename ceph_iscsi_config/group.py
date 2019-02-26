@@ -1,5 +1,3 @@
-#!/usr/bin/env python2
-
 # import ceph_iscsi_config.settings as settings
 import json
 

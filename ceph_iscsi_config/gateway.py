@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import os
 
 from rtslib_fb.target import Target, TPG, NetworkPortal, LUN
