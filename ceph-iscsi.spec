@@ -23,9 +23,12 @@ Name:           ceph-iscsi
 Version:        3.0
 Release:        1%{?dist}
 Group:          System/Filesystems
-Summary:        Python package providing modules for ceph iscsi gateway configuration management
-
+Summary:        Python modules for Ceph iSCSI gateway configuration management
+%if 0%{?suse_version}
+License:        GPL-3.0-or-later
+%else
 License:        GPLv3+
+%endif
 URL:            https://github.com/ceph/ceph-iscsi
 Source0:        https://github.com/ceph/ceph-iscsi/archive/%{version}/%{name}-%{version}.tar.gz
 
@@ -52,8 +55,14 @@ Requires:       python3-rbd >= 10.2.2
 Requires:       python3-netifaces >= 0.10.4
 Requires:       python3-rtslib >= 2.1.fb67
 Requires:       python3-cryptography
-Requires:       python3-flask >= 0.10.1
 Requires:       python3-rpm >= 4.11
+%if 0%{?suse_version}
+BuildRequires:  python-rpm-macros
+BuildRequires:  fdupes
+Requires:       python3-Flask >= 0.10.1
+%else
+Requires:       python3-flask >= 0.10.1
+%endif
 %endif
 
 BuildRequires:  systemd
@@ -81,31 +90,66 @@ Grafana.
 %if 0%{?with_python2}
 %{__python2} setup.py build
 %else
+%if 0%{?suse_version}
+%python3_build
+%else
 %{py3_build}
+%endif
 %endif
 
 %install
 %if 0%{?with_python2}
 %{__python2} setup.py install -O1 --skip-build --root %{buildroot}  --install-scripts %{_bindir}
 %else
+%if 0%{?suse_version}
+%python3_install
+%python_expand %fdupes %{buildroot}%{$python_sitelib}
+%else
 %{py3_install}
+%endif
 %endif
 mkdir -p %{buildroot}%{_unitdir}
 install -m 0644 .%{_unitdir}/rbd-target-gw.service %{buildroot}%{_unitdir}
 install -m 0644 .%{_unitdir}/rbd-target-api.service %{buildroot}%{_unitdir}
-mkdir -p %{buildroot}%{_sysconfdir}/systemd/system/rbd-target-gw.service.d
-install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependencies.conf %{buildroot}%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/
 mkdir -p %{buildroot}%{_mandir}/man8
 install -m 0644 gwcli.8 %{buildroot}%{_mandir}/man8/
 gzip %{buildroot}%{_mandir}/man8/gwcli.8
+mkdir -p %{buildroot}%{_unitdir}/rbd-target-gw.service.d
+install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependencies.conf %{buildroot}%{_unitdir}/rbd-target-gw.service.d/
+%if 0%{?suse_version}
+mkdir -p %{buildroot}%{_sbindir}
+ln -s service %{buildroot}%{_sbindir}/rcrbd-target-gw
+ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
+%endif
+
+%pre
+%if 0%{?suse_version}
+%service_add_pre rbd-target-gw.service rbd-target-api.service
+%endif
 
 %post
+%if 0%{?fedora} || 0%{?rhel}
 /bin/systemctl --system daemon-reload &> /dev/null || :
 /bin/systemctl --system enable rbd-target-gw &> /dev/null || :
 /bin/systemctl --system enable rbd-target-api &> /dev/null || :
+%endif
+%if 0%{?suse_version}
+%service_add_post rbd-target-gw.service rbd-target-api.service
+%endif
+
+%preun
+%if 0%{?suse_version}
+%service_del_preun rbd-target-gw.service rbd-target-api.service
+%endif
 
 %postun
+%if 0%{?fedora} || 0%{?rhel}
 /bin/systemctl --system daemon-reload &> /dev/null || :
+%endif
+%if 0%{?suse_version}
+%service_del_postun rbd-target-gw.service rbd-target-api.service
+%endif
+
 
 %files
 %license LICENSE
@@ -122,10 +166,15 @@ gzip %{buildroot}%{_mandir}/man8/gwcli.8
 %{_bindir}/rbd-target-api
 %{_unitdir}/rbd-target-gw.service
 %{_unitdir}/rbd-target-api.service
-%{_sysconfdir}/systemd/system/rbd-target-gw.service.d
 %{_mandir}/man8/gwcli.8.gz
 %attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-gw
 %attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-api
+%dir %{_unitdir}/rbd-target-gw.service.d
+%{_unitdir}/rbd-target-gw.service.d/dependencies.conf
+%if 0%{?suse_version}
+%{_sbindir}/rcrbd-target-gw
+%{_sbindir}/rcrbd-target-api
+%endif
 
 %changelog
 
