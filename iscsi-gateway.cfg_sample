@@ -6,10 +6,8 @@ cluster_name = <ceph cluster name>
 # Pool name where internal `gateway.conf` object is stored
 # pool = rbd
 
-# Place a copy of the ceph cluster's admin keyring in the gateway's /etc/ceph
-# drectory and reference the filename here
-gateway_keyring = <client.admin.keyring>
-
+# CephX client name
+# cluster_client_name = client.<rados_id>  # E.g.: client.admin
 
 # API settings.
 # The api supports a number of options that allow you to tailor it to your

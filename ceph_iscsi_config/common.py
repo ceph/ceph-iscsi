@@ -30,9 +30,7 @@ class CephCluster(object):
         self.error = False
         self.error_msg = ''
         self.cluster = rados.Rados(conffile=settings.config.cephconf,
-                                   conf=dict(keyring="{}/{}".format(
-                                             settings.config.ceph_config_dir,
-                                             settings.config.gateway_keyring)))
+                                   name=settings.config.cluster_client_name)
         try:
             self.cluster.connect()
         except rados.Error as err:

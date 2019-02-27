@@ -38,19 +38,19 @@ class CephGroup(UIGroup):
 
         for cluster_name in self.cluster_map.keys():
 
-            keyring = self.cluster_map[cluster_name]['keyring']
+            cluster_client_name = None
             if cluster_name == settings.config.cluster_name:
 
-                if settings.config.gateway_keyring:
-                    keyring = settings.config.gateway_keyring
-                    self.cluster_map[cluster_name]['keyring'] = keyring
+                if settings.config.cluster_client_name:
+                    cluster_client_name = settings.config.cluster_client_name
+                    self.cluster_map[cluster_name]['client_name'] = cluster_client_name
 
             # define the cluster object
             self.logger.debug("Adding ceph cluster '{}' to the UI".format(cluster_name))
             cluster = CephCluster(self,
                                   cluster_name,
                                   self.cluster_map[cluster_name]['conf_file'],
-                                  keyring)
+                                  cluster_client_name)
 
             self.cluster_map[cluster_name]['object'] = cluster
             if self.cluster_map[cluster_name]['local']:
@@ -60,10 +60,10 @@ class CephGroup(UIGroup):
         """
         Look at the /etc/ceph dir to generate a dict of clusters that are
         defined/known to the gateway
-        :return: (dict) ceph_name -> conf_file, keyring
+        :return: (dict) ceph_name -> conf_file, client_name
         """
 
-        clusters = {}       # dict ceph_name -> conf_file, keyring
+        clusters = {}       # dict ceph_name -> conf_file, client_name
 
         conf_files = glob.glob(os.path.join(CephGroup.ceph_config_dir,
                                '*.conf'))
@@ -74,14 +74,20 @@ class CephGroup(UIGroup):
             name = os.path.basename(conf).split('.')[0]
             keyring = glob.glob(os.path.join(CephGroup.ceph_config_dir,
                                              '{}*.keyring'.format(name)))
-            if not keyring:
-                self.logger.debug("Skipping {} - no keyring found".format(conf))
-                continue
+
+            client_name = None
+            if keyring:
+                keyring = keyring[0]  # select the first one
+
+                if keyring.startswith("ceph.client."):
+                    begin_idx = keyring.find(".")
+                    end_idx = keyring.find(".keyring")
+                    client_name = keyring[begin_idx + 1:end_idx]
 
             local = True if name == settings.config.cluster_name else False
 
             clusters[name] = {'conf_file': conf,
-                              'keyring': keyring[0],
+                              'client_name': client_name,
                               'name': name,
                               'local': local}
 
@@ -121,10 +127,10 @@ class CephGroup(UIGroup):
 
 class CephCluster(UIGroup):
 
-    def __init__(self, parent, cluster_name, conf_file, keyring):
+    def __init__(self, parent, cluster_name, conf_file, client_name):
 
         self.conf = conf_file
-        self.keyring = keyring
+        self.client_name = client_name
         self.cluster_name = cluster_name
         UIGroup.__init__(self, cluster_name, parent)
 
@@ -177,8 +183,7 @@ class CephCluster(UIGroup):
         raw = status['pgmap']['bytes_total']
         output += "Raw capacity: {}\n".format(human_size(raw))
         output += "\nConfig : {}\n".format(self.conf)
-        output += "Keyring: {}\n".format(os.path.join(CephGroup.ceph_config_dir,
-                                                      self.keyring))
+        output += "Client Name: {}\n".format(self.client_name)
 
         console_message(output, color=color[self.health_status])
 
