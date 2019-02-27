@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError
 

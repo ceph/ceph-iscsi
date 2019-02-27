@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import CephiSCSIError

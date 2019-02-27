@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from gwcli.node import UIGroup, UINode
 
 from gwcli.utils import response_message, APIRequest

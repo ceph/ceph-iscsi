@@ -1,5 +1,3 @@
-#!/usr/bin/env python2
-
 import re
 
 from gwcli.node import UIGroup, UINode

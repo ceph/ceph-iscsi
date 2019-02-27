@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from configshell_fb import ConfigNode
 from gwcli.utils import console_message
 import logging

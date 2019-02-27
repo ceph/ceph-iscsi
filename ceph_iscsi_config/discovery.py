@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from rtslib_fb.fabric import ISCSIFabricModule
 
 from ceph_iscsi_config.client import CHAP
