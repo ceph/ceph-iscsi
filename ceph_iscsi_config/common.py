@@ -5,7 +5,7 @@ import traceback
 
 from ceph_iscsi_config.backstore import USER_RBD
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import get_time
+from ceph_iscsi_config.utils import encryption_available, get_time
 
 
 class ConfigTransaction(object):
@@ -49,9 +49,13 @@ class Config(object):
     seed_config = {"disks": {},
                    "gateways": {},
                    "targets": {},
-                   "discovery_auth": {'chap': '',
-                                      'chap_mutual': ''},
-                   "version": 7,
+                   "discovery_auth": {'username': '',
+                                      'password': '',
+                                      'password_encryption_enabled': False,
+                                      'mutual_username': '',
+                                      'mutual_password': '',
+                                      'mutual_password_encryption_enabled': False},
+                   "version": 8,
                    "epoch": 0,
                    "created": '',
                    "updated": ''
@@ -255,6 +259,50 @@ class Config(object):
                         group['disks'] = new_group_disks
                 self.update_item("targets", iqn, target)
             self.update_item("version", None, 7)
+
+        if self.config['version'] == 7:
+            if '/' in self.config['discovery_auth']['chap']:
+                duser, dpassword = self.config['discovery_auth']['chap'].split('/', 1)
+            else:
+                duser = ''
+                dpassword = ''
+            self.config['discovery_auth']['username'] = duser
+            self.config['discovery_auth']['password'] = dpassword
+            self.config['discovery_auth']['password_encryption_enabled'] = False
+            self.config['discovery_auth'].pop('chap', None)
+            if '/' in self.config['discovery_auth']['chap_mutual']:
+                dmuser, dmpassword = self.config['discovery_auth']['chap_mutual'].split('/', 1)
+            else:
+                dmuser = ''
+                dmpassword = ''
+            self.config['discovery_auth']['mutual_username'] = dmuser
+            self.config['discovery_auth']['mutual_password'] = dmpassword
+            self.config['discovery_auth']['mutual_password_encryption_enabled'] = False
+            self.config['discovery_auth'].pop('chap_mutual', None)
+            self.update_item("discovery_auth", None, self.config['discovery_auth'])
+            for target_iqn, target in self.config['targets'].items():
+                for _, client in target['clients'].items():
+                    if '/' in client['auth']['chap']:
+                        user, password = client['auth']['chap'].split('/', 1)
+                    else:
+                        user = ''
+                        password = ''
+                    client['auth']['username'] = user
+                    client['auth']['password'] = password
+                    client['auth']['password_encryption_enabled'] = \
+                        (len(password) > 16 and encryption_available())
+                    client['auth'].pop('chap', None)
+                    if '/' in client['auth']['chap_mutual']:
+                        muser, mpassword = client['auth']['chap_mutual'].split('/', 1)
+                    else:
+                        muser = ''
+                        mpassword = ''
+                    client['auth']['mutual_username'] = muser
+                    client['auth']['mutual_password'] = mpassword
+                    client['auth']['mutual_password_encryption_enabled'] = \
+                        (len(mpassword) > 16 and encryption_available())
+                    client['auth'].pop('chap_mutual', None)
+            self.update_item("version", None, 8)
 
         self.commit("retain")
 

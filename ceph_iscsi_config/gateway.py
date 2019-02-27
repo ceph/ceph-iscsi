@@ -499,8 +499,14 @@ class GWTarget(GWObject):
                 # return to caller, with error state set
                 return
 
-            Discovery.set_discovery_auth_lio(config.config['discovery_auth']['chap'],
-                                             config.config['discovery_auth']['chap_mutual'])
+            discovery_auth_config = config.config['discovery_auth']
+            Discovery.set_discovery_auth_lio(discovery_auth_config['username'],
+                                             discovery_auth_config['password'],
+                                             discovery_auth_config['password_encryption_enabled'],
+                                             discovery_auth_config['mutual_username'],
+                                             discovery_auth_config['mutual_password'],
+                                             discovery_auth_config[
+                                                 'mutual_password_encryption_enabled'])
 
             target_config = config.config["targets"][self.iqn]
             gateway_group = config.config["gateways"].keys()
@@ -587,8 +593,15 @@ class GWTarget(GWObject):
                 config.add_item("targets", self.iqn, seed_target)
                 config.commit()
 
-                Discovery.set_discovery_auth_lio(config.config['discovery_auth']['chap'],
-                                                 config.config['discovery_auth']['chap_mutual'])
+                discovery_auth_config = config.config['discovery_auth']
+                Discovery.set_discovery_auth_lio(discovery_auth_config['username'],
+                                                 discovery_auth_config['password'],
+                                                 discovery_auth_config[
+                                                     'password_encryption_enabled'],
+                                                 discovery_auth_config['mutual_username'],
+                                                 discovery_auth_config['mutual_password'],
+                                                 discovery_auth_config[
+                                                     'mutual_password_encryption_enabled'])
 
         elif mode == 'clearconfig':
             # Called by API from CLI clearconfig command

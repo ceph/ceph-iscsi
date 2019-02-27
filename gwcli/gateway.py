@@ -311,36 +311,48 @@ class ISCSITargets(UIGroup):
 
         self.logger.info('ok')
 
-    def ui_command_discovery_auth(self, chap=None, chap_mutual=None):
+    def ui_command_discovery_auth(self, username=None, password=None, mutual_username=None,
+                                  mutual_password=None):
         """
         Discovery authentication can be set to use CHAP/CHAP_MUTUAL by supplying
-        strings of the form <username>/<password>
+        username, password, mutual_username, mutual_password
 
         Specifying 'nochap' will remove discovery authentication.
 
         e.g.
-        auth chap=username/password chap_mutual=username/password
+        auth username=<user> password=<pass> mutual_username=<m_user> mutual_password=<m_pass>
 
         """
 
-        self.logger.warn("discovery chap={}, chap_mutual={}".format(chap, chap_mutual))
+        self.logger.warn("discovery username={}, password={}, mutual_username={}, "
+                         "mutual_password={}".format(username, password, mutual_username,
+                                                     mutual_password))
 
         self.logger.debug("CMD: /iscsi discovery_auth")
 
-        if not chap:
+        if not username:
             self.logger.error("To set or reset discovery authentication, specify either "
-                              "chap=<user>/<password> [chap_mutual]=<user>/<password> or nochap")
+                              "username=<user> password=<password> [mutual_username]=<user> "
+                              "[mutual_password]=<password> or nochap")
             return
 
-        if chap == 'nochap':
-            chap = ''
-        if not chap_mutual:
-            chap_mutual = ''
+        if username == 'nochap':
+            username = ''
+            password = ''
+            mutual_username = ''
+            mutual_password = ''
 
-        self.logger.debug("discovery auth to be set to chap='{}', chap_mutual='{}'".format(
-            chap, chap_mutual))
+        self.logger.debug("discovery auth to be set to username='{}', password='{}', "
+                          "mutual_username='{}', mutual_password='{}'".format(username, password,
+                                                                              mutual_username,
+                                                                              mutual_password))
 
-        api_vars = {"chap": chap, "chap_mutual": chap_mutual}
+        api_vars = {
+            "username": username,
+            "password": password,
+            "mutual_username": mutual_username,
+            "mutual_password": mutual_password
+        }
         discoveryauth_api = ('{}://localhost:{}/api/'
                              'discoveryauth'.format(self.http_mode,
                                                     settings.config.api_port))
@@ -348,16 +360,16 @@ class ISCSITargets(UIGroup):
         api.put()
 
         if api.response.status_code == 200:
-            self._set_auth(chap, chap_mutual)
+            self._set_auth(username, password, mutual_username, mutual_password)
             self.logger.info('ok')
         else:
             self.logger.error("Error: {}".format(response_message(api.response, self.logger)))
             return
 
-    def _set_auth(self, chap, chap_mutual):
-        if chap_mutual != '':
+    def _set_auth(self, username, password, mutual_username, mutual_password):
+        if mutual_username != '' and mutual_password != '':
             self.auth = "CHAP_MUTUAL"
-        elif chap != '':
+        elif username != '' and password != '':
             self.auth = "CHAP"
         else:
             self.auth = None
@@ -366,7 +378,10 @@ class ISCSITargets(UIGroup):
 
         self.logger.debug("Refreshing gateway & client information")
         self.reset()
-        self._set_auth(discovery_auth['chap'], discovery_auth['chap_mutual'])
+        self._set_auth(discovery_auth['username'],
+                       discovery_auth['password'],
+                       discovery_auth['mutual_username'],
+                       discovery_auth['mutual_password'])
         for target_iqn, target in targets.items():
             tgt = Target(target_iqn, self)
             tgt.controls = target['controls']

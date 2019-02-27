@@ -506,20 +506,25 @@ class LUN(GWObject):
                 if self.config_key not in image_list:
                     continue
 
-                client_chap = CHAP(client_metadata['auth']['chap'])
-                chap_str = client_chap.chap_str
+                client_auth_config = client_metadata['auth']
+
+                client_chap = CHAP(client_auth_config['username'],
+                                   client_auth_config['password'],
+                                   client_auth_config['password_encryption_enabled'])
                 if client_chap.error:
                     raise CephiSCSIError("Password decode issue : "
                                          "{}".format(client_chap.error_msg))
 
-                client_chap_mutual = CHAP(client_metadata['auth']['chap_mutual'])
-                chap_mutual_str = client_chap_mutual.chap_str
+                client_chap_mutual = CHAP(client_auth_config['mutual_username'],
+                                          client_auth_config['mutual_password'],
+                                          client_auth_config['mutual_password_encryption_enabled'])
                 if client_chap_mutual.error:
                     raise CephiSCSIError("Password decode issue : "
                                          "{}".format(client_chap_mutual.error_msg))
 
-                client = GWClient(self.logger, client_iqn, image_list, chap_str,
-                                  chap_mutual_str, target_iqn)
+                client = GWClient(self.logger, client_iqn, image_list, client_chap.user,
+                                  client_chap.password, client_chap_mutual.user,
+                                  client_chap_mutual.password, target_iqn)
                 client.manage('present')
                 if client.error:
                     client_err = "LUN mapping failed {} - {}".format(client_iqn,
