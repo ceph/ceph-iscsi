@@ -1488,6 +1488,79 @@ def _discoveryauth():
     return jsonify(message='OK'), 200
 
 
+@app.route('/api/targetauth/<target_iqn>', methods=['PUT'])
+@requires_restricted_auth
+def targetauth(target_iqn=None):
+    """
+    Coordinate the gen-acls across each gateway node
+    :param target_iqn: (str) IQN of the target
+    :param action: (str) action to be performed
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d auth='disable_acl'
+        -X PUT https://192.168.122.69:5000/api/targetauth/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
+    """
+
+    action = request.form.get('action')
+    if action not in ['disable_acl', 'enable_acl']:
+        return jsonify(message='Invalid auth {}'.format(action)), 400
+
+    target_config = config.config['targets'][target_iqn]
+
+    if action == 'disable_acl' and target_config['clients'].keys():
+        return jsonify(message='Cannot disable ACL authentication '
+                               'because target has clients'), 400
+
+    try:
+        gateways = get_remote_gateways(target_config['portals'], logger)
+    except CephiSCSIError as err:
+        return jsonify(message="{}".format(err)), 400
+    local_gw = this_host()
+    gateways.insert(0, local_gw)
+
+    # Apply to all gateways
+    api_vars = {
+        "committing_host": local_gw,
+        "action": action
+    }
+    resp_text, resp_code = call_api(gateways, '_targetauth',
+                                    target_iqn,
+                                    http_method='put',
+                                    api_vars=api_vars)
+
+    return jsonify(message="target auth {} - {}".format(action, resp_text)), resp_code
+
+
+@app.route('/api/_targetauth/<target_iqn>', methods=['PUT'])
+@requires_restricted_auth
+def _targetauth(target_iqn=None):
+    """
+    Apply gen-acls on the local gateway
+    Internal Use ONLY
+    **RESTRICTED**
+    """
+
+    local_gw = this_host()
+    committing_host = request.form['committing_host']
+    action = request.form['action']
+
+    target = GWTarget(logger, target_iqn, [])
+
+    target_config = config.config['targets'][target_iqn]
+    if action in ['disable_acl', 'enable_acl']:
+        target_config['acl_enabled'] = (action == 'enable_acl')
+    config.update_item('targets', target_iqn, target_config)
+
+    if target.exists():
+        target.load_config()
+        target.update_acl(config)
+
+    if committing_host == local_gw:
+        config.commit("retain")
+
+    return jsonify(message='OK'), 200
+
+
 @app.route('/api/clients/<target_iqn>', methods=['GET'])
 @requires_restricted_auth
 def get_clients(target_iqn=None):

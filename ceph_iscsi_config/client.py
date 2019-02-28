@@ -274,7 +274,7 @@ class GWClient(GWObject):
 
         tpg.set_attribute('authentication', '0')
 
-    def configure_auth(self, chap_credentials, chap_mutual_credentials):
+    def configure_auth(self, chap_credentials, chap_mutual_credentials, target_config):
         """
         Attempt to configure authentication for the client
         :return:
@@ -359,6 +359,15 @@ class GWClient(GWObject):
                               "credentials for {}".format(self.iqn))
         else:
             self.change_count += 1
+
+        self._update_acl(target_config)
+
+    def _update_acl(self, target_config):
+        if self.tpg.node_acls:
+            self.tpg.set_attribute('generate_node_acls', 0)
+            if not target_config['acl_enabled']:
+                target_config['acl_enabled'] = True
+                self.change_count += 1
 
     def _add_lun(self, image, lun):
         """
@@ -571,7 +580,7 @@ class GWClient(GWObject):
                 self.logger.warning("(main) client '{}' configured without"
                                     " security".format(self.iqn))
 
-            self.configure_auth(self.chap, self.chap_mutual)
+            self.configure_auth(self.chap, self.chap_mutual, target_config)
             if self.error:
                 return
 
