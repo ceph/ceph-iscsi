@@ -3,6 +3,9 @@
 # cluster from the gateway node is required.
 cluster_name = <ceph cluster name>
 
+# Pool name where internal `gateway.conf` object is stored
+# pool = rbd
+
 # Place a copy of the ceph cluster's admin keyring in the gateway's /etc/ceph
 # drectory and reference the filename here
 gateway_keyring = <client.admin.keyring>
