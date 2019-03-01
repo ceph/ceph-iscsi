@@ -203,7 +203,7 @@ def convert_2_bytes(disk_size):
     return _bytes
 
 
-def get_pool_id(conf=None, pool_name='rbd'):
+def get_pool_id(conf=None, pool_name=None):
     """
     Query Rados to get the pool id of a given pool name
     :param conf: ceph configuration file
@@ -213,6 +213,8 @@ def get_pool_id(conf=None, pool_name='rbd'):
 
     if conf is None:
         conf = settings.config.cephconf
+    if pool_name is None:
+        pool_name = settings.config.pool
 
     with rados.Rados(conffile=conf) as cluster:
         pool_id = cluster.pool_lookup(pool_name)
