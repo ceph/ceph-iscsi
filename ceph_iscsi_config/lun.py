@@ -19,6 +19,7 @@ from ceph_iscsi_config.gateway_object import GWObject
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.group import Group
+from ceph_iscsi_config.backstore import lookup_storage_object
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -802,18 +803,11 @@ class LUN(GWObject):
         return size_ok
 
     def lio_stg_object(self):
-        found_it = False
-        rtsroot = root.RTSRoot()
-        for stg_object in rtsroot.storage_objects:
-
-            # First match on name, but then check the pool incase the same
-            # name exists in multiple pools
-            if stg_object.name == self.config_key:
-
-                found_it = True
-                break
-
-        return stg_object if found_it else None
+        try:
+            return lookup_storage_object(self.config_key, self.backstore)
+        except RTSLibError as err:
+            self.logger.debug("lio stg lookup failed {}".format(err))
+            return None
 
     def add_dev_to_lio(self, in_wwn=None):
         """
@@ -909,17 +903,19 @@ class LUN(GWObject):
                     else:
                         break       # continue to the next tpg
 
-        for stg_object in lio_root.storage_objects:
-            if stg_object.name == self.config_key:
-                try:
-                    stg_object.delete()
-                except Exception as e:
-                    self.error = True
-                    self.error_msg = ("Delete from LIO/backstores failed - "
-                                      "{}".format(e))
-                    return
+        so = self.lio_stg_object()
+        if not so:
+            self.error = True
+            self.error_msg = ("Removal failed. Could not find LIO object.")
+            return
 
-                break
+        try:
+            so.delete()
+        except Exception as err:
+            self.error = True
+            self.error_msg = ("Delete from LIO/backstores failed - "
+                              "{}".format(err))
+            return
 
     @staticmethod
     def valid_disk(ceph_iscsi_config, logger, **kwargs):

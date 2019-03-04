@@ -16,6 +16,7 @@ from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.gateway_object import GWObject
+from ceph_iscsi_config.backstore import lookup_storage_object
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -450,12 +451,19 @@ class GWTarget(GWObject):
         so this method, brings those objects into the gateways TPG
         """
 
-        lio_root = root.RTSRoot()
         target_config = config.config["targets"][self.iqn]
-        target_stg_object = [stg_object for stg_object in lio_root.storage_objects
-                             if stg_object.name in target_config['disks']]
 
-        for stg_object in target_stg_object:
+        for disk in target_config['disks']:
+            backstore = config.config["disks"][disk]["backstore"]
+
+            try:
+                stg_object = lookup_storage_object(disk, backstore)
+            except (RTSLibError, CephiSCSIError) as err:
+                self.logger.error("Could not map {} to LUN: {}".format(disk, err))
+                self.error = True
+                self.error_msg = err
+                return
+
             self._map_lun(config, stg_object)
             if self.error:
                 return
