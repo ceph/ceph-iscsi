@@ -2,6 +2,7 @@ import os
 
 from rtslib_fb.target import Target, TPG, NetworkPortal, LUN
 from rtslib_fb.fabric import ISCSIFabricModule
+from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 from rtslib_fb.alua import ALUATargetPortGroup
 
@@ -15,7 +16,6 @@ from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.gateway_object import GWObject
-from ceph_iscsi_config.backstore import lookup_storage_object
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -324,11 +324,10 @@ class GWTarget(GWObject):
         """
 
         try:
-            self.target = Target(ISCSIFabricModule(), self.iqn, "lookup")
 
-            # clear list so we can rebuild with the current values below
-            if self.tpg_list:
-                del self.tpg_list[:]
+            lio_root = root.RTSRoot()
+            self.target = [tgt for tgt in lio_root.targets
+                           if tgt.wwn == self.iqn][0]
 
             # there could/should be multiple tpg's for the target
             for tpg in self.target.tpgs:
@@ -409,60 +408,63 @@ class GWTarget(GWObject):
                                                            tpg.tag,
                                                            alua_tpg.name))
 
-    def _map_lun(self, config, stg_object):
-        for tpg in self.tpg_list:
-            self.logger.debug("processing tpg{}".format(tpg.tag))
-
-            lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
-
-            try:
-                mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
-                self.changes_made = True
-            except RTSLibError as err:
-                if "already exists in configFS" not in err:
-                    self.logger.error("LUN mapping failed: {}".format(err))
-                    self.error = True
-                    self.error_msg = err
-                    return
-
-                # Already created. Ignore and loop to the next tpg.
-                continue
-
-            try:
-                self.bind_alua_group_to_lun(config, mapped_lun)
-            except CephiSCSIInval as err:
-                self.logger.error("Could not bind LUN to ALUA group: "
-                                  "{}".format(err))
-                self.error = True
-                self.error_msg = err
-                return
-
-    def map_lun(self, config, stg_object):
-        self.load_config()
-        self._map_lun(config, stg_object)
-
     def map_luns(self, config):
         """
         LIO will have objects already defined by the lun module,
         so this method, brings those objects into the gateways TPG
         """
 
+        lio_root = root.RTSRoot()
         target_config = config.config["targets"][self.iqn]
+        target_stg_object = [stg_object for stg_object in lio_root.storage_objects
+                             if stg_object.name in target_config['disks']]
 
-        for disk in target_config['disks']:
-            backstore = config.config["disks"][disk]["backstore"]
+        # process each storage object added to the gateway, and map to the tpg
+        for stg_object in target_stg_object:
 
-            try:
-                stg_object = lookup_storage_object(disk, backstore)
-            except (RTSLibError, CephiSCSIError) as err:
-                self.logger.error("Could not map {} to LUN: {}".format(disk, err))
-                self.error = True
-                self.error_msg = err
-                return
+            for tpg in self.tpg_list:
+                self.logger.debug("processing tpg{}".format(tpg.tag))
 
-            self._map_lun(config, stg_object)
-            if self.error:
-                return
+                if not self.lun_mapped(tpg, stg_object):
+                    self.logger.debug("{} needed mapping to "
+                                      "tpg{}".format(stg_object.name,
+                                                     tpg.tag))
+
+                    lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
+
+                    try:
+                        mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
+                        self.changes_made = True
+                    except RTSLibError as err:
+                        self.logger.error("LUN mapping failed: {}".format(err))
+                        self.error = True
+                        self.error_msg = err
+                        return
+
+                    try:
+                        self.bind_alua_group_to_lun(config, mapped_lun)
+                    except CephiSCSIInval as err:
+                        self.logger.error("Could not bind LUN to ALUA group: "
+                                          "{}".format(err))
+                        self.error = True
+                        self.error_msg = err
+                        return
+
+    def lun_mapped(self, tpg, storage_object):
+        """
+        Check to see if a given storage object (i.e. block device) is already
+        mapped to the gateway's TPG
+        :param storage_object: storage object to look for
+        :return: boolean - is the storage object mapped or not
+        """
+
+        mapped_state = False
+        for l in tpg.luns:
+            if l.storage_object.name == storage_object.name:
+                mapped_state = True
+                break
+
+        return mapped_state
 
     def delete(self):
         self.target.delete()

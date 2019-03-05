@@ -827,13 +827,19 @@ def _target_disk(target_iqn=None):
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
 
-        try:
-            lun.map_lun(gateway, owner, disk)
-        except CephiSCSIError as err:
-            status_code = 400 if str(err) else 500
-            logger.error("LUN add failed : {}".format(err))
+        lun.map_lun(target_iqn, owner, disk)
+        if lun.error:
+            status_code = 400 if lun.error_msg else 500
+            logger.error("LUN add failed : {}".format(lun.error_msg))
             return jsonify(message="Failed to add the LUN - "
-                                   "{}".format(err)), status_code
+                                   "{}".format(lun.error_msg)), status_code
+
+        logger.info("Syncing TPG to LUN mapping")
+        gateway.manage('map')
+        if gateway.error:
+            return jsonify(message="Failed to sync LUNs on gateway, "
+                                   "Err {}.".format(gateway.error_msg)), 500
+
     else:
         # DELETE gateway request
 

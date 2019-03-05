@@ -19,7 +19,6 @@ from ceph_iscsi_config.gateway_object import GWObject
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.group import Group
-from ceph_iscsi_config.backstore import lookup_storage_object
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -409,26 +408,20 @@ class LUN(GWObject):
 
             self.config.commit()
 
-    def map_lun(self, gateway, owner, disk):
-        target_config = self.config.config['targets'][gateway.iqn]
+    def map_lun(self, target_iqn, owner, disk):
+        target_config = self.config.config['targets'][target_iqn]
         disk_metadata = self.config.config['disks'][disk]
         disk_metadata['owner'] = owner
         self.config.update_item("disks", disk, disk_metadata)
 
         target_config['disks'].append(disk)
-        self.config.update_item("targets", gateway.iqn, target_config)
+        self.config.update_item("targets", target_iqn, target_config)
 
         gateway_dict = self.config.config['gateways'][owner]
         gateway_dict['active_luns'] += 1
         self.config.update_item('gateways', owner, gateway_dict)
 
-        so = self.allocate()
-        if self.error:
-            raise CephiSCSIError(self.error_msg)
-
-        gateway.map_lun(self.config, so)
-        if gateway.error:
-            raise CephiSCSIError(gateway.error_msg)
+        self.allocate()
 
     def manage(self, desired_state):
 
@@ -541,14 +534,6 @@ class LUN(GWObject):
                 raise CephiSCSIError(client_err)
 
     def allocate(self, keep_dev_in_lio=True):
-        """
-        Create image and add to LIO and config.
-
-        :param keep_dev_in_lio: (bool) false if the LIO so should be removed
-                                 after allocating the wwn.
-        :return: LIO storage object if successful and keep_dev_in_lio=True
-                 else None.
-        """
         self.logger.debug("LUN.allocate starting, listing rbd devices")
         disk_list = RBDDev.rbd_list(pool=self.pool)
         self.logger.debug("rados pool '{}' contains the following - "
@@ -578,7 +563,7 @@ class LUN(GWObject):
                 else:
                     self.error = True
                     self.error_msg = rbd_image.error_msg
-                    return None
+                    return
 
             else:
                 # the image isn't there, and this isn't the 'owning' host
@@ -592,7 +577,7 @@ class LUN(GWObject):
                         self.error = True
                         self.error_msg = ("(LUN.allocate) timed out waiting "
                                           "for rbd to show up")
-                        return None
+                        return
         else:
             # requested image is already defined to ceph
 
@@ -610,7 +595,7 @@ class LUN(GWObject):
                                   "with LIO\nOnly image features {} are"
                                   " supported".format(self.image, features))
                 self.logger.error(self.error_msg)
-                return None
+                return
 
         self.logger.debug("Check the rbd image size matches the request")
 
@@ -624,7 +609,7 @@ class LUN(GWObject):
                 self.logger.critical(rbd_image.error_msg)
                 self.error = True
                 self.error_msg = rbd_image.error_msg
-                return None
+                return
 
             if rbd_image.changed:
                 self.logger.info("rbd image {} resized "
@@ -654,17 +639,17 @@ class LUN(GWObject):
                 if wwn == '':
                     # disk hasn't been defined to LIO yet, it' not been defined
                     # to the config yet and this is the allocating host
-                    so = self.add_dev_to_lio()
+                    lun = self.add_dev_to_lio()
                     if self.error:
-                        return None
+                        return
 
                     # lun is now in LIO, time for some housekeeping :P
-                    wwn = so._get_wwn()
+                    wwn = lun._get_wwn()
 
                     if not keep_dev_in_lio:
                         self.remove_dev_from_lio()
                         if self.error:
-                            return None
+                            return
 
                     disk_attr = {"wwn": wwn,
                                  "image": self.image,
@@ -688,9 +673,9 @@ class LUN(GWObject):
 
                 else:
                     # config object already had wwn for this rbd image
-                    so = self.add_dev_to_lio(wwn)
+                    self.add_dev_to_lio(wwn)
                     if self.error:
-                        return None
+                        return
 
                     self.update_controls()
                     self.logger.debug("(LUN.allocate) registered '{}' to LIO "
@@ -722,13 +707,13 @@ class LUN(GWObject):
                     self.error_msg = ("(LUN.allocate) waited too long for the "
                                       "wwn information on image {} to "
                                       "arrive".format(self.image))
-                    return None
+                    return
 
                 # At this point we have a wwn from the config for this rbd
                 # image, so just add to LIO
-                so = self.add_dev_to_lio(wwn)
+                self.add_dev_to_lio(wwn)
                 if self.error:
-                    return None
+                    return
 
                 self.logger.info("(LUN.allocate) added {} to LIO using wwn "
                                  "'{}' defined by {}".format(self.image,
@@ -743,7 +728,7 @@ class LUN(GWObject):
                 self.error = True
                 self.error_msg = "Unable to sync the rbd device size with LIO"
                 self.logger.critical(self.error_msg)
-                return None
+                return
 
         self.logger.debug("config meta data for this disk is "
                           "{}".format(self.config.config['disks'][self.config_key]))
@@ -757,10 +742,6 @@ class LUN(GWObject):
             self.config.commit()
             self.error = self.config.error
             self.error_msg = self.config.error_msg
-            if self.error:
-                return None
-
-        return so
 
     def lio_size_ok(self, rbd_object, stg_object):
         """
@@ -803,11 +784,18 @@ class LUN(GWObject):
         return size_ok
 
     def lio_stg_object(self):
-        try:
-            return lookup_storage_object(self.config_key, self.backstore)
-        except RTSLibError as err:
-            self.logger.debug("lio stg lookup failed {}".format(err))
-            return None
+        found_it = False
+        rtsroot = root.RTSRoot()
+        for stg_object in rtsroot.storage_objects:
+
+            # First match on name, but then check the pool incase the same
+            # name exists in multiple pools
+            if stg_object.name == self.config_key:
+
+                found_it = True
+                break
+
+        return stg_object if found_it else None
 
     def add_dev_to_lio(self, in_wwn=None):
         """
@@ -903,19 +891,17 @@ class LUN(GWObject):
                     else:
                         break       # continue to the next tpg
 
-        so = self.lio_stg_object()
-        if not so:
-            self.error = True
-            self.error_msg = ("Removal failed. Could not find LIO object.")
-            return
+        for stg_object in lio_root.storage_objects:
+            if stg_object.name == self.config_key:
+                try:
+                    stg_object.delete()
+                except Exception as e:
+                    self.error = True
+                    self.error_msg = ("Delete from LIO/backstores failed - "
+                                      "{}".format(e))
+                    return
 
-        try:
-            so.delete()
-        except Exception as err:
-            self.error = True
-            self.error_msg = ("Delete from LIO/backstores failed - "
-                              "{}".format(err))
-            return
+                break
 
     @staticmethod
     def valid_disk(ceph_iscsi_config, logger, **kwargs):
