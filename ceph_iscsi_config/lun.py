@@ -1072,7 +1072,12 @@ class LUN(GWObject):
     def get_backstore_object_name(pool, image, disks_config):
         """
         Determine the backstore storage object name based on the pool name,
-        image name, and existing storage object names to avoid conflicts
+        image name, and existing storage object names to avoid conflicts.
+
+        Example of how name conflict resolution will work:
+          - Add disk `a.b/c` will create the storage object `a.b.c`
+          - Add disk `a/b.c` will create the storage object `a.b.c.1`
+
         :param pool: pool name
         :param image: image name
         :param disks_config: disks configuration from `gateway.conf`
