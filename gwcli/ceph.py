@@ -1,8 +1,6 @@
 from .node import UIGroup, UINode
 import json
 import rados
-import glob
-import os
 
 from gwcli.utils import console_message, os_cmd
 import ceph_iscsi_config.settings as settings
@@ -28,70 +26,15 @@ class CephGroup(UIGroup):
                  the pool(s), together with the current over-commit percentage.
                  '''
 
-    ceph_config_dir = '/etc/ceph'
-    default_ceph_conf = '{}/ceph.conf'.format(ceph_config_dir)
-
     def __init__(self, parent):
-        UIGroup.__init__(self, 'clusters', parent)
-        self.cluster_map = self.get_clusters()
-        self.local_ceph = None
+        UIGroup.__init__(self, 'cluster', parent)
 
-        for cluster_name in self.cluster_map.keys():
-
-            cluster_client_name = None
-            if cluster_name == settings.config.cluster_name:
-
-                if settings.config.cluster_client_name:
-                    cluster_client_name = settings.config.cluster_client_name
-                    self.cluster_map[cluster_name]['client_name'] = cluster_client_name
-
-            # define the cluster object
-            self.logger.debug("Adding ceph cluster '{}' to the UI".format(cluster_name))
-            cluster = CephCluster(self,
-                                  cluster_name,
-                                  self.cluster_map[cluster_name]['conf_file'],
-                                  cluster_client_name)
-
-            self.cluster_map[cluster_name]['object'] = cluster
-            if self.cluster_map[cluster_name]['local']:
-                self.local_ceph = cluster
-
-    def get_clusters(self):
-        """
-        Look at the /etc/ceph dir to generate a dict of clusters that are
-        defined/known to the gateway
-        :return: (dict) ceph_name -> conf_file, client_name
-        """
-
-        clusters = {}       # dict ceph_name -> conf_file, client_name
-
-        conf_files = glob.glob(os.path.join(CephGroup.ceph_config_dir,
-                               '*.conf'))
-
-        valid_conf_files = [conf for conf in conf_files
-                            if CephGroup.valid_conf(conf)]
-        for conf in valid_conf_files:
-            name = os.path.basename(conf).split('.')[0]
-            keyring = glob.glob(os.path.join(CephGroup.ceph_config_dir,
-                                             '{}*.keyring'.format(name)))
-
-            client_name = None
-            if keyring:
-                keyring = keyring[0]  # select the first one
-
-                if keyring.startswith("ceph.client."):
-                    begin_idx = keyring.find(".")
-                    end_idx = keyring.find(".keyring")
-                    client_name = keyring[begin_idx + 1:end_idx]
-
-            local = True if name == settings.config.cluster_name else False
-
-            clusters[name] = {'conf_file': conf,
-                              'client_name': client_name,
-                              'name': name,
-                              'local': local}
-
-        return clusters
+        self.logger.debug("Adding ceph cluster '{}' to the UI"
+                          .format(settings.config.cluster_name))
+        self.cluster = CephCluster(self,
+                                   settings.config.cluster_name,
+                                   settings.config.cephconf,
+                                   settings.config.cluster_client_name)
 
     @staticmethod
     def valid_conf(config_file):
