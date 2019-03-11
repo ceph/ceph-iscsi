@@ -14,11 +14,13 @@ class LIO(object):
 
     def drop_lun_maps(self, config, update_config):
 
-        disk_keys = config.config['disks'].keys()
+        disks_config = config.config['disks']
+        backstore_object_names = [disk['backstore_object_name'] for _, disk in
+                                  disks_config.items()]
 
         for stg_object in self.lio_root.storage_objects:
 
-            if stg_object.name in disk_keys:
+            if stg_object.name in backstore_object_names:
 
                 # this is an rbd device that's in the config object,
                 # so remove it
@@ -32,7 +34,8 @@ class LIO(object):
 
                     if update_config:
                         # update the disk item to remove the wwn info
-                        image_metadata = config.config['disks'][stg_object.name]
+                        image_metadata = [disk for _, disk in config.config['disks'].items()
+                                          if disk['backstore_object_name'] == stg_object.name][0]
                         image_metadata['wwn'] = ''
                         config.update_item("disks",
                                            stg_object.name,

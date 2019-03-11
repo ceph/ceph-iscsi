@@ -19,7 +19,7 @@ class Group(object):
         :param target_iqn: (str) target iqn
         :param group_name: (str) group name
         :param members: (list) iscsi IQN's of the clients
-        :param disks: (list) disk names of the format pool.image
+        :param disks: (list) disk names of the format pool/image
         """
 
         self.logger = logger
@@ -318,7 +318,7 @@ class Group(object):
         # grab the client's metadata from the config (needed by setup_luns)
         target_config = self.config.config['targets'][self.target_iqn]
         client.metadata = target_config['clients'][client_iqn]
-        client.setup_luns()
+        client.setup_luns(self.config.config['disks'])
 
         if client.error:
             self._set_error(client.error_msg)

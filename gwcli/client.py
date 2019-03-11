@@ -340,7 +340,11 @@ class Client(UINode):
 
     def summary(self):
 
-        all_disks = self.parent.parent.parent.parent.disks.children
+        all_pools = self.parent.parent.parent.parent.disks.children
+        all_disks = []
+        for pool in all_pools:
+            for disk in pool.children:
+                all_disks.append(disk)
         total_bytes = 0
 
         client_luns = [lun.rbd_name for lun in self.children]
@@ -497,8 +501,8 @@ class Client(UINode):
         in the configuration, the cli will attempt to create it for you.
 
         e.g.
-        disk add <pool_name.image_name> <size>
-        disk remove <pool_name.image_name>
+        disk add <pool_name/image_name> <size>
+        disk remove <pool_name/image_name>
 
         Adding a disk will result in the disk occupying the client's next
         available lun id. Once allocated removing a LUN will not change the
@@ -533,8 +537,13 @@ class Client(UINode):
 
             if disk not in current_luns:
                 ui_root = self.get_ui_root()
+                all_pools = ui_root.disks.children
+                all_disks = []
+                for current_pool in all_pools:
+                    for current_disk in current_pool.children:
+                        all_disks.append(current_disk)
                 valid_disk_names = [defined_disk.image_id
-                                    for defined_disk in ui_root.disks.children]
+                                    for defined_disk in all_disks]
             else:
                 # disk provided is already mapped, so remind the user
                 self.logger.error("Disk {} already mapped".format(disk))
@@ -553,9 +562,9 @@ class Client(UINode):
 
                 # a disk given here would be of the form pool.image
                 try:
-                    pool, image = disk.split('.')
+                    pool, image = disk.split('/')
                 except ValueError:
-                    self.logger.error("Invalid format. Use pool_name.disk_name")
+                    self.logger.error("Invalid format. Use pool_name/disk_name")
                     return
 
                 rc = ui_disks.create_disk(pool=pool, image=image, size=size)

@@ -272,18 +272,20 @@ class LUN(GWObject):
         ]
     }
 
-    def __init__(self, logger, pool, image, size, allocating_host, backstore):
+    def __init__(self, logger, pool, image, size, allocating_host,
+                 backstore, backstore_object_name):
         self.logger = logger
         self.image = image
         self.pool = pool
         self.pool_id = 0
         self.size_bytes = convert_2_bytes(size)
-        self.config_key = '{}.{}'.format(self.pool, self.image)
+        self.config_key = '{}/{}'.format(self.pool, self.image)
 
         # the allocating host could be fqdn or shortname - but the config
         # only uses shortname so it needs to be converted to shortname format
         self.allocating_host = allocating_host.split('.')[0]
         self.backstore = backstore
+        self.backstore_object_name = backstore_object_name
 
         self.error = False
         self.error_msg = ''
@@ -672,7 +674,8 @@ class LUN(GWObject):
                                  "allocating_host": self.allocating_host,
                                  "pool_id": rbd_image.pool_id,
                                  "controls": self.controls,
-                                 "backstore": self.backstore}
+                                 "backstore": self.backstore,
+                                 "backstore_object_name": self.backstore_object_name}
 
                     self.config.update_item('disks',
                                             self.config_key,
@@ -804,7 +807,7 @@ class LUN(GWObject):
 
     def lio_stg_object(self):
         try:
-            return lookup_storage_object(self.config_key, self.backstore)
+            return lookup_storage_object(self.backstore_object_name, self.backstore)
         except RTSLibError as err:
             self.logger.debug("lio stg lookup failed {}".format(err))
             return None
@@ -859,7 +862,7 @@ class LUN(GWObject):
             if (settings.config.cephconf != '/etc/ceph/ceph.conf'):
                 cfgstring += ";conf={}".format(settings.config.cephconf)
 
-            new_lun = UserBackedStorageObject(name=self.config_key,
+            new_lun = UserBackedStorageObject(name=self.backstore_object_name,
                                               config=cfgstring,
                                               size=self.size_bytes,
                                               wwn=in_wwn, control=control_string)
@@ -892,7 +895,7 @@ class LUN(GWObject):
         # remove the device from all tpgs
         for t in lio_root.tpgs:
             for lun in t.luns:
-                if lun.storage_object.name == self.config_key:
+                if lun.storage_object.name == self.backstore_object_name:
                     try:
                         lun.delete()
                     except Exception as e:
@@ -954,7 +957,7 @@ class LUN(GWObject):
 
         config = ceph_iscsi_config.config
 
-        disk_key = "{}.{}".format(kwargs['pool'], kwargs['image'])
+        disk_key = "{}/{}".format(kwargs['pool'], kwargs['image'])
 
         if mode in ['create', 'resize']:
 
@@ -968,11 +971,11 @@ class LUN(GWObject):
             if len(config['disks']) >= 256:
                 return "Disk limit of 256 reached."
 
-            disk_regex = re.compile(r"^[a-zA-Z0-9\-_]+$")
+            disk_regex = re.compile(r"^[a-zA-Z0-9\-_\.]+$")
             if not disk_regex.search(kwargs['pool']):
-                return "Invalid pool name (use alphanumeric, '_', or '-' characters)"
+                return "Invalid pool name (use alphanumeric, '_', '.', or '-' characters)"
             if not disk_regex.search(kwargs['image']):
-                return "Invalid image name (use alphanumeric, '_', or '-' characters)"
+                return "Invalid image name (use alphanumeric, '_', '.', or '-' characters)"
 
             if kwargs['count'].isdigit():
                 if not 1 <= int(kwargs['count']) <= 10:
@@ -1061,6 +1064,34 @@ class LUN(GWObject):
                       key=lambda x: (gateways[x]['active_luns']))[0]
 
     @staticmethod
+    def _backstore_object_name_exists(disks_config, backstore_object_name_exists):
+        return len([disk for _, disk in disks_config.items()
+                    if disk['backstore_object_name'] == backstore_object_name_exists]) > 0
+
+    @staticmethod
+    def get_backstore_object_name(pool, image, disks_config):
+        """
+        Determine the backstore storage object name based on the pool name,
+        image name, and existing storage object names to avoid conflicts.
+
+        Example of how name conflict resolution will work:
+          - Add disk `a.b/c` will create the storage object `a.b.c`
+          - Add disk `a/b.c` will create the storage object `a.b.c.1`
+
+        :param pool: pool name
+        :param image: image name
+        :param disks_config: disks configuration from `gateway.conf`
+        :return: the backstore storage object name to be used
+        """
+        base_name = '{}.{}'.format(pool, image)
+        candidate = base_name
+        counter = 0
+        while LUN._backstore_object_name_exists(disks_config, candidate):
+            counter += 1
+            candidate = '{}.{}'.format(base_name, counter)
+        return candidate
+
+    @staticmethod
     def define_luns(logger, config, gateway):
         """
         define the disks in the config to LIO
@@ -1093,7 +1124,7 @@ class LUN(GWObject):
                 with cluster.open_ioctx(pool) as ioctx:
 
                     pool_disks = [disk_key for disk_key in srtd_disks
-                                  if disk_key.startswith(pool + '.')]
+                                  if disk_key.startswith(pool + '/')]
                     for disk_key in pool_disks:
 
                         is_lun_mapped = False
@@ -1103,15 +1134,17 @@ class LUN(GWObject):
                                 is_lun_mapped = True
                                 break
                         if is_lun_mapped:
-                            pool, image_name = disk_key.split('.')
+                            pool, image_name = disk_key.split('/')
 
                             try:
                                 with rbd.Image(ioctx, image_name) as rbd_image:
                                     RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
 
-                                    backstore = config.config['disks'][disk_key]['backstore']
-                                    lun = LUN(logger, pool, image_name,
-                                              rbd_image.size(), local_gw, backstore)
+                                    disk_config = config.config['disks'][disk_key]
+                                    backstore = disk_config['backstore']
+                                    backstore_object_name = disk_config['backstore_object_name']
+                                    lun = LUN(logger, pool, image_name, rbd_image.size(),
+                                              local_gw, backstore, backstore_object_name)
                                     if lun.error:
                                         raise CephiSCSIError("Error defining rbd "
                                                              "image {}".format(disk_key))

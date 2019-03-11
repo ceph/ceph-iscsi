@@ -299,7 +299,12 @@ class HostGroup(UIGroup):
         # simple sanity checks
         # 1. does the disk exist in the configuration
         ui_root = self.get_ui_root()
-        if disk_name not in [disk.name for disk in ui_root.disks.children]:
+        all_pools = ui_root.disks.children
+        all_disks = []
+        for current_pool in all_pools:
+            for current_disk in current_pool.children:
+                all_disks.append(current_disk)
+        if disk_name not in [disk.image_id for disk in all_disks]:
             self.logger.error("Disk '{}' is not defined within the "
                               "configuration".format(disk_name))
             return
