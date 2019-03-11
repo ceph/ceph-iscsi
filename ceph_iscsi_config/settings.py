@@ -94,8 +94,8 @@ class Settings(object):
         return v
 
     defaults = {"cluster_name": "ceph",
-                "gateway_keyring": "ceph.client.admin.keyring",
                 "pool": "rbd",
+                "cluster_client_name": "client.admin",
                 "time_out": 30,
                 "api_host": "::",
                 "api_port": 5000,
@@ -160,7 +160,7 @@ class Settings(object):
                 # We always want these values set to at least the defaults.
                 self._define_settings(Settings.target_defaults)
 
-        self.cephconf = '/etc/ceph/{}.conf'.format(self.cluster_name)
+        self.cephconf = '{}/{}.conf'.format(self.ceph_config_dir, self.cluster_name)
         if self.api_secure:
             self.api_ssl_verify = False if self.api_secure else None
 
