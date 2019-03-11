@@ -160,7 +160,7 @@ class Settings(object):
                 # We always want these values set to at least the defaults.
                 self._define_settings(Settings.target_defaults)
 
-        self.cephconf = '/etc/ceph/{}.conf'.format(self.cluster_name)
+        self.cephconf = '{}/{}.conf'.format(self.ceph_config_dir, self.cluster_name)
         if self.api_secure:
             self.api_ssl_verify = False if self.api_secure else None
 
