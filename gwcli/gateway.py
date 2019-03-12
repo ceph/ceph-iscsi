@@ -480,7 +480,7 @@ class Target(UINode):
         config = self.parent.parent._get_config()
         if not config:
             self.logger.error("Unable to refresh local config")
-        self.controls = config.get('controls', {})
+        self.controls = config['targets'][self.target_iqn]['controls']
 
         self.logger.info('ok')
 

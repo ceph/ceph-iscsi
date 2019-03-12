@@ -271,6 +271,16 @@ def target(target_iqn=None):
             return jsonify(message="Unexpected or invalid controls - "
                                    "{}".format(err)), 500
 
+        if mode == 'reconfigure':
+            target_config = config.config['targets'].get(target_iqn, None)
+            if target_config is None:
+                return jsonify(message="Target: {} is not defined."
+                                       "".format(target_iqn)), 400
+
+            if client_controls and not target_config['clients']:
+                return jsonify(message="No clients found. Create clients then "
+                                       "rerun reconfigure command."), 400
+
         gateway_ip_list = []
         target = GWTarget(logger,
                           str(target_iqn),
