@@ -421,7 +421,7 @@ class GWTarget(GWObject):
                 mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
                 self.changes_made = True
             except RTSLibError as err:
-                if "already exists in configFS" not in err:
+                if "already exists in configFS" not in str(err):
                     self.logger.error("LUN mapping failed: {}".format(err))
                     self.error = True
                     self.error_msg = err
