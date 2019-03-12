@@ -14,6 +14,7 @@ import threading
 import time
 import inspect
 import platform
+import copy
 
 from functools import (reduce, wraps)
 from rpm import labelCompare
@@ -36,7 +37,7 @@ from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
                                      format_lio_yes_no, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway, valid_client,
-                         get_remote_gateways, valid_snapshot_name,
+                         valid_credentials, get_remote_gateways, valid_snapshot_name,
                          GatewayAPIError)
 
 app = Flask(__name__)
@@ -386,21 +387,25 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
     for client_iqn in target_config['clients']:
         client_metadata = target_config['clients'][client_iqn]
         image_list = client_metadata['luns'].keys()
-        client_chap = CHAP(client_metadata['auth']['chap'])
-        chap_str = client_chap.chap_str
+        client_auth_config = client_metadata['auth']
+        client_chap = CHAP(client_auth_config['username'],
+                           client_auth_config['password'],
+                           client_auth_config['password_encryption_enabled'])
         if client_chap.error:
             logger.debug("Password decode issue : "
                          "{}".format(client_chap.error_msg))
             halt("Unable to decode password for {}".format(client_iqn))
 
-        client_chap_mutual = CHAP(client_metadata['auth']['chap_mutual'])
-        chap_mutual_str = client_chap_mutual.chap_str
+        client_chap_mutual = CHAP(client_auth_config['mutual_username'],
+                                  client_auth_config['mutual_password'],
+                                  client_auth_config['mutual_password_encryption_enabled'])
         if client_chap_mutual.error:
             logger.debug("Password decode issue : "
                          "{}".format(client_chap_mutual.error_msg))
             halt("Unable to decode password for {}".format(client_iqn))
 
-        client = GWClient(logger, client_iqn, image_list, chap_str, chap_mutual_str, target_iqn)
+        client = GWClient(logger, client_iqn, image_list, client_chap.user, client_chap.password,
+                          client_chap_mutual.user, client_chap_mutual.password, target_iqn)
         if client.error:
             logger.error("Could not create client. Control override failed "
                          "{} - {}".format(client_iqn, client.error_msg))
@@ -471,6 +476,7 @@ def get_config():
     """
     Return the complete config object to the caller (must be authenticated)
     WARNING: Contents will include any defined CHAP credentials
+    :param decrypt_passwords: (bool) if true, passwords will be decrypted
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/config
@@ -478,7 +484,32 @@ def get_config():
 
     if request.method == 'GET':
         config.refresh()
-        return jsonify(config.config), 200
+        decrypt_passwords = request.args.get('decrypt_passwords', 'false')
+        result_config = copy.deepcopy(config.config)
+
+        if decrypt_passwords.lower() == 'true':
+            discovery_auth_config = result_config['discovery_auth']
+            chap = CHAP(discovery_auth_config['username'],
+                        discovery_auth_config['password'],
+                        discovery_auth_config['password_encryption_enabled'])
+            discovery_auth_config['password'] = chap.password
+            chap = CHAP(discovery_auth_config['mutual_username'],
+                        discovery_auth_config['mutual_password'],
+                        discovery_auth_config['mutual_password_encryption_enabled'])
+            discovery_auth_config['mutual_password'] = chap.password
+            for _, target in result_config['targets'].items():
+                for _, client in target['clients'].items():
+                    auth_config = client['auth']
+                    chap = CHAP(auth_config['username'],
+                                auth_config['password'],
+                                auth_config['password_encryption_enabled'])
+                    auth_config['password'] = chap.password
+                    chap = CHAP(auth_config['mutual_username'],
+                                auth_config['mutual_password'],
+                                auth_config['mutual_password_encryption_enabled'])
+                    auth_config['mutual_password'] = chap.password
+
+        return jsonify(result_config), 200
 
 
 @app.route('/api/gateways/<target_iqn>', methods=['GET'])
@@ -1441,44 +1472,48 @@ def discoveryauth():
     """
     Coordinate discovery authentication changes across each gateway node
     The following parameters are needed to manage discovery auth
-    :param chap: (str) chap string of the form username/password or ''
-            username is 8-64 chars long containing any alphanumeric in
-                [0-9a-zA-Z] and '.' ':' '@' '_' '-'
-            password is 12-16 chars long containing any alphanumeric in
-                [0-9a-zA-Z] and '@' '-' '_'
-    :param chap_mutual: (str) chap string of the form username/password or ''
-            username is 8-64 chars long containing any alphanumeric in
-                [0-9a-zA-Z] and '.' ':' '@' '_' '-'
-            password is 12-16 chars long containing any alphanumeric in
-                [0-9a-zA-Z] and '@' '-' '_'
+    :param username: (str) username string is 8-64 chars long containing any alphanumeric in
+                           [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+    :param password: (str) password string is 12-16 chars long containing any alphanumeric in
+                           [0-9a-zA-Z] and '@' '-' '_' '/'
+    :param mutual_username: (str) mutual_username string is 8-64 chars long containing any
+                            alphanumeric in
+                            [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+    :param mutual_password: (str) mutual_password string is 12-16 chars long containing any
+                            alphanumeric in
+                            [0-9a-zA-Z] and '@' '-' '_' '/'
     **RESTRICTED**
-    Examples:
-    curl --insecure --user admin:admin -d chap=''
-        -X PUT https://192.168.122.69:5000/api/discoveryauth
-    curl --insecure --user admin:admin -d chap=dmin1234/admin12345678
+    Example:
+    curl --insecure --user admin:admin -d username=myiscsiusername -d password=myiscsipassword
+        -d mutual_username=myiscsiusername -d mutual_password=myiscsipassword
         -X PUT https://192.168.122.69:5000/api/discoveryauth
     """
 
-    chap = request.form.get('chap')
-    chap_mutual = request.form.get('chap_mutual')
+    username = request.form.get('username', '')
+    password = request.form.get('password', '')
+    mutual_username = request.form.get('mutual_username', '')
+    mutual_password = request.form.get('mutual_password', '')
 
     # Validate request
-    error_msg = Discovery.validate_discovery_auth(chap, chap_mutual)
+    error_msg = valid_credentials(username, password, mutual_username, mutual_password)
     if error_msg:
         logger.error("BAD discovery auth request from {} - {}".format(
             request.remote_addr, error_msg))
         return jsonify(message=error_msg), 400
 
     # Apply to all gateways
-    api_vars = {"chap": chap,
-                "chap_mutual": chap_mutual}
+    api_vars = {"username": username,
+                "password": password,
+                "mutual_username": mutual_username,
+                "mutual_password": mutual_password}
     gateways = config.config['gateways'].keys()
     resp_text, resp_code = call_api(gateways, '_discoveryauth', '',
                                     http_method='put',
                                     api_vars=api_vars)
 
     # Update the configuration
-    Discovery.set_discovery_auth_config(chap, chap_mutual, config)
+    Discovery.set_discovery_auth_config(username, password, mutual_username, mutual_password,
+                                        config)
     config.commit("retain")
 
     return jsonify(message="discovery auth {}".format(resp_text)), \
@@ -1494,10 +1529,13 @@ def _discoveryauth():
     **RESTRICTED**
     """
 
-    chap = request.form['chap']
-    chap_mutual = request.form['chap_mutual']
+    username = request.form.get('username', '')
+    password = request.form.get('password', '')
+    mutual_username = request.form.get('mutual_username', '')
+    mutual_password = request.form.get('mutual_password', '')
 
-    Discovery.set_discovery_auth_lio(chap, chap_mutual)
+    Discovery.set_discovery_auth_lio(username, password, False, mutual_username, mutual_password,
+                                     False)
 
     return jsonify(message='OK'), 200
 
@@ -1615,8 +1653,10 @@ def _update_client(**kwargs):
     client = GWClient(logger,
                       kwargs['client_iqn'],
                       image_list,
-                      kwargs['chap'],
-                      kwargs['chap_mutual'],
+                      kwargs['username'],
+                      kwargs['password'],
+                      kwargs['mutual_username'],
+                      kwargs['mutual_password'],
                       kwargs['target_iqn'])
 
     if client.error:
@@ -1642,21 +1682,20 @@ def clientauth(target_iqn, client_iqn):
     The following parameters are needed to manage client auth
     :param target_iqn: (str) target IQN name
     :param client_iqn: (str) client IQN name
-    :param chap: (str) chap string of the form username/password or ''
-            username is 8-64 chars long containing any alphanumeric in
-                [0-9a-zA-Z] and '.' ':' '@' '_' '-'
-            password is 12-16 chars long containing any alphanumeric in
-                [0-9a-zA-Z] and '@' '-' '_'
-    :param chap_mutual: (str) chap string of the form username/password or ''
-            username is 8-64 chars long containing any alphanumeric in
-                [0-9a-zA-Z] and '.' ':' '@' '_' '-'
-            password is 12-16 chars long containing any alphanumeric in
-                [0-9a-zA-Z] and '@' '-' '_'
+    :param username: (str) username string is 8-64 chars long containing any alphanumeric in
+                           [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+    :param password: (str) password string is 12-16 chars long containing any alphanumeric in
+                           [0-9a-zA-Z] and '@' '-' '_' '/'
+    :param mutual_username: (str) mutual_username string is 8-64 chars long containing any
+                            alphanumeric in
+                            [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+    :param mutual_password: (str) mutual_password string is 12-16 chars long containing any
+                            alphanumeric in
+                            [0-9a-zA-Z] and '@' '-' '_' '/'
     **RESTRICTED**
-    Examples:
-    curl --insecure --user admin:admin -d chap=''
-        -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
-    curl --insecure --user admin:admin -d chap=dmin1234/admin12345678
+    Example:
+    curl --insecure --user admin:admin -d username=myiscsiusername -d password=myiscsipassword
+        -d mutual_username=myiscsiusername -d mutual_password=myiscsipassword
         -X PUT https://192.168.122.69:5000/api/clientauth/iqn.2017-08.org.ceph:iscsi-gw0
     """
 
@@ -1681,12 +1720,17 @@ def clientauth(target_iqn, client_iqn):
 
     lun_list = target_config['clients'][client_iqn]['luns'].keys()
     image_list = ','.join(lun_list)
-    chap = request.form.get('chap')
-    chap_mutual = request.form.get('chap_mutual')
+    username = request.form.get('username', '')
+    password = request.form.get('password', '')
+    mutual_username = request.form.get('mutual_username', '')
+    mutual_password = request.form.get('mutual_password', '')
 
     client_usable = valid_client(mode='auth',
                                  client_iqn=client_iqn,
-                                 chap=chap,
+                                 username=username,
+                                 password=password,
+                                 mutual_username=mutual_username,
+                                 mutual_password=mutual_password,
                                  target_iqn=target_iqn)
     if client_usable != 'ok':
         logger.error("BAD auth request from {}".format(request.remote_addr))
@@ -1694,8 +1738,10 @@ def clientauth(target_iqn, client_iqn):
 
     api_vars = {"committing_host": this_host(),
                 "image_list": image_list,
-                "chap": chap,
-                "chap_mutual": chap_mutual}
+                "username": username,
+                "password": password,
+                "mutual_username": mutual_username,
+                "mutual_password": mutual_password}
 
     gateways.insert(0, 'localhost')
 
@@ -1721,14 +1767,18 @@ def _clientauth(target_iqn, client_iqn):
 
     # PUT request to define/change authentication
     image_list = request.form['image_list']
-    chap = request.form['chap']
-    chap_mutual = request.form['chap_mutual']
+    username = request.form.get('username', '')
+    password = request.form.get('password', '')
+    mutual_username = request.form.get('mutual_username', '')
+    mutual_password = request.form.get('mutual_password', '')
     committing_host = request.form['committing_host']
 
     status_code, status_text = _update_client(client_iqn=client_iqn,
                                               images=image_list,
-                                              chap=chap,
-                                              chap_mutual=chap_mutual,
+                                              username=username,
+                                              password=password,
+                                              mutual_username=mutual_username,
+                                              mutual_password=mutual_password,
                                               committing_host=committing_host,
                                               target_iqn=target_iqn)
 
@@ -1779,10 +1829,13 @@ def clientlun(target_iqn, client_iqn):
         else:
             return jsonify(message="disk not mapped to client"), 400
 
-    chap_obj = CHAP(target_config['clients'][client_iqn]['auth']['chap'])
-    chap = "{}/{}".format(chap_obj.user, chap_obj.password)
-    chap_mutual_obj = CHAP(target_config['clients'][client_iqn]['auth']['chap_mutual'])
-    chap_mutual = "{}/{}".format(chap_mutual_obj.user, chap_mutual_obj.password)
+    auth_config = target_config['clients'][client_iqn]['auth']
+    chap_obj = CHAP(auth_config['username'],
+                    auth_config['password'],
+                    auth_config['password_encryption_enabled'])
+    chap_mutual_obj = CHAP(auth_config['mutual_username'],
+                           auth_config['mutual_password'],
+                           auth_config['mutual_password_encryption_enabled'])
     image_list = ','.join(lun_list)
     client_usable = valid_client(mode='disk', client_iqn=client_iqn,
                                  image_list=image_list,
@@ -1796,8 +1849,10 @@ def clientlun(target_iqn, client_iqn):
     # committing host is the local LIO node
     api_vars = {"committing_host": this_host(),
                 "image_list": image_list,
-                "chap": chap,
-                "chap_mutual": chap_mutual}
+                "username": chap_obj.user,
+                "password": chap_obj.password,
+                "mutual_username": chap_mutual_obj.user,
+                "mutual_password": chap_mutual_obj.password}
 
     gateways.insert(0, 'localhost')
     resp_text, resp_code = call_api(gateways, '_clientlun',
@@ -1833,14 +1888,18 @@ def _clientlun(target_iqn, client_iqn):
 
         image_list = request.form['image_list']
 
-        chap = request.form['chap']
-        chap_mutual = request.form['chap_mutual']
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        mutual_username = request.form.get('mutual_username', '')
+        mutual_password = request.form.get('mutual_password', '')
         committing_host = request.form['committing_host']
 
         status_code, status_text = _update_client(client_iqn=client_iqn,
                                                   images=image_list,
-                                                  chap=chap,
-                                                  chap_mutual=chap_mutual,
+                                                  username=username,
+                                                  password=password,
+                                                  mutual_username=mutual_username,
+                                                  mutual_password=mutual_password,
                                                   committing_host=committing_host,
                                                   target_iqn=target_iqn)
 
@@ -1952,13 +2011,17 @@ def _client(target_iqn, client_iqn):
 
         image_list = request.form.get('image_list', '')
 
-        chap = request.form.get('chap', '')
-        chap_mutual = request.form.get('chap_mutual', '')
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        mutual_username = request.form.get('mutual_username', '')
+        mutual_password = request.form.get('mutual_password', '')
 
         status_code, status_text = _update_client(client_iqn=client_iqn,
                                                   images=image_list,
-                                                  chap=chap,
-                                                  chap_mutual=chap_mutual,
+                                                  username=username,
+                                                  password=password,
+                                                  mutual_username=mutual_username,
+                                                  mutual_password=mutual_password,
                                                   committing_host=committing_host,
                                                   target_iqn=target_iqn)
 
@@ -1973,7 +2036,7 @@ def _client(target_iqn, client_iqn):
         # Make sure the delete request is for a client we have defined
         target_config = config.config['targets'][target_iqn]
         if client_iqn in target_config['clients'].keys():
-            client = GWClient(logger, client_iqn, '', '', '', target_iqn)
+            client = GWClient(logger, client_iqn, '', '', '', '', '', target_iqn)
             client.manage('absent', committer=committing_host)
 
             if client.error:

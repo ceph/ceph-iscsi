@@ -27,19 +27,27 @@ class GWClient(GWObject):
                 "nopin_timeout",
                 "cmdsn_depth"]
 
-    seed_metadata = {"auth": {"chap": '', "chap_mutual": ''},
+    seed_metadata = {"auth": {"username": '',
+                              "password": '',
+                              "password_encryption_enabled": False,
+                              "mutual_username": '',
+                              "mutual_password": '',
+                              "mutual_password_encryption_enabled": False},
                      "luns": {},
                      "group_name": ""
                      }
 
-    def __init__(self, logger, client_iqn, image_list, chap, chap_mutual, target_iqn):
+    def __init__(self, logger, client_iqn, image_list, username, password, mutual_username,
+                 mutual_password, target_iqn):
         """
         Instantiate an instance of an LIO client
         :param client_iqn: (str) iscsi iqn string
         :param image_list: (list) list of rbd images (pool/image) to attach
                            to this client or list of tuples (disk, lunid)
-        :param chap: (str) chap credentials in the format 'user/password'
-        :param chap_mutual: (str) chap_mutual credentials in the format 'user/password'
+        :param username: (str) chap username
+        :param password: (str) chap password
+        :param mutual_username: (str) chap mutual username
+        :param mutual_password: (str) chap mutual password
         :param target_iqn: (str) target iqn string
         :return:
         """
@@ -63,8 +71,10 @@ class GWClient(GWObject):
             else:
                 self.requested_images = image_list
 
-        self.chap = chap                        # parameters for auth
-        self.chap_mutual = chap_mutual          # parameters for mutual auth
+        self.username = username
+        self.password = password
+        self.mutual_username = mutual_username
+        self.mutual_password = mutual_password
         self.mutual = ''
         self.tpgauth = ''
         self.metadata = {}
@@ -237,17 +247,20 @@ class GWClient(GWObject):
         target_config = config.config['targets'][target_iqn]
         for client_iqn in target_config['clients']:
             client_metadata = target_config['clients'][client_iqn]
-            client_chap = CHAP(client_metadata['auth']['chap'])
-            client_chap_mutual = CHAP(client_metadata['auth']['chap_mutual'])
+            client_chap = CHAP(client_metadata['auth']['username'],
+                               client_metadata['auth']['password'],
+                               client_metadata['auth']['password_encryption_enabled'])
+            client_chap_mutual = CHAP(client_metadata['auth']['mutual_username'],
+                                      client_metadata['auth']['mutual_password'],
+                                      client_metadata['auth'][
+                                          'mutual_password_encryption_enabled'])
 
             image_list = list(client_metadata['luns'].keys())
 
-            chap_str = client_chap.chap_str
             if client_chap.error:
                 raise CephiSCSIError("Unable to decode password for {}. "
                                      "CHAP error: {}".format(client_iqn,
                                                              client_chap.error_msg))
-            chap_mutual_str = client_chap_mutual.chap_str
             if client_chap_mutual.error:
                 raise CephiSCSIError("Unable to decode password for {}. "
                                      "CHAP_MUTUAL error: {}".format(client_iqn,
@@ -256,8 +269,10 @@ class GWClient(GWObject):
             client = GWClient(logger,
                               client_iqn,
                               image_list,
-                              chap_str,
-                              chap_mutual_str,
+                              client_chap.user,
+                              client_chap.password,
+                              client_chap_mutual.user,
+                              client_chap_mutual.password,
                               target_iqn)
 
             client.manage('present')  # ensure the client exists
@@ -276,66 +291,48 @@ class GWClient(GWObject):
 
         tpg.set_attribute('authentication', '0')
 
-    def configure_auth(self, chap_credentials, chap_mutual_credentials, target_config):
+    def configure_auth(self, username, password, mutual_username, mutual_password, target_config):
         """
         Attempt to configure authentication for the client
         :return:
         """
 
-        auth_enabled = False
-        if '/' in chap_credentials:
-            client_username, client_password = chap_credentials.split('/', 1)
-            auth_enabled = True
-        elif not chap_credentials:
-            client_username = ''
-            client_password = ''
-            chap_credentials = "/"
+        auth_enabled = (username and password)
 
-        if '/' in chap_mutual_credentials:
-            client_mutual_username, client_mutual_password = chap_mutual_credentials.split('/', 1)
-            auth_enabled = True
-        elif not chap_mutual_credentials:
-            client_mutual_username = ''
-            client_mutual_password = ''
-            chap_mutual_credentials = "/"
-
-        self.logger.debug("configuring auth chap={}, chap_mutual={}".format(
-            chap_credentials, chap_mutual_credentials))
-
-        acl_credentials = "{}/{}".format(self.acl.chap_userid,
-                                         self.acl.chap_password)
-        acl_mutual_credentials = "{}/{}".format(self.acl.chap_mutual_userid,
-                                                self.acl.chap_mutual_password)
+        self.logger.debug("configuring auth username={}, password={}, mutual_username={}, "
+                          "mutual_password={}".format(username, password, mutual_username,
+                                                      mutual_password))
+        acl_chap_userid = self.acl.chap_userid
+        acl_chap_password = self.acl.chap_password
+        acl_chap_mutual_userid = self.acl.chap_mutual_userid
+        acl_chap_mutual_password = self.acl.chap_mutual_password
 
         try:
             self.logger.debug("Updating the ACL")
-            if chap_credentials != acl_credentials:
-                self.acl.chap_userid = client_username
-                self.acl.chap_password = client_password
+            if username != self.acl.chap_userid or \
+                    password != self.acl.chap_password:
+                self.acl.chap_userid = username
+                self.acl.chap_password = password
 
-                new_chap = CHAP(chap_credentials)
-                self.logger.debug("chap object set to: {},{},{},{}".format(
-                    new_chap.chap_str, new_chap.user, new_chap.password,
-                    new_chap.password_str))
+                new_chap = CHAP(username, password, False)
+                self.logger.debug("chap object set to: {},{},{}".format(
+                    new_chap.user, new_chap.password, new_chap.password_str))
 
-                new_chap.chap_str = "{}/{}".format(client_username,
-                                                   client_password)
                 if new_chap.error:
                     self.error = True
                     self.error_msg = new_chap.error_msg
                     return
 
-            if chap_mutual_credentials != acl_mutual_credentials:
-                self.acl.chap_mutual_userid = client_mutual_username
-                self.acl.chap_mutual_password = client_mutual_password
+            if mutual_username != self.acl.chap_mutual_userid or \
+                    mutual_password != self.acl.chap_mutual_password:
+                self.acl.chap_mutual_userid = mutual_username
+                self.acl.chap_mutual_password = mutual_password
 
-                new_chap_mutual = CHAP(chap_mutual_credentials)
-                self.logger.debug("chap mutual object set to: {},{},{},{}".format(
-                    new_chap_mutual.chap_str, new_chap_mutual.user, new_chap_mutual.password,
+                new_chap_mutual = CHAP(mutual_username, mutual_password, False)
+                self.logger.debug("chap mutual object set to: {},{},{}".format(
+                    new_chap_mutual.user, new_chap_mutual.password,
                     new_chap_mutual.password_str))
 
-                new_chap_mutual.chap_str = "{}/{}".format(client_mutual_username,
-                                                          client_mutual_password)
                 if new_chap_mutual.error:
                     self.error = True
                     self.error_msg = new_chap_mutual.error_msg
@@ -347,10 +344,18 @@ class GWClient(GWObject):
                 self.try_disable_auth(self.tpg)
 
             self.logger.debug("Updating config object meta data")
-            if chap_credentials != acl_credentials:
-                self.metadata['auth']['chap'] = new_chap.chap_str
-            if chap_mutual_credentials != acl_mutual_credentials:
-                self.metadata['auth']['chap_mutual'] = new_chap_mutual.chap_str
+            encryption_enabled = encryption_available()
+            if username != acl_chap_userid:
+                self.metadata['auth']['username'] = new_chap.user
+            if password != acl_chap_password:
+                self.metadata['auth']['password'] = new_chap.encrypted_password(encryption_enabled)
+                self.metadata['auth']['password_encryption_enabled'] = encryption_enabled
+            if mutual_username != acl_chap_mutual_userid:
+                self.metadata['auth']['mutual_username'] = new_chap_mutual.user
+            if mutual_password != acl_chap_mutual_password:
+                self.metadata['auth']['mutual_password'] = \
+                    new_chap_mutual.encrypted_password(encryption_enabled)
+                self.metadata['auth']['mutual_password_encryption_enabled'] = encryption_enabled
 
         except RTSLibError as err:
             self.error = True
@@ -526,23 +531,27 @@ class GWClient(GWObject):
                 #
                 # Does the request match the current config?
 
-                # extract the chap_str from the config object entry
-                config_chap = CHAP(self.metadata['auth']['chap'])
-                chap_str = config_chap.chap_str
+                auth_config = self.metadata['auth']
+                config_chap = CHAP(auth_config['username'],
+                                   auth_config['password'],
+                                   auth_config['password_encryption_enabled'])
                 if config_chap.error:
                     self.error = True
                     self.error_msg = config_chap.error_msg
                     return
                 # extract the chap_mutual_str from the config object entry
-                config_chap_mutual = CHAP(self.metadata['auth']['chap_mutual'])
-                chap_mutual_str = config_chap_mutual.chap_str
+                config_chap_mutual = CHAP(auth_config['mutual_username'],
+                                          auth_config['mutual_password'],
+                                          auth_config['mutual_password_encryption_enabled'])
                 if config_chap_mutual.error:
                     self.error = True
                     self.error_msg = config_chap_mutual.error_msg
                     return
 
-                if self.chap == chap_str and \
-                   self.chap_mutual == chap_mutual_str and \
+                if self.username == config_chap.user and \
+                   self.password == config_chap.password and \
+                   self.mutual_username == config_chap_mutual.user and \
+                   self.mutual_password == config_chap_mutual.password and \
                    config_image_list == sorted(self.requested_images):
                     self.commit_enabled = False
             else:
@@ -581,11 +590,14 @@ class GWClient(GWObject):
                                       "for {}".format(bad_images, self.iqn))
                     return
 
-            if self.chap == '' and self.chap_mutual == '':
+            if not self.username and not self.password and \
+               not self.mutual_username and not self.mutual_password:
                 self.logger.warning("(main) client '{}' configured without"
                                     " security".format(self.iqn))
 
-            self.configure_auth(self.chap, self.chap_mutual, target_config)
+            self.configure_auth(self.username, self.password, self.mutual_username,
+                                self.mutual_password, target_config)
+
             if self.error:
                 return
 
@@ -705,37 +717,22 @@ class GWClient(GWObject):
 
 class CHAP(object):
 
-    def __init__(self, chap_str):
+    def __init__(self, user, password_str, encryption_enabled):
 
         self.error = False
         self.error_msg = ''
 
-        if '/' in chap_str:
-            self.user, self.password_str = chap_str.split('/', 1)
-
-            if len(self.password_str) > 16 and encryption_available():
-                self.password = self._decrypt()
-            else:
-                self.password = self.password_str
-        else:
-            self.user = ''
-            self.password = ''
-
-    def _get_chap_str(self):
-        if len(self.password) > 0:
-            return '{}/{}'.format(self.user,
-                                  self.password)
-        else:
-            return ''
-
-    def _set_chap_str(self, chap_str):
-
-        self.user, self.password_str = chap_str.split('/', 1)
-
-        if encryption_available() and len(self.password_str) > 0:
-            self.password = self._encrypt()
+        self.user = user
+        self.password_str = password_str
+        if len(self.password_str) > 0 and encryption_enabled:
+            self.password = self._decrypt()
         else:
             self.password = self.password_str
+
+    def encrypted_password(self, encryption_enabled):
+        if encryption_enabled and len(self.password_str) > 0:
+            return self._encrypt()
+        return self.password
 
     def _decrypt(self):
 
@@ -785,7 +782,3 @@ class CHAP(object):
             return None
         else:
             return encrypted_pw
-
-    chap_str = property(_get_chap_str,
-                        _set_chap_str,
-                        doc="get/set the chap string (user/password)")

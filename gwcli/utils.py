@@ -151,14 +151,15 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
 
 
 def get_remote_gateways(config, logger, local_gw_required=True):
-    '''
+    """
     Return the list of remote gws.
     :param: config: Config object with gws setup.
     :param: logger: Logger object
     :param: local_gw_required: Check if local_gw is defined within gateways configuration
     :return: A list of gw names, or CephiSCSIError if not run on a gw in the
              config
-    '''
+    """
+
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
     gateways = [key for key in config
@@ -174,33 +175,45 @@ def get_remote_gateways(config, logger, local_gw_required=True):
     return gateways
 
 
-def valid_credentials(credentials_str, auth_type='chap'):
+def valid_credentials(username, password, mutual_username, mutual_password):
     """
-    Return a boolean indicating whether the credentials supplied are
-    acceptable
+    Returns `None` if credentials are acceptable, otherwise return an error message
+
+    username / mutual_username is 8-64 chars long containing any alphanumeric in
+    [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+
+    password / mutual_password is 12-16 chars long containing any alphanumeric in
+    [0-9a-zA-Z] and '@' '-' '_' '/'
     """
 
-    # regardless of the auth_type, the credentials_str must be of
-    # for form <username>/<password>
-    try:
-        user_name, password = credentials_str.split('/')
-    except ValueError:
-        return False
+    usr_regex = re.compile(r"^[\w\\.\:\@\_\-]{8,64}$")
+    pw_regex = re.compile(r"^[\w\@\-\_\/]{12,16}$")
 
-    if auth_type == 'chap':
-        # username is 8-64 chars long containing any alphanumeric in
-        # [0-9a-zA-Z] and '.' ':' '@' '_' '-'
-        # password is 12-16 chars long containing any alphanumeric in
-        # [0-9a-zA-Z] and '@' '-' '_' or !,_,& symbol
-        usr_regex = re.compile(r"^[\w\\.\:\@\_\-]{8,64}$")
-        pw_regex = re.compile(r"^[\w\@\-\_]{12,16}$")
-        if not usr_regex.search(user_name) or not pw_regex.search(password):
-            return False
+    if username and not password:
+        return 'Password is required'
 
-        return True
-    else:
-        # insert mutual or any other credentials logic here!
-        return True
+    if not username and (password or mutual_username):
+        return 'Username is required'
+
+    if mutual_username and not mutual_password:
+        return 'Mutual password is required'
+
+    if not mutual_username and mutual_password:
+        return 'Mutual username is required'
+
+    if username and not usr_regex.search(username):
+        return 'Invalid username'
+
+    if mutual_username and not usr_regex.search(mutual_username):
+        return 'Invalid mutual username'
+
+    if password and not pw_regex.search(password):
+        return 'Invalid password'
+
+    if mutual_password and not pw_regex.search(mutual_password):
+        return 'Invalid mutual password'
+
+    return None
 
 
 def valid_client(**kwargs):
@@ -283,20 +296,18 @@ def valid_client(**kwargs):
         return 'ok'
 
     elif mode == 'auth':
-        chap = kwargs['chap']
         # client iqn must exist
         if client_iqn not in target_config['clients']:
             return ("Client '{}' does not exist".format(client_iqn))
 
-        # must provide chap as either '' or a user/password string
-        if 'chap' not in kwargs:
-            return ("Client auth needs 'chap' defined")
+        username = kwargs['username']
+        password = kwargs['password']
+        mutual_username = kwargs['mutual_username']
+        mutual_password = kwargs['mutual_password']
 
-        # credentials string must be valid
-        if chap:
-            if not valid_credentials(chap):
-                return ("Invalid format for CHAP credentials. Refer to 'help' "
-                        "or documentation for the correct format")
+        error_msg = valid_credentials(username, password, mutual_username, mutual_password)
+        if error_msg:
+            return error_msg
 
         return 'ok'
 

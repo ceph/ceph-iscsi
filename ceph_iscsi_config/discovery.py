@@ -1,26 +1,21 @@
 from rtslib_fb.fabric import ISCSIFabricModule
 
 from ceph_iscsi_config.client import CHAP
+from ceph_iscsi_config.utils import encryption_available
 
 
 class Discovery(object):
 
     @staticmethod
-    def validate_discovery_auth(chap_str, chap_mutual_str):
-        if chap_str != '' and '/' not in chap_str:
-            return 'CHAP format is invalid - must be a <username>/<password> format'
-        if chap_mutual_str != '' and '/' not in chap_mutual_str:
-            return 'CHAP_MUTUAL format is invalid - must be a <username>/<password> format'
-        return None
-
-    @staticmethod
-    def set_discovery_auth_lio(chap_str, chap_mutual_str):
+    def set_discovery_auth_lio(username, password, password_encryption_enabled, mutual_username,
+                               mutual_password, mutual_password_encryption_enabled):
         iscsi_fabric = ISCSIFabricModule()
-        if chap_str == '':
+        if username == '':
             iscsi_fabric.clear_discovery_auth_settings()
         else:
-            chap = CHAP(chap_str)
-            chap_mutual = CHAP(chap_mutual_str)
+            chap = CHAP(username, password, password_encryption_enabled)
+            chap_mutual = CHAP(mutual_username, mutual_password,
+                               mutual_password_encryption_enabled)
             iscsi_fabric.discovery_userid = chap.user
             iscsi_fabric.discovery_password = chap.password
             iscsi_fabric.discovery_mutual_userid = chap_mutual.user
@@ -28,12 +23,22 @@ class Discovery(object):
             iscsi_fabric.discovery_enable_auth = True
 
     @staticmethod
-    def set_discovery_auth_config(chap_str, chap_mutual_str, config):
+    def set_discovery_auth_config(username, password, mutual_username, mutual_password, config):
+        encryption_enabled = encryption_available()
         discovery_auth_config = {
-            'chap': '',
-            'chap_mutual': ''
+            'username': '',
+            'password': '',
+            'password_encryption_enabled': encryption_enabled,
+            'mutual_username': '',
+            'mutual_password': '',
+            'mutual_password_encryption_enabled': encryption_enabled
         }
-        if chap_str != '':
-            discovery_auth_config['chap'] = chap_str
-            discovery_auth_config['chap_mutual'] = chap_mutual_str
+        if username != '':
+            chap = CHAP(username, password, encryption_enabled)
+            chap_mutual = CHAP(mutual_username, mutual_password, encryption_enabled)
+            discovery_auth_config['username'] = chap.user
+            discovery_auth_config['password'] = chap.encrypted_password(encryption_enabled)
+            discovery_auth_config['mutual_username'] = chap_mutual.user
+            discovery_auth_config['mutual_password'] = \
+                chap_mutual.encrypted_password(encryption_enabled)
         config.update_item('discovery_auth', '', discovery_auth_config)

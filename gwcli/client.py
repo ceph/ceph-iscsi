@@ -214,7 +214,7 @@ class Clients(UIGroup):
 
         if action == 'nochap':
             for client in self.children:
-                client.set_auth(action, None)
+                client.set_auth(action, None, None, None)
         else:
             target_iqn = self.parent.name
             api_vars = {'action': action}
@@ -243,12 +243,12 @@ class Clients(UIGroup):
         auth_stat_str = "ACL" if self.config['targets'][target_iqn]['acl_enabled'] else "None"
 
         for client in self.children:
-            if client.auth['chap'] == 'None':
+            if not client.auth['username']:
                 chap_disabled = True
             else:
                 chap_enabled = True
 
-            if client.auth['chap_mutual'] == 'None':
+            if not client.auth['mutual_username']:
                 chap_mutual_disabled = True
             else:
                 chap_mutual_enabled = True
@@ -301,26 +301,26 @@ class Client(UINode):
             self.__setattr__(k, v)
 
         # decode the chap password if necessary
-        if 'chap' in self.auth:
-            self.chap = CHAP(self.auth['chap'])
-
-            if self.chap.chap_str != '':
-                self.auth['chap'] = self.chap.chap_str
-            else:
-                self.auth['chap'] = "None"
+        if 'username' in self.auth and 'password' in self.auth:
+            self.chap = CHAP(self.auth['username'],
+                             self.auth['password'],
+                             self.auth['password_encryption_enabled'])
+            self.auth['username'] = self.chap.user
+            self.auth['password'] = self.chap.password
         else:
-            self.auth['chap'] = "None"
+            self.auth['username'] = ''
+            self.auth['password'] = ''
 
         # decode the chap_mutual password if necessary
-        if 'chap_mutual' in self.auth:
-            self.chap_mutual = CHAP(self.auth['chap_mutual'])
-
-            if self.chap_mutual.chap_str != '':
-                self.auth['chap_mutual'] = self.chap_mutual.chap_str
-            else:
-                self.auth['chap_mutual'] = "None"
+        if 'mutual_username' in self.auth and 'mutual_password' in self.auth:
+            self.chap_mutual = CHAP(self.auth['mutual_username'],
+                                    self.auth['mutual_password'],
+                                    self.auth['mutual_password_encryption_enabled'])
+            self.auth['mutual_username'] = self.chap_mutual.user
+            self.auth['mutual_password'] = self.chap_mutual.password
         else:
-            self.auth['chap_mutual'] = "None"
+            self.auth['mutual_username'] = ''
+            self.auth['mutual_password'] = ''
 
         self.refresh_luns()
 
@@ -359,10 +359,10 @@ class Client(UINode):
         auth_text = "Auth: None"
         status = False
 
-        if 'chap_mutual' in self.auth and self.auth['chap_mutual'] != 'None':
+        if self.auth.get('mutual_username'):
             auth_text = "Auth: CHAP_MUTUAL"
             status = True
-        elif 'chap' in self.auth and self.auth['chap'] != 'None':
+        elif self.auth.get('username'):
             auth_text = "Auth: CHAP"
             status = True
 
@@ -373,45 +373,40 @@ class Client(UINode):
 
         return ", ".join(msg), status
 
-    def set_auth(self, chap=None, chap_mutual=None):
+    def set_auth(self, username=None, password=None, mutual_username=None, mutual_password=None):
 
-        self.logger.warn("chap={}, chap_mutual={}".format(chap, chap_mutual))
+        self.logger.debug("username={}, password={}, mutual_username={}, "
+                          "mutual_password={}".format(username, password, mutual_username,
+                                                      mutual_password))
 
         self.logger.debug("CMD: ../hosts/<client_iqn> auth *")
 
-        if not chap:
+        if not username:
             self.logger.error("To set or reset authentication, specify either "
-                              "chap=<user>/<password> [chap_mutual]=<user>/<password> or nochap")
+                              "username=<user> password=<password> "
+                              "[mutual_username]=<user> [mutual_password]=<password> "
+                              "or nochap")
             return
 
-        if chap == 'nochap':
-            chap = ''
-        else:
-            # string could have been supplied as chap=user/password or
-            # simply user/password - either way all we see is user/password
-            if '/' not in chap:
-                self.logger.error(
-                    "CHAP format is invalid - must be a <username>/<password> "
-                    "format. Use 'help auth' to show the correct syntax and "
-                    "supported characters")
-                return
+        if username == 'nochap':
+            username = ''
+            password = ''
+            mutual_username = ''
+            mutual_password = ''
 
-        if not chap_mutual:
-            chap_mutual = ''
-        else:
-            if '/' not in chap_mutual:
-                self.logger.error(
-                    "CHAP_MUTUAL format is invalid - must be a <username>/<password> "
-                    "format. Use 'help auth' to show the correct syntax and "
-                    "supported characters")
-                return
-
-        self.logger.debug("auth to be set to chap='{}', chap_mutual='{}' for '{}'".format(
-            chap, chap_mutual, self.client_iqn))
+        self.logger.debug("auth to be set to username='{}', password='{}', mutual_username='{}', "
+                          "mutual_password='{}' for '{}'".format(username, password,
+                                                                 mutual_username, mutual_password,
+                                                                 self.client_iqn))
 
         target_iqn = self.parent.parent.name
 
-        api_vars = {"chap": chap, "chap_mutual": chap_mutual}
+        api_vars = {
+            "username": username,
+            "password": password,
+            "mutual_username": mutual_username,
+            "mutual_password": mutual_password
+        }
 
         clientauth_api = ('{}://localhost:{}/api/'
                           'clientauth/{}/{}'.format(self.http_mode,
@@ -424,40 +419,36 @@ class Client(UINode):
 
         if api.response.status_code == 200:
             self.logger.debug("- client credentials updated")
-            if chap != '':
-                self.auth['chap'] = chap
-            else:
-                self.auth['chap'] = "None"
-            if chap_mutual != '':
-                self.auth['chap_mutual'] = chap_mutual
-            else:
-                self.auth['chap_mutual'] = "None"
-
+            self.auth['username'] = username
+            self.auth['password'] = password
+            self.auth['mutual_username'] = mutual_username
+            self.auth['mutual_password'] = mutual_password
             self.logger.info('ok')
 
         else:
-            self.logger.error("Failed to update the client's auth"
-                              " :{}".format(response_message(api.response,
-                                                             self.logger)))
+            self.logger.error("Failed to update the client's auth: "
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
             return
 
-    def ui_command_auth(self, chap=None, chap_mutual=None):
+    def ui_command_auth(self, username=None, password=None, mutual_username=None,
+                        mutual_password=None):
         """
         Client authentication can be set to use CHAP/CHAP_MUTUAL by supplying
-        strings of the form <username>/<password>
+        username, password, mutual_username, mutual_password
 
         e.g.
-        auth chap=username/password chap_mutual=username/password
+        auth username=<user> password=<pass> mutual_username=<m_user> mutual_password=<m_pass>
 
-        username ... the username is 8-64 character string. Each character
-                     may either be an alphanumeric or use one of the following
-                     special characters .,:,-,@.
-                     Consider using the hosts 'shortname' or the initiators IQN
-                     value as the username
+        username / mutual_username ... the username is 8-64 character string. Each character
+                                       may either be an alphanumeric or use one of the following
+                                       special characters .,:,-,@.
+                                       Consider using the hosts 'shortname' or the initiators IQN
+                                       value as the username
 
-        password ... the password must be between 12-16 chars in length
-                     containing alphanumeric characters, plus the following
-                     special characters @,_,-
+        password / mutual_password ... the password must be between 12-16 chars in length
+                                       containing alphanumeric characters, plus the following
+                                       special characters @,_,-,/
 
         WARNING1: Using unsupported special characters may result in truncation,
                   resulting in failed logins.
@@ -470,18 +461,19 @@ class Client(UINode):
 
         self.logger.debug("CMD: ../hosts/<client_iqn> auth *")
 
-        if not chap:
+        if not username:
             self.logger.error("To set authentication, specify "
-                              "chap=<user>/<password> [chap_mutual]=<user>/<password>")
+                              "username=<user> password=<password> "
+                              "[mutual_username]=<user> [mutual_password]=<password>")
             return
 
-        if chap == 'nochap':
+        if username == 'nochap':
             self.logger.error("CHAP must be disabled for all clients at the "
                               "same time. Run the 'auth nochap' command from "
                               "the hosts node within gwcli.")
             return
 
-        self.set_auth(chap, chap_mutual)
+        self.set_auth(username, password, mutual_username, mutual_password)
 
     @staticmethod
     def get_srtd_names(lun_list):

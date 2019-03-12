@@ -26,9 +26,10 @@ class ChapTest(unittest.TestCase):
         settings.init()
 
     def test_chap_no_encryption(self):
-        chap = CHAP("")
-        chap._set_chap_str("username/password")
-        self.assertEqual(chap._get_chap_str(), "username/password")
+        chap = CHAP("username", "password", False)
+        self.assertEqual(chap.user, "username")
+        self.assertEqual(chap.password, "password")
+        self.assertEqual(chap.password_str, "password")
 
     def test_chap_encryption(self):
         private_key = rsa.generate_private_key(public_exponent=65537,
@@ -53,11 +54,14 @@ class ChapTest(unittest.TestCase):
         settings.config.pub_key = pub_key_file[1]
         settings.config.ceph_config_dir = ""
 
-        chap = CHAP("")
-        chap._set_chap_str("username/passwordverylonglong")
+        chap = CHAP("username", "passwordverylonglong", False)
 
-        chap2 = CHAP(chap._get_chap_str())
-        self.assertEqual(chap2._get_chap_str(), "username/passwordverylonglong")
+        encrypted_password = chap.encrypted_password(True)
+        chap2 = CHAP(chap.user, encrypted_password, True)
+        self.assertEqual(chap2.user, "username")
+        self.assertEqual(chap2.password, "passwordverylonglong")
+        self.assertEqual(chap2.password_str, encrypted_password)
+        self.assertNotEqual(encrypted_password, "passwordverylonglong")
 
     def test_chap_upgrade(self):
         private_key = rsa.generate_private_key(public_exponent=65537,
@@ -89,5 +93,6 @@ class ChapTest(unittest.TestCase):
                                      algorithm=hashes.SHA1(),
                                      label=None))).decode('utf-8')
 
-        chap2 = CHAP("username/{}".format(encrypted_pw))
-        self.assertEqual(chap2._get_chap_str(), "username/passwordverylonglong")
+        chap2 = CHAP("username", encrypted_pw, True)
+        self.assertEqual(chap2.user, "username")
+        self.assertEqual(chap2.password, "passwordverylonglong")

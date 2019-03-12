@@ -158,8 +158,12 @@ class ChapTest(unittest.TestCase):
             }
         },
         "discovery_auth": {
-            "chap": "",
-            "chap_mutual": ""
+            "username": "",
+            "password": "",
+            "password_encryption_enabled": False,
+            "mutual_username": "",
+            "mutual_password": "",
+            "mutual_password_encryption_enabled": False
         },
         "epoch": 19,
         "gateways": {
@@ -179,8 +183,12 @@ class ChapTest(unittest.TestCase):
                 "clients": {
                     "iqn.1994-05.com.redhat:rh7-client": {
                         "auth": {
-                            "chap": "myiscsiusername/myiscsipassword",
-                            "chap_mutual": ""
+                            "username": "myiscsiusername",
+                            "password": "myiscsipassword",
+                            "password_encryption_enabled": False,
+                            "mutual_username": "",
+                            "mutual_password": "",
+                            "mutual_password_encryption_enabled": False
                         },
                         "group_name": "mygroup",
                         "luns": {
@@ -243,5 +251,5 @@ class ChapTest(unittest.TestCase):
             }
         },
         "updated": "2018/12/07 09:18:13",
-        "version": 7
+        "version": 8
     }
