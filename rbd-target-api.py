@@ -174,6 +174,10 @@ def get_sys_info(query_type=None):
 
         return jsonify(data=ip_addresses()), 200
 
+    if query_type == 'hostname':
+
+        return jsonify(data=this_host()), 200
+
     elif query_type == 'checkconf':
 
         local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
