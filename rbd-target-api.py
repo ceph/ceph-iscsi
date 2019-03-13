@@ -1384,7 +1384,8 @@ def disksnap(pool, image, name):
 def _disksnap_create(pool_name, image_name, name):
     logger.debug("snapshot create request")
     try:
-        with rados.Rados(conffile=settings.config.cephconf) as cluster, \
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster, \
                 cluster.open_ioctx(pool_name) as ioctx, \
                 rbd.Image(ioctx, image_name) as image:
             image.create_snap(name)
@@ -1403,7 +1404,8 @@ def _disksnap_create(pool_name, image_name, name):
 def _disksnap_delete(pool_name, image_name, name):
     logger.debug("snapshot delete request")
     try:
-        with rados.Rados(conffile=settings.config.cephconf) as cluster, \
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster, \
                 cluster.open_ioctx(pool_name) as ioctx, \
                 rbd.Image(ioctx, image_name) as image:
             try:
@@ -1444,7 +1446,8 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
                                     api_vars=api_vars)
     if resp_code == 200:
         try:
-            with rados.Rados(conffile=settings.config.cephconf) as cluster, \
+            with rados.Rados(conffile=settings.config.cephconf,
+                             name=settings.config.cluster_client_name) as cluster, \
                     cluster.open_ioctx(pool_name) as ioctx, \
                     rbd.Image(ioctx, image_name) as image:
 
@@ -2534,7 +2537,8 @@ class ConfigWatcher(threading.Thread):
         logger.info("Checking for config object changes every {}s".format(
             self.interval))
 
-        cluster = rados.Rados(conffile=settings.config.cephconf)
+        cluster = rados.Rados(conffile=settings.config.cephconf,
+                              name=settings.config.cluster_client_name)
         cluster.connect()
         ioctx = cluster.open_ioctx(settings.config.pool)
         while True:

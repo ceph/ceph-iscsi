@@ -118,7 +118,8 @@ class Disks(UIGroup):
         start_time = int(time.time())
         scan_threads = []
         # Open a connection to the cluster
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
             # Initiate the scan threads
             for _t in range(0, self.scan_threads, 1):
                 _thread = threading.Thread(target=self._get_disk_meta,
@@ -748,7 +749,8 @@ class Disk(UINode):
         :return:
         """
         self.logger.debug("Refreshing image metadata")
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 try:
                     with rbd.Image(ioctx, self.image) as rbd_image:
