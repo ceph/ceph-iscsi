@@ -133,7 +133,7 @@ class CephCluster(UIGroup):
     @property
     def cluster_version(self):
 
-        vers_out = os_cmd("ceph -c {} version".format(self.conf))
+        vers_out = os_cmd("ceph -c {} -n {} version".format(self.conf, self.client_name))
 
         # RHEL packages include additional info, that we don't need
         version_str = vers_out.split()[2].decode('utf-8')
@@ -142,7 +142,7 @@ class CephCluster(UIGroup):
     def update_state(self):
 
         self.logger.debug("Querying ceph for state information")
-        with rados.Rados(conffile=self.conf) as cluster:
+        with rados.Rados(conffile=self.conf, name=self.client_name) as cluster:
             cluster.wait_for_latest_osdmap()
 
             cmd = {'prefix': 'status', 'format': 'json'}
@@ -233,7 +233,7 @@ class CephPools(UIGroup):
         # This is overkill and hacky, but the bindings don't provide
         # pool type information...so it's SLEDGEHAMMER meets NUT time
         self.logger.debug("Fetching ceph osd information")
-        with rados.Rados(conffile=self.parent.conf) as cluster:
+        with rados.Rados(conffile=self.parent.conf, name=self.parent.client_name) as cluster:
             cluster.wait_for_latest_osdmap()
 
             cmd = {'prefix': 'osd dump', 'format': 'json'}
@@ -259,7 +259,7 @@ class CephPools(UIGroup):
         # so stats need to be gathered at this level through the mon_command
         # interface, and pushed down to the child objects. Having a refresh
         # method within the child object would have been preferred!
-        with rados.Rados(conffile=self.parent.conf) as cluster:
+        with rados.Rados(conffile=self.parent.conf, name=self.parent.client_name) as cluster:
             cluster.wait_for_latest_osdmap()
 
             cmd = {'prefix': 'df', 'format': 'json'}

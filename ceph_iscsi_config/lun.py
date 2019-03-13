@@ -61,7 +61,8 @@ class RBDDev(object):
         :return: status code and msg
         """
 
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 rbd_inst = rbd.RBD()
                 try:
@@ -88,7 +89,8 @@ class RBDDev(object):
         rbd_deleted = False
         extra_error_info = ''
 
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 rbd_inst = rbd.RBD()
 
@@ -131,7 +133,8 @@ class RBDDev(object):
         :return: boolean value reflecting whether the rbd image was resized
         """
 
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 with rbd.Image(ioctx, self.image) as rbd_image:
 
@@ -157,7 +160,8 @@ class RBDDev(object):
         :return: (int) rbd image size in bytes
         """
 
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 with rbd.Image(ioctx, self.image) as rbd_image:
                     image_size = rbd_image.size()
@@ -177,7 +181,7 @@ class RBDDev(object):
         if pool is None:
             pool = settings.config.pool
 
-        with rados.Rados(conffile=conf) as cluster:
+        with rados.Rados(conffile=conf, name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(pool) as ioctx:
                 rbd_inst = rbd.RBD()
                 rbd_names = rbd_inst.list(ioctx)
@@ -212,7 +216,8 @@ class RBDDev(object):
     def _valid_rbd(self):
 
         valid_state = True
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
             ioctx = cluster.open_ioctx(self.pool)
             with rbd.Image(ioctx, self.image) as rbd_image:
 
@@ -867,6 +872,10 @@ class LUN(GWObject):
             if (settings.config.cephconf != '/etc/ceph/ceph.conf'):
                 cfgstring += ";conf={}".format(settings.config.cephconf)
 
+            if (settings.config.cluster_client_name != 'client.admin'):
+                client_id = settings.config.cluster_client_name.split('.', 1)[1]
+                cfgstring += ";id={}".format(client_id)
+
             new_lun = UserBackedStorageObject(name=self.backstore_object_name,
                                               config=cfgstring,
                                               size=self.size_bytes,
@@ -1120,7 +1129,8 @@ class LUN(GWObject):
 
         ips = ip_addresses()
 
-        with rados.Rados(conffile=settings.config.cephconf) as cluster:
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
 
             for pool in pools:
 
@@ -1191,7 +1201,7 @@ def rados_pool(conf=None, pool=None):
     if pool is None:
         pool = settings.config.pool
 
-    with rados.Rados(conffile=conf) as cluster:
+    with rados.Rados(conffile=conf, name=settings.config.cluster_client_name) as cluster:
         pool_list = cluster.list_pools()
 
     return pool in pool_list

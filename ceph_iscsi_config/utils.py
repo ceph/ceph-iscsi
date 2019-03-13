@@ -216,7 +216,7 @@ def get_pool_id(conf=None, pool_name=None):
     if pool_name is None:
         pool_name = settings.config.pool
 
-    with rados.Rados(conffile=conf) as cluster:
+    with rados.Rados(conffile=conf, name=settings.config.cluster_client_name) as cluster:
         pool_id = cluster.pool_lookup(pool_name)
 
     return pool_id
@@ -233,7 +233,7 @@ def get_pool_name(conf=None, pool_id=0):
     if conf is None:
         conf = settings.config.cephconf
 
-    with rados.Rados(conffile=conf) as cluster:
+    with rados.Rados(conffile=conf, name=settings.config.cluster_client_name) as cluster:
         pool_name = cluster.pool_reverse_lookup(pool_id)
 
     return pool_name
@@ -250,7 +250,7 @@ def get_rbd_size(pool, image, conf=None):
     if conf is None:
         conf = settings.config.cephconf
 
-    with rados.Rados(conffile=conf) as cluster:
+    with rados.Rados(conffile=conf, name=settings.config.cluster_client_name) as cluster:
         with cluster.open_ioctx(pool) as ioctx:
             with rbd.Image(ioctx, image) as rbd_image:
                 size = rbd_image.size()
@@ -267,7 +267,7 @@ def get_pools(conf=None):
     if conf is None:
         conf = settings.config.cephconf
 
-    with rados.Rados(conffile=conf) as cluster:
+    with rados.Rados(conffile=conf, name=settings.config.cluster_client_name) as cluster:
         pool_list = cluster.list_pools()
 
     return pool_list
