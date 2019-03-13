@@ -17,7 +17,7 @@ from ceph_iscsi_config.metrics import GatewayStats
 
 import ceph_iscsi_config.settings as settings
 
-from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.target import GWTarget
 from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.common import Config

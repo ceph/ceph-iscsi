@@ -27,7 +27,7 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.discovery import Discovery
-from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.target import GWTarget
 from ceph_iscsi_config.group import Group
 from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP

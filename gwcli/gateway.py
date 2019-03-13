@@ -10,7 +10,7 @@ from gwcli.utils import (this_host, response_message, GatewayAPIError,
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
-from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.target import GWTarget
 
 from gwcli.ceph import CephGroup
 

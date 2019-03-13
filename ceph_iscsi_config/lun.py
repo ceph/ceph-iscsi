@@ -16,7 +16,7 @@ from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      get_pools, get_rbd_size, this_host,
                                      human_size, CephiSCSIError)
 from ceph_iscsi_config.gateway_object import GWObject
-from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.target import GWTarget
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.group import Group
 from ceph_iscsi_config.backstore import lookup_storage_object
