@@ -629,6 +629,8 @@ def gateway(target_iqn=None, gateway_name=None):
                                     http_method='put',
                                     api_vars=api_vars)
 
+    config.refresh()
+
     return jsonify(message="Gateway creation {}".format(resp_text)), resp_code
 
 
