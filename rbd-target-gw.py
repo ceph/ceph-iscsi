@@ -47,8 +47,10 @@ def ceph_rm_blacklist(blacklisted_ip):
     logger.info("Removing blacklisted entry for this host : "
                 "{}".format(blacklisted_ip))
 
-    result = subprocess.check_output("ceph --conf {cephconf} osd blacklist rm {blacklisted_ip}".
+    result = subprocess.check_output("ceph -n {client_name} --conf {cephconf} "
+                                     "osd blacklist rm {blacklisted_ip}".
                                      format(blacklisted_ip=blacklisted_ip,
+                                            client_name=settings.config.cluster_client_name,
                                             cephconf=settings.config.cephconf),
                                      stderr=subprocess.STDOUT, shell=True)
     if "un-blacklisting" in result:
@@ -56,8 +58,10 @@ def ceph_rm_blacklist(blacklisted_ip):
         return True
     else:
         logger.critical("blacklist removal failed. Run"
-                        " 'ceph --conf {cephconf} osd blacklist rm {blacklisted_ip}'".
+                        " 'ceph -n {client_name} --conf {cephconf} "
+                        "osd blacklist rm {blacklisted_ip}'".
                         format(blacklisted_ip=blacklisted_ip,
+                               client_name=settings.config.cluster_client_name,
                                cephconf=settings.config.cephconf))
         return False
 
@@ -168,14 +172,19 @@ def osd_blacklist_cleanup():
 
         # NB. Need to use the stderr override to catch the output from
         # the command
-        blacklist = subprocess.check_output("ceph --conf {cephconf} osd blacklist ls".
-                                            format(cephconf=settings.config.cephconf),
+        blacklist = subprocess.check_output("ceph -n {client_name} --conf {cephconf} "
+                                            "osd blacklist ls"
+                                            .format(
+                                                client_name=settings.config.cluster_client_name,
+                                                cephconf=settings.config.cephconf),
                                             shell=True,
                                             stderr=subprocess.STDOUT)
 
     except subprocess.CalledProcessError:
-        logger.critical("Failed to run 'ceph --conf {cephconf} osd blacklist ls'. "
-                        "Please resolve manually...".format(cephconf=settings.config.cephconf))
+        logger.critical("Failed to run 'ceph -n {client_name} --conf {cephconf} "
+                        "osd blacklist ls'. Please resolve manually..."
+                        .format(client_name=settings.config.cluster_client_name,
+                                cephconf=settings.config.cephconf))
         cleanup_state = False
     else:
 
