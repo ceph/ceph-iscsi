@@ -302,6 +302,8 @@ class Config(object):
                     client['auth']['mutual_password_encryption_enabled'] = \
                         (len(mpassword) > 16 and encryption_available())
                     client['auth'].pop('chap_mutual', None)
+
+                self.update_item("targets", target_iqn, target)
             self.update_item("version", None, 8)
 
         self.commit("retain")
