@@ -1,9 +1,10 @@
 import subprocess
 import netifaces
 
-from rtslib_fb.root import RTSRoot
 from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError
+from rtslib_fb.fabric import ISCSIFabricModule
+from rtslib_fb.target import Target
 
 import ceph_iscsi_config.settings as settings
 
@@ -113,20 +114,25 @@ class CephiSCSIGateway(object):
 
         return cleanup_state
 
-    def get_tpgs(self):
+    def get_tpgs(self, target_iqn):
         """
-        determine the number of tpgs in the current LIO environment
+        determine the number of tpgs in the current target
         :return: count of the defined tpgs
         """
 
-        return len([tpg.tag for tpg in RTSRoot().tpgs])
+        try:
+            target = Target(ISCSIFabricModule(), target_iqn, "lookup")
 
-    def portals_active(self):
+            return len([tpg.tag for tpg in target.tpgs])
+        except RTSLibError:
+            return 0
+
+    def portals_active(self, target_iqn):
         """
         use the get_tpgs function to determine whether there are tpg's defined
         :return: (bool) indicating whether there are tpgs defined
         """
-        return self.get_tpgs() > 0
+        return self.get_tpgs(target_iqn) > 0
 
     def define_target(self, target_iqn, gw_ip_list):
         """
@@ -148,7 +154,7 @@ class CephiSCSIGateway(object):
         # 0, this is a boot time request
 
         target = GWTarget(self.logger, target_iqn, gw_ip_list,
-                          enable_portal=self.portals_active())
+                          enable_portal=self.portals_active(target_iqn))
         if target.error:
             raise CephiSCSIError("Error initializing iSCSI target: "
                                  "{}".format(target.error_msg))
@@ -193,7 +199,6 @@ class CephiSCSIGateway(object):
             return
 
         # at this point we have a gateway entry that applies to the running host
-        portals_already_active = self.portals_active()
 
         self.logger.info("Processing Gateway configuration")
         targets = self.define_targets()
@@ -215,7 +220,7 @@ class CephiSCSIGateway(object):
                 self.logger.error("Could not define clients: {}".format(err))
                 raise
 
-            if not portals_already_active:
+            if not target.enable_portal:
                 # The tpgs, luns and clients are all defined, but the active tpg
                 # doesn't have an IP bound to it yet (due to the
                 # enable_portals=False setting above)
