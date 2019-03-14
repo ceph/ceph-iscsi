@@ -605,7 +605,7 @@ class GatewayGroup(UIGroup):
         nosync ......... by default new gateways are sync'd with the
                          existing configuration by cli. By specifying nosync
                          the sync step is bypassed - so the new gateway
-                         will need to have it's rbd-target-gw daemon
+                         will need to have it's rbd-target-api daemon
                          restarted to apply the current configuration
                          (default = False)
         skipchecks ..... set this to true to force gateway validity checks
@@ -644,7 +644,7 @@ class GatewayGroup(UIGroup):
         config = self.parent.parent.parent._get_config()
         if not config:
             self.logger.error("Unable to refresh local config"
-                              " over API - sync aborted, restart rbd-target-gw"
+                              " over API - sync aborted, restart rbd-target-api"
                               " on {} to sync".format(gateway_name))
 
         target_iqn = self.parent.name

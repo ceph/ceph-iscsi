@@ -26,6 +26,7 @@ from flask import Flask, jsonify, request
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.gateway import CephiSCSIGateway
 from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.target import GWTarget
 from ceph_iscsi_config.group import Group
@@ -2608,6 +2609,20 @@ def main():
     log.addHandler(file_handler)
     log.addHandler(syslog_handler)
 
+    ceph_gw = CephiSCSIGateway(logger, config)
+
+    osd_state_ok = ceph_gw.osd_blacklist_cleanup()
+    if not osd_state_ok:
+        sys.exit(16)
+
+    try:
+        ceph_gw.define()
+    except (CephiSCSIError, RTSLibError) as err:
+        err_str = "Could not load gateway: {}".format(err)
+        logger.error(err_str)
+        ceph_gw.delete()
+        halt(err_str)
+
     if settings.config.api_secure:
 
         context = get_ssl_context()
@@ -2634,12 +2649,17 @@ def main():
 
 def signal_stop(*args):
     logger.info("Shutdown received")
-    sys.exit(0)
+
+    ceph_gw = CephiSCSIGateway(logger, config)
+    sys.exit(ceph_gw.delete())
 
 
 def signal_reload(*args):
     logger.info("Refreshing local copy of the Gateway configuration")
     config.refresh()
+
+    ceph_gw = CephiSCSIGateway(logger, config)
+    ceph_gw.define()
 
 
 if __name__ == '__main__':
