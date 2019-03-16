@@ -619,7 +619,8 @@ def gateway(target_iqn=None, gateway_name=None):
     if first_gateway:
         gateways = ['localhost']
     else:
-        gateways.append(gateway_name)
+        # Update the new gw first, so other gws see the updated gateways list.
+        gateways.insert(0, gateway_name)
 
     api_vars = {"gateway_ip_list": ",".join(gateway_ip_list),
                 "mode": "target",
@@ -663,10 +664,6 @@ def _gateway(target_iqn=None, gateway_name=None):
         # the parameters need to be cast to str for compatibility
         # with the comparison logic in common.config.add_item
         logger.debug("Attempting create of gateway {}".format(gateway_name))
-
-        if gateway_name in target_config['portals']:
-            return jsonify(message="Gateway already exist in the "
-                                   "configuration"), 404
 
         gateway_ips = str(request.form['gateway_ip_list'])
         target_mode = str(request.form.get('mode', 'target'))

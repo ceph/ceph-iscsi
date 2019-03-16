@@ -527,6 +527,19 @@ class GWTarget(GWObject):
                 self.config_updated = True
 
             if local_gw not in target_config['portals']:
+                # Update existing gws with the new gw
+                for remote_gw, remote_gw_config in target_config['portals'].items():
+                    if remote_gw_config['gateway_ip_list'] == self.gateway_ip_list:
+                        continue
+
+                    inactive_portal_ip = list(self.gateway_ip_list)
+                    inactive_portal_ip.remove(remote_gw_config["portal_ip_address"])
+                    remote_gw_config['gateway_ip_list'] = self.gateway_ip_list
+                    remote_gw_config['tpgs'] = len(self.tpg_list)
+                    remote_gw_config['inactive_portal_ips'] = inactive_portal_ip
+                    target_config['portals'][remote_gw] = remote_gw_config
+
+                # Add the new gw
                 inactive_portal_ip = list(self.gateway_ip_list)
                 inactive_portal_ip.remove(self.active_portal_ip)
 
@@ -536,21 +549,9 @@ class GWTarget(GWObject):
                                    "inactive_portal_ips": inactive_portal_ip}
                 target_config['portals'][local_gw] = portal_metadata
                 target_config['ip_list'] = self.gateway_ip_list
+
                 config.update_item("targets", self.iqn, target_config)
                 self.config_updated = True
-            else:
-                # gateway already defined, so check that the IP list it has
-                # matches the current request
-                portal_details = target_config['portals'][local_gw]
-                if portal_details['gateway_ip_list'] != self.gateway_ip_list:
-                    inactive_portal_ip = list(self.gateway_ip_list)
-                    inactive_portal_ip.remove(self.active_portal_ip)
-                    portal_details['gateway_ip_list'] = self.gateway_ip_list
-                    portal_details['tpgs'] = len(self.tpg_list)
-                    portal_details['inactive_portal_ips'] = inactive_portal_ip
-                    target_config['portals'][local_gw] = portal_details
-                    config.update_item("targets", self.iqn, target_config)
-                    self.config_updated = True
 
             if self.config_updated:
                 config.commit()
