@@ -15,7 +15,7 @@ from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.gateway_object import GWObject
-from ceph_iscsi_config.backstore import lookup_storage_object
+from ceph_iscsi_config.backstore import lookup_storage_object_by_disk
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -452,15 +452,12 @@ class GWTarget(GWObject):
         target_config = config.config["targets"][self.iqn]
 
         for disk in target_config['disks']:
-            backstore = config.config["disks"][disk]["backstore"]
-            backstore_object_name = config.config["disks"][disk]["backstore_object_name"]
-
-            try:
-                stg_object = lookup_storage_object(backstore_object_name, backstore)
-            except (RTSLibError, CephiSCSIError) as err:
-                self.logger.error("Could not map {} to LUN: {}".format(disk, err))
+            stg_object = lookup_storage_object_by_disk(config, disk)
+            if stg_object is None:
+                err_msg = "Could not map {} to LUN. Disk not found".format(disk)
+                self.logger.error(err_msg)
                 self.error = True
-                self.error_msg = err
+                self.error_msg = err_msg
                 return
 
             self._map_lun(config, stg_object)
