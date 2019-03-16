@@ -197,7 +197,7 @@ class GWTarget(GWObject):
                 else:
                     break
 
-    def clear_config(self):
+    def clear_config(self, config):
         """
         Remove the target definition form LIO
         :return: None
@@ -224,7 +224,7 @@ class GWTarget(GWObject):
         self.logger.info("Removing target configuration")
 
         try:
-            self.delete()
+            self.delete(config)
         except RTSLibError as err:
             self.error = True
             self.error_msg = "Unable to delete target - {}".format(err)
@@ -311,7 +311,8 @@ class GWTarget(GWObject):
             self.error = True
 
         if self.error:
-            self.delete()
+            if self.target:
+                self.target.delete()
         else:
             self.changes_made = True
             self.logger.info("(Gateway.create_target) created an iscsi target "
@@ -464,8 +465,43 @@ class GWTarget(GWObject):
             if self.error:
                 return
 
-    def delete(self):
-        self.target.delete()
+    def delete(self, config):
+
+        saved_err = None
+
+        if self.target is None:
+            self.load_config()
+            # Ignore errors. Target was probably not setup. Try to clean up
+            # disks.
+
+        if self.target:
+            try:
+                self.target.delete()
+            except RTSLibError as err:
+                self.logger.error("lio target deletion failed {}".format(err))
+                saved_err = err
+                # drop down and try to delete disks
+
+        for disk in config.config['targets'][self.iqn]['disks']:
+            so = lookup_storage_object_by_disk(config, disk)
+            if so is None:
+                self.logger.debug("lio disk lookup failed {}")
+                # SO may not have got setup. Ignore.
+                continue
+            if so.status == 'activated':
+                # Still mapped so ignore.
+                continue
+
+            try:
+                so.delete()
+            except RTSLibError as err:
+                self.logger.error("lio disk deletion failed {}".format(err))
+                if saved_err is None:
+                    saved_err = err
+                # Try the other disks.
+
+        if saved_err:
+            raise RTSLibError(saved_err)
 
     def manage(self, mode):
         """
@@ -611,7 +647,7 @@ class GWTarget(GWObject):
                 return
 
             target_config = config.config["targets"][self.iqn]
-            self.clear_config()
+            self.clear_config(config)
 
             if not self.error:
                 if len(target_config['portals']) == 0:
