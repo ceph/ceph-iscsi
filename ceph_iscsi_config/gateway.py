@@ -1,7 +1,6 @@
 import subprocess
 import netifaces
 
-from rtslib_fb import root
 from rtslib_fb.utils import RTSLibError
 from rtslib_fb.fabric import ISCSIFabricModule
 from rtslib_fb.target import Target
@@ -234,35 +233,49 @@ class CephiSCSIGateway(object):
 
         self.logger.info("Ceph iSCSI Gateway configuration load complete")
 
-    def __delete_targets(self):
-        if self.hostname in self.config.config['gateways']:
-            lio_root = root.RTSRoot()
-            for tgt in lio_root.targets:
-                if tgt.wwn in self.config.config['targets'] \
-                        and self.hostname in self.config.config['targets'][tgt.wwn]['portals']:
-                    tgt.delete()
+    def delete_target(self, target_iqn):
+
+        target = GWTarget(self.logger, target_iqn, {})
+        if target.error:
+            raise CephiSCSIError("Could not initialize target: {}".
+                                 format(target.error_msg))
+
+        target.load_config()
+        if target.error:
+            self.logger.debug("Could not find target {}: {}".
+                              format(target_iqn, target.error_msg))
+            # Target might not be setup on this node. Ignore.
+            return
+
+        try:
+            target.delete(self.config)
+        except RTSLibError as err:
+            err_msg = "Could not remove target {}: {}".format(target_iqn, err)
+            raise CephiSCSIError(err_msg)
 
     def delete_targets(self):
+
+        err_msg = None
+
+        if self.hostname not in self.config.config['gateways']:
+            return
+
         # Clear the current config, based on the config objects settings.
         # This will fail incoming IO, but wait on outstanding IO to
         # complete normally. We rely on the initiator multipath layer
         # to handle retries like a normal path failure.
         self.logger.info("Removing iSCSI target from LIO")
-        try:
-            self.__delete_targets()
-        except RTSLibError as err:
-            self.logger.error("Failed to remove target objects: {}".format(err))
-            return 8
 
-        self.logger.info("Removing LUNs from LIO")
-        lio = LIO()
-        lio.drop_lun_maps(self.config, False)
-        if lio.error:
-            self.logger.error("failed to remove LUN objects")
-            return 4
+        for target_iqn, target_config in self.config.config['targets'].items():
+            try:
+                self.delete_target(target_iqn)
+            except CephiSCSIError as err:
+                if err_msg is None:
+                    err_msg = err
+                continue
 
-        self.logger.info("Active Ceph iSCSI gateway configuration removed")
-        return 0
+        if err_msg:
+            raise CephiSCSIError(err_msg)
 
     def delete(self):
         """
@@ -287,10 +300,27 @@ class CephiSCSIGateway(object):
             if self.hostname not in self.config.config["gateways"]:
                 self.logger.info("No gateway configuration to remove on this "
                                  "host ({})".format(self.hostname))
-                return 8
+                return 0
         else:
             self.logger.info("Configuration object does not hold any gateway "
                              "metadata - nothing to do")
             return 0
 
-        return self.delete_targets()
+        ret = 0
+
+        try:
+            self.delete_targets()
+        except CephiSCSIError:
+            ret = 8
+
+        # unload disks not yet added to targets
+        lio = LIO()
+        lio.drop_lun_maps(self.config, False)
+        if lio.error:
+            self.logger.error("failed to remove LUN objects")
+            if ret != 0:
+                ret = 4
+
+        if ret == 0:
+            self.logger.info("Active Ceph iSCSI gateway configuration removed")
+        return ret
