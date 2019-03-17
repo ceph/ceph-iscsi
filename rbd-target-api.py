@@ -623,7 +623,6 @@ def gateway(target_iqn=None, gateway_name=None):
         gateways.insert(0, gateway_name)
 
     api_vars = {"gateway_ip_list": ",".join(gateway_ip_list),
-                "mode": "target",
                 "nosync": nosync}
 
     resp_text, resp_code = call_api(gateways, '_gateway',
@@ -666,7 +665,6 @@ def _gateway(target_iqn=None, gateway_name=None):
         logger.debug("Attempting create of gateway {}".format(gateway_name))
 
         gateway_ips = str(request.form['gateway_ip_list'])
-        target_mode = str(request.form.get('mode', 'target'))
         nosync = str(request.form.get('nosync', 'false'))
 
         gateway_ip_list = gateway_ips.split(',')
@@ -680,7 +678,7 @@ def _gateway(target_iqn=None, gateway_name=None):
                          "{}".format(gateway.error_msg))
             return jsonify(message="Failed to create the gateway"), 500
 
-        gateway.manage(target_mode)
+        gateway.manage('target')
         if gateway.error:
             logger.error("manage({}) logic failed for {}: "
                          "{}".format(target_mode, gateway_name,
@@ -689,29 +687,27 @@ def _gateway(target_iqn=None, gateway_name=None):
 
         logger.info("created the gateway")
 
-        if target_mode == 'target':
-            # refresh only for target definitions, since that's when the config
-            # will actually change
-            logger.info("refreshing the configuration after the gateway "
-                        "creation")
-            config.refresh()
+        # refresh only for target definitions, since that's when the config
+        # will actually change
+        logger.info("refreshing the configuration after the gateway creation")
+        config.refresh()
 
-            if nosync.lower() != 'true':
-                logger.info("Syncing LUN configuration")
-                try:
-                    LUN.define_luns(logger, config, gateway)
-                except CephiSCSIError as err:
-                    gateway.manage('clearconfig')
-                    return jsonify(message="Failed to sync LUNs on gateway. "
-                                           "Err {}.".format(err)), 500
+        if nosync.lower() != 'true':
+            logger.info("Syncing LUN configuration")
+            try:
+                LUN.define_luns(logger, config, gateway)
+            except CephiSCSIError as err:
+                gateway.manage('clearconfig')
+                return jsonify(message="Failed to sync LUNs on gateway. "
+                                       "Err {}.".format(err)), 500
 
-                logger.info("Syncing client configuration")
-                try:
-                    GWClient.define_clients(logger, config, target_iqn)
-                except CephiSCSIError as err:
-                    gateway.manage('clearconfig')
-                    return jsonify(message="Failed to sync clients on gateway"
-                                           ". Err {}.".format(err)), 500
+            logger.info("Syncing client configuration")
+            try:
+                GWClient.define_clients(logger, config, target_iqn)
+            except CephiSCSIError as err:
+                gateway.manage('clearconfig')
+                return jsonify(message="Failed to sync clients on gateway"
+                                       ". Err {}.".format(err)), 500
 
         return jsonify(message="Gateway defined/mapped"), 200
 
