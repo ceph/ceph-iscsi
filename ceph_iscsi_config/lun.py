@@ -1106,6 +1106,60 @@ class LUN(GWObject):
         return candidate
 
     @staticmethod
+    def find_first_mapped_target(config, disk):
+        for target, target_config in config.config['targets'].items():
+            if disk in target_config['disks']:
+                return target
+
+        return None
+
+    @staticmethod
+    def reassign_owners(logger, config):
+        """
+        Reassign disks across gateways after a gw deletion.
+        :param logger: logger object to print to
+        :param config: configuration dict from the rados pool
+        :raises CephiSCSIError.
+        """
+
+        updated = False
+        gateways = config.config['gateways']
+
+        for disk, disk_config in config.config['disks'].items():
+            owner = disk_config.get('owner', None)
+            if owner is None:
+                continue
+
+            gw = gateways.get(owner, None)
+            if gw is None:
+                target = LUN.find_first_mapped_target(config, disk)
+
+                if not gateways or target is None:
+                    disk_config.pop('owner')
+                else:
+                    target_config = config.config['targets'][target]
+                    new_owner = LUN.get_owner(gateways,
+                                              target_config['portals'])
+
+                    logger.info("Changing {}'s owner from {} to {}".
+                                format(disk, owner, new_owner))
+                    disk_config['owner'] = new_owner
+
+                    gw_config = config.config['gateways'][new_owner]
+                    active_cnt = gw_config['active_luns']
+                    gw_config['active_luns'] = active_cnt + 1
+                    config.update_item("gateways", new_owner, gw_config)
+
+                config.update_item("disks", disk, disk_config)
+                updated = True
+
+        if updated:
+            config.commit("retain")
+            if config.error:
+                raise CephiSCSIError("Could not update LUN owners: {}".
+                                     format(config.error_msg))
+
+    @staticmethod
     def define_luns(logger, config, gateway):
         """
         define the disks in the config to LIO

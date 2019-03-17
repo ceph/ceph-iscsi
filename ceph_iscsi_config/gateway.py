@@ -324,3 +324,52 @@ class CephiSCSIGateway(object):
         if ret == 0:
             self.logger.info("Active Ceph iSCSI gateway configuration removed")
         return ret
+
+    def remove_from_config(self, target_iqn):
+        has_changed = False
+
+        target_config = self.config.config["targets"].get(target_iqn)
+        if target_config:
+            local_gw = target_config['portals'].get(self.hostname)
+            if local_gw:
+                local_gw_ip = local_gw['portal_ip_address']
+
+                target_config['portals'].pop(self.hostname)
+
+                ip_list = target_config['ip_list']
+                ip_list.remove(local_gw_ip)
+
+                for _, remote_gw_config in target_config['portals'].items():
+                    remote_gw_config["gateway_ip_list"].remove(local_gw_ip)
+                    remote_gw_config["inactive_portal_ips"].remove(local_gw_ip)
+                    tpg_count = remote_gw_config["tpgs"]
+                    remote_gw_config["tpgs"] = tpg_count - 1
+
+                if not target_config['portals']:
+                    # Last gw for the target so delete everything that lives
+                    # under the tpg in LIO since we can't create it
+                    target_config['disks'] = []
+                    target_config['clients'] = {}
+                    target_config['controls'] = {}
+                    target_config['groups'] = {}
+
+                has_changed = True
+                self.config.update_item('targets', target_iqn, target_config)
+
+        remove_gateway = True
+        for _, target in self.config.config["targets"].items():
+            if self.hostname in target['portals']:
+                remove_gateway = False
+                break
+
+        if remove_gateway:
+            # gateway is no longer used, so delete it
+            has_changed = True
+            self.config.del_item('gateways', self.hostname)
+
+        LUN.reassign_owners(self.logger, self.config)
+
+        if has_changed:
+            self.config.commit("retain")
+            if self.config.error:
+                raise CephiSCSIError(self.config.error_msg)
