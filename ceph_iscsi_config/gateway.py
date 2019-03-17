@@ -133,11 +133,12 @@ class CephiSCSIGateway(object):
         """
         return self.get_tpgs(target_iqn) > 0
 
-    def define_target(self, target_iqn, gw_ip_list):
+    def define_target(self, target_iqn, gw_ip_list, target_only=False):
         """
         define the iSCSI target and tpgs
         :param target_iqn: (str) target iqn
         :param gw_ip_list: (list) gateway ip list
+        :param target_only: (bool) if True only setup target
         :return: (object) GWTarget object
         """
 
@@ -164,20 +165,22 @@ class CephiSCSIGateway(object):
             raise CephiSCSIError("Error creating the iSCSI target (target, "
                                  "TPGs, Portals): {}".format(target.error_msg))
 
-        self.logger.info("Processing LUN configuration")
-        try:
-            LUN.define_luns(self.logger, self.config, target)
-        except CephiSCSIError as err:
-            self.logger.error("{} - Could not define LUNs: "
-                              "{}".format(target.iqn, err))
-            raise
+        if not target_only:
+            self.logger.info("Processing LUN configuration")
+            try:
+                LUN.define_luns(self.logger, self.config, target)
+            except CephiSCSIError as err:
+                self.logger.error("{} - Could not define LUNs: "
+                                  "{}".format(target.iqn, err))
+                raise
 
-        self.logger.info("{} - Processing client configuration".format(target.iqn))
-        try:
-            GWClient.define_clients(self.logger, self.config, target.iqn)
-        except CephiSCSIError as err:
-            self.logger.error("Could not define clients: {}".format(err))
-            raise
+            self.logger.info("{} - Processing client configuration".
+                             format(target.iqn))
+            try:
+                GWClient.define_clients(self.logger, self.config, target.iqn)
+            except CephiSCSIError as err:
+                self.logger.error("Could not define clients: {}".format(err))
+                raise
 
         if not target.enable_portal:
             # The tpgs, luns and clients are all defined, but the active tpg

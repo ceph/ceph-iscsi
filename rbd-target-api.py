@@ -669,45 +669,17 @@ def _gateway(target_iqn=None, gateway_name=None):
 
         gateway_ip_list = gateway_ips.split(',')
 
-        gateway = GWTarget(logger,
-                           target_iqn,
-                           gateway_ip_list)
+        target_only = False
+        if nosync.lower() == 'true':
+            target_only = True
 
-        if gateway.error:
-            logger.error("Unable to create an instance of the GWTarget class: "
-                         "{}".format(gateway.error_msg))
-            return jsonify(message="Failed to create the gateway"), 500
-
-        gateway.manage('target')
-        if gateway.error:
-            logger.error("manage({}) logic failed for {}: "
-                         "{}".format(target_mode, gateway_name,
-                                     gateway.error_msg))
-            return jsonify(message="Failed to create the gateway"), 500
-
-        logger.info("created the gateway")
-
-        # refresh only for target definitions, since that's when the config
-        # will actually change
-        logger.info("refreshing the configuration after the gateway creation")
-        config.refresh()
-
-        if nosync.lower() != 'true':
-            logger.info("Syncing LUN configuration")
-            try:
-                LUN.define_luns(logger, config, gateway)
-            except CephiSCSIError as err:
-                gateway.manage('clearconfig')
-                return jsonify(message="Failed to sync LUNs on gateway. "
-                                       "Err {}.".format(err)), 500
-
-            logger.info("Syncing client configuration")
-            try:
-                GWClient.define_clients(logger, config, target_iqn)
-            except CephiSCSIError as err:
-                gateway.manage('clearconfig')
-                return jsonify(message="Failed to sync clients on gateway"
-                                       ". Err {}.".format(err)), 500
+        try:
+            ceph_gw = CephiSCSIGateway(logger, config)
+            ceph_gw.define_target(target_iqn, gateway_ip_list, target_only)
+        except CephiSCSIError as err:
+            err_msg = "Could not create target on gateway: {}".format(err)
+            logger.error(err_msg)
+            return jsonify(message=err_msg), 500
 
         return jsonify(message="Gateway defined/mapped"), 200
 
