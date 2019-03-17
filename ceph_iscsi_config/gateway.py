@@ -151,6 +151,7 @@ class CephiSCSIGateway(object):
         # first check if there are tpgs already in LIO (True) - this would
         # indicate a restart or reload call has been made. If the tpg count is
         # 0, this is a boot time request
+        self.logger.info("Setting up {}".format(target_iqn))
 
         target = GWTarget(self.logger, target_iqn, gw_ip_list,
                           enable_portal=self.portals_active(target_iqn))
@@ -163,6 +164,32 @@ class CephiSCSIGateway(object):
             raise CephiSCSIError("Error creating the iSCSI target (target, "
                                  "TPGs, Portals): {}".format(target.error_msg))
 
+        self.logger.info("Processing LUN configuration")
+        try:
+            LUN.define_luns(self.logger, self.config, target)
+        except CephiSCSIError as err:
+            self.logger.error("{} - Could not define LUNs: "
+                              "{}".format(target.iqn, err))
+            raise
+
+        self.logger.info("{} - Processing client configuration".format(target.iqn))
+        try:
+            GWClient.define_clients(self.logger, self.config, target.iqn)
+        except CephiSCSIError as err:
+            self.logger.error("Could not define clients: {}".format(err))
+            raise
+
+        if not target.enable_portal:
+            # The tpgs, luns and clients are all defined, but the active tpg
+            # doesn't have an IP bound to it yet (due to the
+            # enable_portals=False setting above)
+            self.logger.info("{} - Adding the IP to the enabled tpg, "
+                             "allowing iSCSI logins".format(target.iqn))
+            target.enable_active_tpg(self.config)
+            if target.error:
+                raise CephiSCSIError("{} - Error enabling the IP with the "
+                                     "active TPG: {}".format(target.iqn,
+                                                             target.error_msg))
         return target
 
     def define_targets(self):
@@ -200,37 +227,7 @@ class CephiSCSIGateway(object):
         # at this point we have a gateway entry that applies to the running host
 
         self.logger.info("Processing Gateway configuration")
-        targets = self.define_targets()
-
-        self.logger.info("Processing LUN configuration")
-        for target in targets:
-
-            try:
-                LUN.define_luns(self.logger, self.config, target)
-            except CephiSCSIError as err:
-                self.logger.error("{} - Could not define LUNs: "
-                                  "{}".format(target.iqn, err))
-                raise
-
-            self.logger.info("{} - Processing client configuration".format(target.iqn))
-            try:
-                GWClient.define_clients(self.logger, self.config, target.iqn)
-            except CephiSCSIError as err:
-                self.logger.error("Could not define clients: {}".format(err))
-                raise
-
-            if not target.enable_portal:
-                # The tpgs, luns and clients are all defined, but the active tpg
-                # doesn't have an IP bound to it yet (due to the
-                # enable_portals=False setting above)
-                self.logger.info("{} - Adding the IP to the enabled tpg, "
-                                 "allowing iSCSI logins".format(target.iqn))
-                target.enable_active_tpg(self.config)
-                if target.error:
-                    raise CephiSCSIError("{} - Error enabling the IP with the "
-                                         "active TPG: {}".
-                                         format(target.iqn, target.error_msg))
-
+        self.define_targets()
         self.logger.info("Ceph iSCSI Gateway configuration load complete")
 
     def delete_target(self, target_iqn):
