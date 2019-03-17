@@ -705,13 +705,6 @@ def _gateway(target_iqn=None, gateway_name=None):
                     return jsonify(message="Failed to sync LUNs on gateway. "
                                            "Err {}.".format(err)), 500
 
-                logger.info("Syncing TPG to LUN mapping")
-                gateway.manage('map')
-                if gateway.error:
-                    gateway.manage('clearconfig')
-                    return jsonify(message="Failed to sync LUNs on gateway, "
-                                           "Err {}.".format(gateway.error_msg)), 500
-
                 logger.info("Syncing client configuration")
                 try:
                     GWClient.define_clients(logger, config, target_iqn)

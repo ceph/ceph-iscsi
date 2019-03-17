@@ -532,6 +532,8 @@ class GWTarget(GWObject):
                 # return to caller, with error state set
                 return
 
+            self.update_acl(config)
+
             discovery_auth_config = config.config['discovery_auth']
             Discovery.set_discovery_auth_lio(discovery_auth_config['username'],
                                              discovery_auth_config['password'],
