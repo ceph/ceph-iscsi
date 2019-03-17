@@ -376,8 +376,13 @@ class GWTarget(GWObject):
         target_config = config.config["targets"][self.iqn]
 
         is_owner = False
-        if target_config['portals'][owning_gw]["portal_ip_address"] == tpg_ip_address:
-            is_owner = True
+        gw_config = target_config['portals'].get(owning_gw, None)
+        # If the user has exported a disk through multiple targets but
+        # they do not have a common gw the owning gw may not exist here.
+        # The LUN will just have all ANO paths then.
+        if gw_config:
+            if gw_config["portal_ip_address"] == tpg_ip_address:
+                is_owner = True
 
         try:
             alua_tpg = alua_create_group(settings.config.alua_failover_type,

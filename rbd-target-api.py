@@ -440,6 +440,18 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
     return "ok"
 
 
+def delete_gateway(gateway_name, target_iqn):
+    ceph_gw = CephiSCSIGateway(logger, config)
+
+    if gateway_name is None or gateway_name == ceph_gw.hostname:
+        ceph_gw.delete_target(target_iqn)
+        ceph_gw.remove_from_config(target_iqn)
+    else:
+        # To maintain the tpg ordering completely tear down the target
+        # and rebuild it with the new ordering.
+        ceph_gw.redefine_target(target_iqn)
+
+
 @app.route('/api/_target/<target_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
 def _target(target_iqn=None):
@@ -545,12 +557,14 @@ def gateways(target_iqn=None):
         return jsonify(target_config['portals']), 200
 
 
-@app.route('/api/gateway/<target_iqn>/<gateway_name>', methods=['PUT'])
+@app.route('/api/gateway/<target_iqn>/<gateway_name>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
 def gateway(target_iqn=None, gateway_name=None):
     """
-    Define iscsi gateway(s) across node(s), adding TPGs, disks and clients
-    The call requires the following variables to be set;
+    Define (PUT) or delete (DELETE) iscsi gateway(s) across node(s), adding
+    TPGs, disks and clients.
+    gateway_name and target_iqn are required by all calls. The rest are
+    required for PUT only.
     :param target_iqn: (str) target iqn
     :param gateway_name: (str) gateway name
     :param ip_address: (str) IPv4/IPv6 address iSCSI should use
@@ -575,67 +589,81 @@ def gateway(target_iqn=None, gateway_name=None):
         err_str = "Invalid iqn {} - {}".format(target_iqn, err)
         return jsonify(message=err_str), 500
 
-    ip_address = request.form.get('ip_address')
-    nosync = request.form.get('nosync', 'false')
-    skipchecks = request.form.get('skipchecks', 'false')
-
     # first confirm that the request is actually valid, if not return a 400
     # error with the error description
     config.refresh()
     current_config = config.config
-
-    if skipchecks.lower() == 'true':
-        logger.warning("Gateway request received, with validity checks "
-                       "disabled")
-        gateway_usable = 'ok'
-    else:
-        logger.info("gateway validation needed for {}".format(gateway_name))
-        gateway_usable = valid_gateway(target_iqn,
-                                       gateway_name,
-                                       ip_address,
-                                       current_config)
-
-    if gateway_usable != 'ok':
-        return jsonify(message=gateway_usable), 400
-
-    resp_text = "Gateway added"  # Assume the best!
-
     target_config = config.config['targets'][target_iqn]
-    current_disks = target_config['disks']
-    current_clients = target_config['clients']
 
-    total_objects = len(current_disks) + len(current_clients.keys())
+    if request.method == 'PUT':
+        ip_address = request.form.get('ip_address')
+        nosync = request.form.get('nosync', 'false')
+        skipchecks = request.form.get('skipchecks', 'false')
 
-    # if the config is empty, it doesn't matter what nosync is set to
-    if total_objects == 0:
-        nosync = 'true'
+        if skipchecks.lower() == 'true':
+            logger.warning("Gateway request received, with validity checks "
+                           "disabled")
+            gateway_usable = 'ok'
+        else:
+            logger.info("gateway validation needed for {}".format(gateway_name))
+            gateway_usable = valid_gateway(target_iqn,
+                                           gateway_name,
+                                           ip_address,
+                                           current_config)
 
-    gateway_ip_list = target_config.get('ip_list', [])
+        if gateway_usable != 'ok':
+            return jsonify(message=gateway_usable), 400
 
-    gateway_ip_list.append(ip_address)
+        current_disks = target_config['disks']
+        current_clients = target_config['clients']
+
+        total_objects = len(current_disks) + len(current_clients.keys())
+
+        # if the config is empty, it doesn't matter what nosync is set to
+        if total_objects == 0:
+            nosync = 'true'
+
+        gateway_ip_list = target_config.get('ip_list', [])
+        gateway_ip_list.append(ip_address)
+
+        op = 'creation'
+        api_vars = {"gateway_ip_list": ",".join(gateway_ip_list),
+                    "nosync": nosync}
+    elif request.method == 'DELETE':
+        if gateway_name not in current_config['gateways']:
+            err_str = "Gateway does not exist in configuration"
+            logger.error(err_str)
+            return jsonify(message=err_str), 404
+
+        op = 'deletion'
+        api_vars = None
+    else:
+        return jsonify(message="Unsupported request type."), 400
 
     gateways = list(target_config['portals'].keys())
     first_gateway = (len(gateways) == 0)
     if first_gateway:
         gateways = ['localhost']
+    elif request.method == 'DELETE':
+        # Update the deleted gw first, so the other gws see the updated
+        # portal list
+        gateways.remove(gateway_name)
+        gateways.insert(0, gateway_name)
     else:
         # Update the new gw first, so other gws see the updated gateways list.
         gateways.insert(0, gateway_name)
 
-    api_vars = {"gateway_ip_list": ",".join(gateway_ip_list),
-                "nosync": nosync}
-
     resp_text, resp_code = call_api(gateways, '_gateway',
                                     '{}/{}'.format(target_iqn, gateway_name),
-                                    http_method='put',
+                                    http_method=request.method.lower(),
                                     api_vars=api_vars)
-
     config.refresh()
 
-    return jsonify(message="Gateway creation {}".format(resp_text)), resp_code
+    return jsonify(message="Gateway {} {}".format(op, resp_text)), resp_code
 
 
-@app.route('/api/_gateway/<target_iqn>/<gateway_name>', methods=['GET', 'PUT'])
+@app.route('/api/_gateway/<target_iqn>/<gateway_name>',
+           methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
 def _gateway(target_iqn=None, gateway_name=None):
     """
@@ -659,6 +687,13 @@ def _gateway(target_iqn=None, gateway_name=None):
             return jsonify(message="Gateway doesn't exist in the "
                                    "configuration"), 404
 
+    elif request.method == 'DELETE':
+        try:
+            delete_gateway(gateway_name, target_iqn)
+        except CephiSCSIError as err:
+            return jsonify(message="Gateway deletion failed: {}.".format(err)), 400
+
+        return jsonify(message="Gateway deleted."), 200
     elif request.method == 'PUT':
         # the parameters need to be cast to str for compatibility
         # with the comparison logic in common.config.add_item

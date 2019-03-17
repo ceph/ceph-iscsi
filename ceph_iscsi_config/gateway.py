@@ -133,6 +133,12 @@ class CephiSCSIGateway(object):
         """
         return self.get_tpgs(target_iqn) > 0
 
+    def redefine_target(self, target_iqn):
+        self.delete_target(target_iqn)
+
+        target_config = self.config.config['targets'][target_iqn]
+        self.define_target(target_iqn, target_config['ip_list'])
+
     def define_target(self, target_iqn, gw_ip_list, target_only=False):
         """
         define the iSCSI target and tpgs
