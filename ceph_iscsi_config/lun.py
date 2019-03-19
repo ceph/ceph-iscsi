@@ -481,7 +481,7 @@ class LUN(GWObject):
         # re-add backend storage object
         so = self.lio_stg_object()
         if not so:
-            self.add_dev_to_lio(wwn)
+            so = self.add_dev_to_lio(wwn)
             if self.error:
                 raise CephiSCSIError("LUN activate failure - {}".format(self.error_msg))
 
