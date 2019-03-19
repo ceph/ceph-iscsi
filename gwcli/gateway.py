@@ -10,7 +10,7 @@ from gwcli.utils import (this_host, response_message, GatewayAPIError,
 
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
-from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.target import GWTarget
 
 from gwcli.ceph import CephGroup
 
@@ -593,6 +593,73 @@ class GatewayGroup(UIGroup):
         else:
             self.logger.error("No gateways to refresh")
 
+    def ui_command_delete(self, gateway_name, confirm=None):
+        """
+        Delete a gateway from the group. This will stop and delete the target
+        running on the gateway.
+
+        If this is the last gateway the target is mapped to all objects added
+        to it will be removed, and confirm=True is required.
+        """
+
+        self.logger.debug("CMD: ../gateways/ delete {} confirm {}".
+                          format(gateway_name, confirm))
+
+        self.logger.info("Deleting gateway, {}".format(gateway_name))
+
+        config = self.parent.parent.parent._get_config()
+        if not config:
+            self.logger.error("Unable to refresh local config over API - sync "
+                              "aborted, restart rbd-target-api on {} to "
+                              "sync".format(gateway_name))
+            return
+
+        target_iqn = self.parent.name
+
+        gw_cnt = len(config['targets'][target_iqn]['portals'])
+        if gw_cnt == 0:
+            self.logger.error("Target is not mapped to any gateways.")
+            return
+
+        if gw_cnt == 1:
+            confirm = self.ui_eval_param(confirm, 'bool', False)
+            if not confirm:
+                self.logger.error("Deleting the last gateway will remove all "
+                                  "objects on this target. Use confirm=true")
+                return
+
+        gw_api = '{}://{}:{}/api'.format(self.http_mode, "localhost",
+                                         settings.config.api_port)
+        gw_rqst = gw_api + '/gateway/{}/{}'.format(target_iqn, gateway_name)
+
+        api = APIRequest(gw_rqst)
+        api.delete()
+
+        msg = response_message(api.response, self.logger)
+        if api.response.status_code != 200:
+            self.logger.error("Failed : {}".format(msg))
+            return
+
+        self.logger.debug("{}".format(msg))
+        self.logger.debug("Removing gw from UI")
+
+        gw_object = self.get_child(gateway_name)
+        self.remove_child(gw_object)
+
+        config = self.parent.parent.parent._get_config()
+        if not config:
+            self.logger.error("Could not refresh disaply. Restart gwcli.")
+        elif not config['targets'][target_iqn]['portals']:
+            # no more gws so everything but the target is dropped.
+            disks_object = self.parent.get_child("disks")
+            disks_object.reset()
+
+            hosts_grp_object = self.parent.get_child("host-groups")
+            hosts_grp_object.reset()
+
+            hosts_object = self.parent.get_child("hosts")
+            hosts_object.reset()
+
     def ui_command_create(self, gateway_name, ip_address, nosync=False,
                           skipchecks='false'):
         """
@@ -605,7 +672,7 @@ class GatewayGroup(UIGroup):
         nosync ......... by default new gateways are sync'd with the
                          existing configuration by cli. By specifying nosync
                          the sync step is bypassed - so the new gateway
-                         will need to have it's rbd-target-gw daemon
+                         will need to have it's rbd-target-api daemon
                          restarted to apply the current configuration
                          (default = False)
         skipchecks ..... set this to true to force gateway validity checks
@@ -644,7 +711,7 @@ class GatewayGroup(UIGroup):
         config = self.parent.parent.parent._get_config()
         if not config:
             self.logger.error("Unable to refresh local config"
-                              " over API - sync aborted, restart rbd-target-gw"
+                              " over API - sync aborted, restart rbd-target-api"
                               " on {} to sync".format(gateway_name))
 
         target_iqn = self.parent.name

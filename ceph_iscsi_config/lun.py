@@ -16,7 +16,7 @@ from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      get_pools, get_rbd_size, this_host,
                                      human_size, CephiSCSIError)
 from ceph_iscsi_config.gateway_object import GWObject
-from ceph_iscsi_config.gateway import GWTarget
+from ceph_iscsi_config.target import GWTarget
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.group import Group
 from ceph_iscsi_config.backstore import lookup_storage_object
@@ -495,8 +495,7 @@ class LUN(GWObject):
             # Add the mapping for the lun to ensure the block device is
             # present on all TPG's
             gateway = GWTarget(self.logger, target_iqn, ip_list)
-
-            gateway.manage('map')
+            gateway.map_lun(self.config, so)
             if gateway.error:
                 raise CephiSCSIError("LUN mapping failed - {}".format(gateway.error_msg))
 
@@ -1106,26 +1105,85 @@ class LUN(GWObject):
         return candidate
 
     @staticmethod
-    def define_luns(logger, config, gateway):
+    def find_first_mapped_target(config, disk):
+        for target, target_config in config.config['targets'].items():
+            if disk in target_config['disks']:
+                return target
+
+        return None
+
+    @staticmethod
+    def reassign_owners(logger, config):
         """
-        define the disks in the config to LIO
+        Reassign disks across gateways after a gw deletion.
         :param logger: logger object to print to
         :param config: configuration dict from the rados pool
-        :param gateway: (object) gateway object - used for mapping
         :raises CephiSCSIError.
         """
 
+        updated = False
+        gateways = config.config['gateways']
+
+        for disk, disk_config in config.config['disks'].items():
+            owner = disk_config.get('owner', None)
+            if owner is None:
+                continue
+
+            gw = gateways.get(owner, None)
+            if gw is None:
+                target = LUN.find_first_mapped_target(config, disk)
+
+                if not gateways or target is None:
+                    disk_config.pop('owner')
+                else:
+                    target_config = config.config['targets'][target]
+                    new_owner = LUN.get_owner(gateways,
+                                              target_config['portals'])
+
+                    logger.info("Changing {}'s owner from {} to {}".
+                                format(disk, owner, new_owner))
+                    disk_config['owner'] = new_owner
+
+                    gw_config = config.config['gateways'][new_owner]
+                    active_cnt = gw_config['active_luns']
+                    gw_config['active_luns'] = active_cnt + 1
+                    config.update_item("gateways", new_owner, gw_config)
+
+                config.update_item("disks", disk, disk_config)
+                updated = True
+
+        if updated:
+            config.commit("retain")
+            if config.error:
+                raise CephiSCSIError("Could not update LUN owners: {}".
+                                     format(config.error_msg))
+
+    @staticmethod
+    def define_luns(logger, config, target):
+        """
+        define the disks in the config to LIO and map to a LUN
+        :param logger: logger object to print to
+        :param config: configuration dict from the rados pool
+        :param target: (object) gateway object - used for mapping
+        :raises CephiSCSIError.
+        """
+
+        ips = ip_addresses()
         local_gw = this_host()
+
+        target_disks = config.config["targets"][target.iqn]['disks']
+        if not target_disks:
+            logger.info("No LUNs to export")
+            return
+
+        disks = {}
+        for disk in target_disks:
+            disks[disk] = config.config['disks'][disk]
 
         # sort the disks dict keys, so the disks are registered in a specific
         # sequence
-        disks = config.config['disks']
         srtd_disks = sorted(disks)
         pools = {disks[disk_key]['pool'] for disk_key in srtd_disks}
-
-        if pools is None:
-            logger.info("No LUNs to export")
-            return True
 
         ips = ip_addresses()
 
@@ -1142,51 +1200,39 @@ class LUN(GWObject):
                                   if disk_key.startswith(pool + '/')]
                     for disk_key in pool_disks:
 
-                        is_lun_mapped = False
-                        for _, target_config in config.config['targets'].items():
-                            if local_gw in target_config['portals'] \
-                                    and disk_key in target_config['disks']:
-                                is_lun_mapped = True
-                                break
-                        if is_lun_mapped:
-                            pool, image_name = disk_key.split('/')
+                        pool, image_name = disk_key.split('/')
+                        with rbd.Image(ioctx, image_name) as rbd_image:
 
-                            try:
-                                with rbd.Image(ioctx, image_name) as rbd_image:
-                                    RBDDev.rbd_lock_cleanup(logger, ips, rbd_image)
+                            disk_config = config.config['disks'][disk_key]
+                            backstore = disk_config['backstore']
+                            backstore_object_name = disk_config['backstore_object_name']
 
-                                    disk_config = config.config['disks'][disk_key]
-                                    backstore = disk_config['backstore']
-                                    backstore_object_name = disk_config['backstore_object_name']
-                                    lun = LUN(logger, pool, image_name, rbd_image.size(),
-                                              local_gw, backstore, backstore_object_name)
-                                    if lun.error:
-                                        raise CephiSCSIError("Error defining rbd "
-                                                             "image {}".format(disk_key))
+                            lun = LUN(logger, pool, image_name,
+                                      rbd_image.size(), local_gw, backstore,
+                                      backstore_object_name)
 
-                                    lun.allocate()
+                            if lun.error:
+                                raise CephiSCSIError("Error defining rbd image {}"
+                                                     .format(disk_key))
 
-                                    if lun.error:
-                                        raise CephiSCSIError("Error unable to "
-                                                             "register  {} with "
-                                                             "LIO - {}".format(disk_key,
-                                                                               lun.error_msg))
+                            so = lun.allocate()
+                            if lun.error:
+                                raise CephiSCSIError("Unable to register {} "
+                                                     "with LIO: {}"
+                                                     .format(disk_key,
+                                                             lun.error_msg))
 
-                            except rbd.ImageNotFound:
-                                raise CephiSCSIError("Disk '{}' defined to the "
-                                                     "config, but image '{}' can "
-                                                     "not be found in '{}' "
-                                                     "pool".format(disk_key,
-                                                                   image_name,
-                                                                   pool))
+                            # If not in use by another target on this gw
+                            # clean up stale locks.
+                            if so.status != 'activated':
+                                RBDDev.rbd_lock_cleanup(logger, ips,
+                                                        rbd_image)
 
-        if gateway:
-            # Gateway Mapping : Map the LUN's registered to all tpg's within the
-            # LIO target
-            gateway.manage('map')
-            if gateway.error:
-                raise CephiSCSIError("Error mapping the LUNs to the tpg's within "
-                                     "the iscsi Target")
+                            target._map_lun(config, so)
+                            if target.error:
+                                raise CephiSCSIError("Mapping for {} failed: {}"
+                                                     .format(disk_key,
+                                                             target.error_msg))
 
 
 def rados_pool(conf=None, pool=None):
