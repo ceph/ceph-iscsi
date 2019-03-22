@@ -2228,15 +2228,21 @@ def get_settings():
         target_default_controls[k] = default_val
 
     disk_default_controls = {}
+    required_rbd_features = {}
+    supported_rbd_features = {}
     for backstore, ks in LUN.SETTINGS.items():
         disk_default_controls[backstore] = {}
         for k in ks:
             default_val = getattr(settings.config, k, None)
             disk_default_controls[backstore][k] = default_val
+        required_rbd_features[backstore] = RBDDev.required_features(backstore)
+        supported_rbd_features[backstore] = RBDDev.supported_features(backstore)
 
     return jsonify({
         'target_default_controls': target_default_controls,
         'disk_default_controls': disk_default_controls,
+        'supported_rbd_features': supported_rbd_features,
+        'required_rbd_features': required_rbd_features,
         'backstores': LUN.BACKSTORES,
         'default_backstore': LUN.DEFAULT_BACKSTORE,
         'config': {
