@@ -372,6 +372,7 @@ class GWClient(GWObject):
     def _update_acl(self, target_config):
         if self.tpg.node_acls:
             self.tpg.set_attribute('generate_node_acls', 0)
+            self.tpg.set_attribute('demo_mode_write_protect', 1)
             if not target_config['acl_enabled']:
                 target_config['acl_enabled'] = True
                 self.change_count += 1

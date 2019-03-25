@@ -234,8 +234,10 @@ class GWTarget(GWObject):
         for tpg in self.tpg_list:
             if target_config['acl_enabled']:
                 tpg.set_attribute('generate_node_acls', 0)
+                tpg.set_attribute('demo_mode_write_protect', 1)
             else:
                 tpg.set_attribute('generate_node_acls', 1)
+                tpg.set_attribute('demo_mode_write_protect', 0)
 
     def create_tpg(self, ip):
 
