@@ -235,6 +235,34 @@ class GWClient(GWObject):
             self.change_count += 1
 
     @staticmethod
+    def get_client_info(target_iqn, client_iqn):
+        result = {
+            "alias": '',
+            "state": '',
+            "ip_address": []
+        }
+        iscsi_fabric = ISCSIFabricModule()
+        target = Target(iscsi_fabric, target_iqn, 'lookup')
+        for tpg in target.tpgs:
+            if tpg.enable:
+                for client in tpg.node_acls:
+                    if client.node_wwn != client_iqn:
+                        continue
+                    session = client.session
+                    if session is None:
+                        break
+                    result['alias'] = session.get('alias')
+                    state = session.get('state').upper()
+                    result['state'] = state
+                    ips = set()
+                    if state == 'LOGGED_IN':
+                        for conn in session.get('connections'):
+                            ips.add(conn.get('address'))
+                        result['ip_address'] = list(ips)
+                    break
+        return result
+
+    @staticmethod
     def define_clients(logger, config, target_iqn):
         """
         define the clients (nodeACLs) to the gateway definition
