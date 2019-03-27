@@ -2448,7 +2448,7 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
 
             return fail_msg, api.response.status_code
 
-    return "successful", 200
+    return api.response.text if http_method == 'get' else 'successful', 200
 
 
 def pre_reqs_errors():
