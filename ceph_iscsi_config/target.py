@@ -685,3 +685,9 @@ class GWTarget(GWObject):
                         config.del_item('gateways', local_gw)
 
                 config.commit()
+
+    @staticmethod
+    def get_num_sessions(target_iqn):
+        with open('/sys/kernel/config/target/iscsi/{}/fabric_statistics/iscsi_instance'
+                  '/sessions'.format(target_iqn)) as sessions_file:
+            return int(sessions_file.read().rstrip('\n'))
