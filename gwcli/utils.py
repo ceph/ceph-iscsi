@@ -8,8 +8,8 @@ import subprocess
 
 
 from rtslib_fb.utils import normalize_wwn, RTSLibError
-import rtslib_fb.root as root
 
+from ceph_iscsi_config.client import GWClient
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (resolve_ip_addresses, gen_file_hash,
                                      CephiSCSIError)
@@ -283,14 +283,10 @@ def valid_client(**kwargs):
         # client to delete must not be logged in - we're just checking locally,
         # since *all* nodes are set up the same, and a client login request
         # would normally login to each gateway
-        lio_root = root.RTSRoot()
-        clients_logged_in = [session['parent_nodeacl'].node_wwn
-                             for session in lio_root.sessions
-                             if session['state'] == 'LOGGED_IN']
-
-        if client_iqn in clients_logged_in:
-            return ("Client '{}' is logged in - unable to delete until"
-                    " it's logged out".format(client_iqn))
+        client_info = GWClient.get_client_info(target_iqn, client_iqn)
+        if client_info['state'] == 'LOGGED_IN':
+            return ("Client '{}' is logged in to {}- unable to delete until"
+                    " it's logged out".format(client_iqn, target_iqn))
 
         # at this point, the client looks ok for a DELETE operation
         return 'ok'
