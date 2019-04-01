@@ -1622,6 +1622,54 @@ def _targetauth(target_iqn=None):
     return jsonify(message='OK'), 200
 
 
+@app.route('/api/targetinfo/<target_iqn>', methods=['GET'])
+@requires_restricted_auth
+def targetinfo(target_iqn):
+    """
+    Returns the total number of active sessions for <target_iqn>
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET
+        http://192.168.122.69:5000/api/targetinfo/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
+    """
+    if target_iqn not in config.config['targets']:
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+    target_config = config.config['targets'][target_iqn]
+    gateways = target_config['portals']
+    num_sessions = 0
+    for gateway in gateways.keys():
+        resp_text, resp_code = call_api([gateway], '_targetinfo', target_iqn, http_method='get')
+        if resp_code != 200:
+            return jsonify(message="{}".format(resp_text)), resp_code
+        gateway_response = json.loads(resp_text)
+        num_sessions += gateway_response['num_sessions']
+    return jsonify({
+        "num_sessions": num_sessions
+    }), 200
+
+
+@app.route('/api/_targetinfo/<target_iqn>', methods=['GET'])
+@requires_restricted_auth
+def _targetinfo(target_iqn):
+    """
+    Returns the number of active sessions for <target_iqn> on local gateway
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET
+        http://192.168.122.69:5000/api/_targetinfo/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
+    """
+    if target_iqn not in config.config['targets']:
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+    target_config = config.config['targets'][target_iqn]
+    local_gw = this_host()
+    if local_gw not in target_config['portals']:
+        return jsonify(message="{} is not a portal of target {}".format(local_gw, target_iqn)), 400
+    num_sessions = GWTarget.get_num_sessions(target_iqn)
+    return jsonify({
+        "num_sessions": num_sessions
+    }), 200
+
+
 @app.route('/api/clients/<target_iqn>', methods=['GET'])
 @requires_restricted_auth
 def get_clients(target_iqn=None):
@@ -2448,7 +2496,7 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
 
             return fail_msg, api.response.status_code
 
-    return "successful", 200
+    return api.response.text if http_method == 'get' else 'successful', 200
 
 
 def pre_reqs_errors():
