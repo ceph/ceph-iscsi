@@ -199,7 +199,7 @@ class Config(object):
                 'clients': self.config['clients'],
                 'portals': portals,
                 'groups': self.config['groups'],
-                'controls': self.config['controls'],
+                'controls': self.config.get('controls', {}),
                 'ip_list': self.config['gateways']['ip_list']
             }
             self.add_item('discovery_auth', None, {
@@ -209,7 +209,8 @@ class Config(object):
             self.add_item("targets", None, {})
             self.add_item("targets", iqn, target)
             self.update_item("targets", iqn, target)
-            self.del_item('controls', None)
+            if 'controls' in self.config:
+                self.del_item('controls', None)
             self.del_item('clients', None)
             self.del_item('groups', None)
             self.update_item("gateways", None, gateways)
