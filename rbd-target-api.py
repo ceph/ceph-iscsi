@@ -1670,6 +1670,28 @@ def _targetinfo(target_iqn):
     }), 200
 
 
+@app.route('/api/gatewayinfo', methods=['GET'])
+@requires_restricted_auth
+def gatewayinfo():
+    """
+    Returns the number of active sessions on local gateway
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET
+        http://192.168.122.69:5000/api/gatewayinfo
+    """
+    local_gw = this_host()
+    if local_gw not in config.config['gateways']:
+        return jsonify(message="Gateway {} does not exist in configuration".format(local_gw)), 400
+    num_sessions = 0
+    for target_iqn, target in config.config['targets'].items():
+        if local_gw in target['portals']:
+            num_sessions += GWTarget.get_num_sessions(target_iqn)
+    return jsonify({
+        "num_sessions": num_sessions
+    }), 200
+
+
 @app.route('/api/clients/<target_iqn>', methods=['GET'])
 @requires_restricted_auth
 def get_clients(target_iqn=None):
