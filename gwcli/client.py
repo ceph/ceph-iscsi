@@ -2,11 +2,10 @@ from gwcli.node import UIGroup, UINode
 
 from gwcli.utils import response_message, APIRequest, get_config
 
-from ceph_iscsi_config.client import CHAP
+from ceph_iscsi_config.client import CHAP, GWClient
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import human_size
 
-import rtslib_fb.root as root
 from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 # this ignores the warning issued when verify=False is used
@@ -690,22 +689,11 @@ class Client(UINode):
 
     @property
     def logged_in(self):
-
-        r = root.RTSRoot()
-        for sess in r.sessions:
-            if sess['parent_nodeacl'].node_wwn == self.client_iqn:
-                self.alias = sess.get('alias')
-                state = sess.get('state').upper()
-                ips = set()
-                if state == 'LOGGED_IN':
-                    for conn in sess.get('connections'):
-                        ips.add(conn.get('address'))
-                    self.ip_address = ','.join(list(ips))
-                else:
-                    self.ip_address = ''
-
-                return state
-        return ''
+        target_iqn = self.parent.parent.name
+        client_info = GWClient.get_client_info(target_iqn, self.client_iqn)
+        self.alias = client_info['alias']
+        self.ip_address = ','.join(client_info['ip_address'])
+        return client_info['state']
 
 
 class MappedLun(UINode):

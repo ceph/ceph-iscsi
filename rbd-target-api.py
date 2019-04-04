@@ -2111,6 +2111,73 @@ def _client(target_iqn, client_iqn):
             return jsonify(message="Client does not exist!"), 404
 
 
+@app.route('/api/clientinfo/<target_iqn>/<client_iqn>', methods=['GET'])
+@requires_restricted_auth
+def clientinfo(target_iqn, client_iqn):
+    """
+    Returns client alias, ip_address and state for each connected portal
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET
+        http://192.168.122.69:5000/api/clientinfo/
+        iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw-client
+    """
+    if target_iqn not in config.config['targets']:
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+    target_config = config.config['targets'][target_iqn]
+    if client_iqn not in target_config['clients']:
+        return jsonify(message="Client {} does not exist".format(client_iqn)), 400
+    gateways = target_config['portals']
+    response = {
+        "alias": '',
+        "state": {},
+        "ip_address": []
+    }
+    for gateway in gateways.keys():
+        resp_text, resp_code = call_api([gateway],
+                                        '_clientinfo',
+                                        '{}/{}'.format(target_iqn, client_iqn),
+                                        http_method='get')
+        if resp_code != 200:
+            return jsonify(message="{}".format(resp_text)), resp_code
+        gateway_response = json.loads(resp_text)
+        alias = gateway_response['alias']
+        if alias:
+            response['alias'] = gateway_response['alias']
+        state = gateway_response['state']
+        if state:
+            if state not in response['state']:
+                response['state'][state] = []
+            response['state'][state].append(gateway)
+        response['ip_address'].extend(gateway_response['ip_address'])
+    response['ip_address'] = list(set(response['ip_address']))
+    return jsonify(response), 200
+
+
+@app.route('/api/_clientinfo/<target_iqn>/<client_iqn>', methods=['GET'])
+@requires_restricted_auth
+def _clientinfo(target_iqn, client_iqn):
+    """
+    Returns client alias, ip_address and state for local gateway
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -X GET
+        http://192.168.122.69:5000/api/_clientinfo/
+        iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw-client
+    """
+    if target_iqn not in config.config['targets']:
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+    target_config = config.config['targets'][target_iqn]
+    if client_iqn not in target_config['clients']:
+        return jsonify(message="Client {} does not exist".format(client_iqn)), 400
+    local_gw = this_host()
+    if local_gw not in target_config['portals']:
+        return jsonify(message="{} is not a portal of target {}".format(local_gw, target_iqn)), 400
+
+    logged_in = GWClient.get_client_info(target_iqn, client_iqn)
+    return jsonify(logged_in), 200
+
+
 @app.route('/api/hostgroups/<target_iqn>', methods=['GET'])
 @requires_restricted_auth
 def hostgroups(target_iqn=None):
