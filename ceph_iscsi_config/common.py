@@ -55,7 +55,7 @@ class Config(object):
                                       'mutual_username': '',
                                       'mutual_password': '',
                                       'mutual_password_encryption_enabled': False},
-                   "version": 8,
+                   "version": 9,
                    "epoch": 0,
                    "created": '',
                    "updated": ''
@@ -306,6 +306,14 @@ class Config(object):
 
                 self.update_item("targets", target_iqn, target)
             self.update_item("version", None, 8)
+
+        if self.config['version'] == 8:
+            for target_iqn, target in self.config['targets'].items():
+                for _, portal in target['portals'].items():
+                    portal['portal_ip_addresses'] = [portal['portal_ip_address']]
+                    portal.pop('portal_ip_address')
+                self.update_item("targets", target_iqn, target)
+            self.update_item("version", None, 9)
 
         self.commit("retain")
 

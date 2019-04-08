@@ -338,16 +338,18 @@ class CephiSCSIGateway(object):
         if target_config:
             local_gw = target_config['portals'].get(self.hostname)
             if local_gw:
-                local_gw_ip = local_gw['portal_ip_address']
+                local_gw_ips = local_gw['portal_ip_addresses']
 
                 target_config['portals'].pop(self.hostname)
 
                 ip_list = target_config['ip_list']
-                ip_list.remove(local_gw_ip)
+                for local_gw_ip in local_gw_ips:
+                    ip_list.remove(local_gw_ip)
 
                 for _, remote_gw_config in target_config['portals'].items():
-                    remote_gw_config["gateway_ip_list"].remove(local_gw_ip)
-                    remote_gw_config["inactive_portal_ips"].remove(local_gw_ip)
+                    for local_gw_ip in local_gw_ips:
+                        remote_gw_config["gateway_ip_list"].remove(local_gw_ip)
+                        remote_gw_config["inactive_portal_ips"].remove(local_gw_ip)
                     tpg_count = remote_gw_config["tpgs"]
                     remote_gw_config["tpgs"] = tpg_count - 1
 

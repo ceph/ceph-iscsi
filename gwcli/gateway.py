@@ -782,7 +782,7 @@ class Gateway(UINode):
 
     display_attributes = ["name",
                           "gateway_ip_list",
-                          "portal_ip_address",
+                          "portal_ip_addresses",
                           "inactive_portal_ips",
                           "tpgs",
                           "service_state"]
@@ -864,5 +864,5 @@ class Gateway(UINode):
     def summary(self):
 
         state = self.state
-        return "{} ({})".format(self.portal_ip_address,
+        return "{} ({})".format(','.join(self.portal_ip_addresses),
                                 state), (state == "UP")

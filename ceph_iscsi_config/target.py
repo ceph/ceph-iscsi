@@ -77,9 +77,9 @@ class GWTarget(GWObject):
                                   " any ip on this host")
                 return
 
-            self.active_portal_ip = list(matching_ip)[0]
+            self.active_portal_ips = list(matching_ip)
             self.logger.debug("active portal will use "
-                              "{}".format(self.active_portal_ip))
+                              "{}".format(self.active_portal_ips))
 
             self.gateway_ip_list = gateway_ip_list
             self.logger.debug("tpg's will be defined in this order"
@@ -88,7 +88,7 @@ class GWTarget(GWObject):
             # without gateway_ip_list passed in this is a 'init' or
             # 'clearconfig' request
             self.gateway_ip_list = []
-            self.active_portal_ip = []
+            self.active_portal_ips = []
 
         self.changes_made = False
         self.config_updated = False
@@ -177,25 +177,25 @@ class GWTarget(GWObject):
         :return: None
         """
 
+        index = 0
         for tpg in self.tpg_list:
             if tpg._get_enable():
                 for lun in tpg.luns:
                     try:
                         self.bind_alua_group_to_lun(config,
                                                     lun,
-                                                    tpg_ip_address=self.active_portal_ip)
+                                                    tpg_ip_address=self.active_portal_ips[index])
                     except CephiSCSIInval as err:
                         self.error = True
                         self.error_msg = err
                         return
 
                 try:
-                    NetworkPortal(tpg, normalize_ip_literal(self.active_portal_ip))
+                    NetworkPortal(tpg, normalize_ip_literal(self.active_portal_ips[index]))
                 except RTSLibError as e:
                     self.error = True
                     self.error_msg = e
-                else:
-                    break
+                index += 1
 
     def clear_config(self, config):
         """
@@ -249,7 +249,7 @@ class GWTarget(GWObject):
 
             self.logger.debug("(Gateway.create_tpg) Added tpg for portal "
                               "ip {}".format(ip))
-            if ip == self.active_portal_ip:
+            if ip in self.active_portal_ips:
                 if self.enable_portal:
                     NetworkPortal(tpg, normalize_ip_literal(ip))
                 tpg.enable = True
@@ -383,7 +383,7 @@ class GWTarget(GWObject):
         # they do not have a common gw the owning gw may not exist here.
         # The LUN will just have all ANO paths then.
         if gw_config:
-            if gw_config["portal_ip_address"] == tpg_ip_address:
+            if gw_config["portal_ip_addresses"][0] == tpg_ip_address:
                 is_owner = True
 
         try:
@@ -575,7 +575,8 @@ class GWTarget(GWObject):
                         continue
 
                     inactive_portal_ip = list(self.gateway_ip_list)
-                    inactive_portal_ip.remove(remote_gw_config["portal_ip_address"])
+                    for portal_ip_address in remote_gw_config["portal_ip_addresses"]:
+                        inactive_portal_ip.remove(portal_ip_address)
                     remote_gw_config['gateway_ip_list'] = self.gateway_ip_list
                     remote_gw_config['tpgs'] = len(self.tpg_list)
                     remote_gw_config['inactive_portal_ips'] = inactive_portal_ip
@@ -583,11 +584,12 @@ class GWTarget(GWObject):
 
                 # Add the new gw
                 inactive_portal_ip = list(self.gateway_ip_list)
-                inactive_portal_ip.remove(self.active_portal_ip)
+                for active_portal_ip in self.active_portal_ips:
+                    inactive_portal_ip.remove(active_portal_ip)
 
                 portal_metadata = {"tpgs": len(self.tpg_list),
                                    "gateway_ip_list": self.gateway_ip_list,
-                                   "portal_ip_address": self.active_portal_ip,
+                                   "portal_ip_addresses": self.active_portal_ips,
                                    "inactive_portal_ips": inactive_portal_ip}
                 target_config['portals'][local_gw] = portal_metadata
                 target_config['ip_list'] = self.gateway_ip_list
@@ -662,12 +664,13 @@ class GWTarget(GWObject):
                 if len(target_config['portals']) == 0:
                     config.del_item('targets', self.iqn)
                 else:
-                    gw_ip = target_config['portals'][local_gw]['portal_ip_address']
+                    gw_ips = target_config['portals'][local_gw]['portal_ip_addresses']
 
                     target_config['portals'].pop(local_gw)
 
                     ip_list = target_config['ip_list']
-                    ip_list.remove(gw_ip)
+                    for gw_ip in gw_ips:
+                        ip_list.remove(gw_ip)
                     if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
                         config.update_item('targets', self.iqn, target_config)
                     else:
