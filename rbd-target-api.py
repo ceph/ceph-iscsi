@@ -1638,6 +1638,10 @@ def targetinfo(target_iqn):
     gateways = target_config['portals']
     num_sessions = 0
     for gateway in gateways.keys():
+        target_state = target_ready([gateway])
+        if target_state.get('status_api') == 'UP' and target_state.get('status_iscsi') == 'DOWN':
+            # If API is 'up' and iSCSI is 'down', there are no active sessions to count
+            continue
         resp_text, resp_code = call_api([gateway], '_targetinfo', target_iqn, http_method='get')
         if resp_code != 200:
             return jsonify(message="{}".format(resp_text)), resp_code
@@ -2489,6 +2493,8 @@ def target_ready(gateway_list):
     """
     http_mode = 'https' if settings.config.api_secure else 'http'
     target_state = {"status": 'OK',
+                    "status_iscsi": 'UP',
+                    "status_api": 'UP',
                     "summary": ''}
 
     for gw in gateway_list:
@@ -2500,15 +2506,21 @@ def target_ready(gateway_list):
             api.get()
         except GatewayAPIError:
             target_state['status'] = 'NOTOK'
+            target_state['status_iscsi'] = 'UNKNOWN'
+            target_state['status_api'] = 'DOWN'
             target_state['summary'] += ',{}(iscsi Unknown, API down)'.format(gw)
         else:
             if api.response.status_code == 200:
                 continue
             elif api.response.status_code == 503:
                 target_state['status'] = 'NOTOK'
+                target_state['status_iscsi'] = 'DOWN'
+                target_state['status_api'] = 'UP'
                 target_state['summary'] += ',{}(iscsi down, API up)'.format(gw)
             else:
                 target_state['status'] = 'NOTOK'
+                target_state['status_iscsi'] = 'UNKNOWN'
+                target_state['status_api'] = 'UNKNOWN'
                 target_state['summary'] += ',{}(UNKNOWN state)'.format(gw)
 
     target_state['summary'] = target_state['summary'][1:]   # ignore 1st char
