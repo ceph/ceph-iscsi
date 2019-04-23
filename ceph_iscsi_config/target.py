@@ -113,8 +113,12 @@ class GWTarget(GWObject):
         :return: boolean
         """
 
+        return GWTarget._exists(self.iqn)
+
+    @staticmethod
+    def _exists(target_iqn):
         return os.path.exists('/sys/kernel/config/target/iscsi/'
-                              '{}'.format(self.iqn))
+                              '{}'.format(target_iqn))
 
     def _get_portals(self, tpg):
         """
@@ -688,6 +692,8 @@ class GWTarget(GWObject):
 
     @staticmethod
     def get_num_sessions(target_iqn):
+        if not GWTarget._exists(target_iqn):
+            return 0
         with open('/sys/kernel/config/target/iscsi/{}/fabric_statistics/iscsi_instance'
                   '/sessions'.format(target_iqn)) as sessions_file:
             return int(sessions_file.read().rstrip('\n'))
