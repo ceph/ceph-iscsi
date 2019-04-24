@@ -128,9 +128,6 @@ class ISCSIRoot(UIRoot):
             return
 
         current_config = self._get_config()
-        if not current_config.get('targets'):
-            self.logger.error("Export requested, but the config is empty")
-            return
 
         if mode == 'copy':
             self.export_copy(current_config)
