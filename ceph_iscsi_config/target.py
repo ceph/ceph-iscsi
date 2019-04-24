@@ -233,10 +233,9 @@ class GWTarget(GWObject):
             self.error = True
             self.error_msg = "Unable to delete target - {}".format(err)
 
-    def update_acl(self, config):
-        target_config = config.config["targets"][self.iqn]
+    def update_acl(self, acl_enabled):
         for tpg in self.tpg_list:
-            if target_config['acl_enabled']:
+            if acl_enabled:
                 tpg.set_attribute('generate_node_acls', 0)
                 tpg.set_attribute('demo_mode_write_protect', 1)
             else:
@@ -543,7 +542,8 @@ class GWTarget(GWObject):
                 # return to caller, with error state set
                 return
 
-            self.update_acl(config)
+            target_config = config.config["targets"][self.iqn]
+            self.update_acl(target_config['acl_enabled'])
 
             discovery_auth_config = config.config['discovery_auth']
             Discovery.set_discovery_auth_lio(discovery_auth_config['username'],
@@ -554,7 +554,6 @@ class GWTarget(GWObject):
                                              discovery_auth_config[
                                                  'mutual_password_encryption_enabled'])
 
-            target_config = config.config["targets"][self.iqn]
             gateway_group = config.config["gateways"].keys()
             if "ip_list" not in target_config:
                 target_config['ip_list'] = self.gateway_ip_list
@@ -610,7 +609,8 @@ class GWTarget(GWObject):
 
                 self.map_luns(config)
 
-                self.update_acl(config)
+                target_config = config.config["targets"][self.iqn]
+                self.update_acl(target_config['acl_enabled'])
 
             else:
                 self.error = True

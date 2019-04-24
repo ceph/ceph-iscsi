@@ -1601,22 +1601,24 @@ def _targetauth(target_iqn=None):
     **RESTRICTED**
     """
 
+    config.refresh()
+
     local_gw = this_host()
     committing_host = request.form['committing_host']
     action = request.form['action']
 
     target = GWTarget(logger, target_iqn, [])
 
-    target_config = config.config['targets'][target_iqn]
-    if action in ['disable_acl', 'enable_acl']:
-        target_config['acl_enabled'] = (action == 'enable_acl')
-    config.update_item('targets', target_iqn, target_config)
+    acl_enabled = (action == 'enable_acl')
 
     if target.exists():
         target.load_config()
-        target.update_acl(config)
+        target.update_acl(acl_enabled)
 
     if committing_host == local_gw:
+        target_config = config.config['targets'][target_iqn]
+        target_config['acl_enabled'] = acl_enabled
+        config.update_item('targets', target_iqn, target_config)
         config.commit("retain")
 
     return jsonify(message='OK'), 200
