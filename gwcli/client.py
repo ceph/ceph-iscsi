@@ -1,6 +1,6 @@
 from gwcli.node import UIGroup, UINode
 
-from gwcli.utils import response_message, APIRequest, get_config
+from gwcli.utils import response_message, APIRequest, get_config, this_host
 
 from ceph_iscsi_config.client import CHAP, GWClient
 import ceph_iscsi_config.settings as settings
@@ -690,10 +690,18 @@ class Client(UINode):
     @property
     def logged_in(self):
         target_iqn = self.parent.parent.name
-        client_info = GWClient.get_client_info(target_iqn, self.client_iqn)
-        self.alias = client_info['alias']
-        self.ip_address = ','.join(client_info['ip_address'])
-        return client_info['state']
+        gateways = self.parent.parent.get_child('gateways')
+        local_gw = this_host()
+        is_local_target = len([child for child in gateways.children if child.name == local_gw]) > 0
+        if is_local_target:
+            client_info = GWClient.get_client_info(target_iqn, self.client_iqn)
+            self.alias = client_info['alias']
+            self.ip_address = ','.join(client_info['ip_address'])
+            return client_info['state']
+        else:
+            self.alias = ''
+            self.ip_address = ''
+            return ''
 
 
 class MappedLun(UINode):
