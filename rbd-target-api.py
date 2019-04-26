@@ -1662,10 +1662,6 @@ def _targetinfo(target_iqn):
     """
     if target_iqn not in config.config['targets']:
         return jsonify(message="Target {} does not exist".format(target_iqn)), 400
-    target_config = config.config['targets'][target_iqn]
-    local_gw = this_host()
-    if local_gw not in target_config['portals']:
-        return jsonify(message="{} is not a portal of target {}".format(local_gw, target_iqn)), 400
     num_sessions = GWTarget.get_num_sessions(target_iqn)
     return jsonify({
         "num_sessions": num_sessions
