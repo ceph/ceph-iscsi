@@ -232,7 +232,7 @@ class ChapTest(unittest.TestCase):
                         "inactive_portal_ips": [
                             "192.168.100.202"
                         ],
-                        "portal_ip_address": "192.168.100.201",
+                        "portal_ip_addresses": ["192.168.100.201"],
                         "tpgs": 2
                     },
                     "node2": {
@@ -243,7 +243,7 @@ class ChapTest(unittest.TestCase):
                         "inactive_portal_ips": [
                             "192.168.100.201"
                         ],
-                        "portal_ip_address": "192.168.100.202",
+                        "portal_ip_addresses": ["192.168.100.202"],
                         "tpgs": 2
                     }
                 },
@@ -251,5 +251,5 @@ class ChapTest(unittest.TestCase):
             }
         },
         "updated": "2018/12/07 09:18:13",
-        "version": 8
+        "version": 9
     }
