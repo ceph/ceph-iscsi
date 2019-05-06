@@ -2,9 +2,13 @@
 This project provides the common logic and CLI tools for creating and managing
 LIO gateways for Ceph.
 
-It includes the ```rbd-target-gw``` daemon which is responsible for restoring
-the state of LIO following a gateway reboot/outage and replaces the existing
+It includes the ```rbd-target-api``` daemon which is responsible for restoring
+the state of LIO following a gateway reboot/outage and exporting a REST API
+to configure the system using tools like gwcli. It replaces the existing
 'target' service.
+
+There is also a second daemon ```rbd-target-gw``` which exports a REST API
+to gather statistics.
 
 It also includes the CLI tool ```gwcli``` which can be used to configure and
 manage the Ceph iSCSI gateway, which replaces the existing ```targetcli```
@@ -14,8 +18,7 @@ configure multiple gateways concurrently.
 ## Usage
 This package should be installed on each node that is intended to be an iSCSI
 gateway. The Python ```ceph_iscsi_config``` modules are used by:
-* the **rbd-target-gw** daemon to restore LIO state at boot time
-* **Ansible** modules defined in the ceph-iscsi-ansible project at https://github.com/pcuzner/ceph-ansible  
+* the **rbd-target-api** daemon to restore LIO state at boot time
 * **API/CLI** configuration tools
 
 ## Installation
@@ -25,7 +28,7 @@ Simply install the provided rpm with:
 
 ### Manually
 The following packages are required by ceph-iscsi-config and must be
-installed before starting the rbd-target-gw service:
+installed before starting the rbd-target-api and rbd-target-gw services:
 
 python-rados
 python-rbd
@@ -49,10 +52,10 @@ following files into their equivalent places on each gateway:
 Once the daemon is in place, reload the configuration with
 ```
 systemctl daemon-reload
-systemctl enable rbd-target-gw
-systemctl start rbd-target-gw
 systemctl enable rbd-target-api
+systemctl enable rbd-target-gw
 systemctl start rbd-target-api
+systemctl start rbd-target-gw
 ```
 
 ## Features
@@ -66,7 +69,7 @@ The functionality provided by each module in the python package is summarised be
 | **lun** | rbd image management (create/resize), combined with mapping to the OS and LIO instance |
 | **utils** | common code called by multiple modules |
 
-The rbd-target-gw daemon performs the following tasks;  
+The rbd-target-api daemon performs the following tasks;
   1. At start up remove any osd blacklist entry that may apply to the running host  
   2. Read the configuration object from Rados  
   3. Process the configuration  
@@ -75,6 +78,6 @@ The rbd-target-gw daemon performs the following tasks;
   3.3 Create the iscsi target, TPG's and port IP's  
   3.4 Define clients (NodeACL's)  
   3.5 add the required rbd images to clients  
-
+  4. Export a REST API for system configuration.
 
 

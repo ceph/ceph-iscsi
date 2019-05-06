@@ -1,7 +1,7 @@
 This project provides the common logic and CLI tools for creating and managing
 LIO gateways for Ceph.
 
-It includes the ```rbd-target-gw``` daemon which is responsible for restoring
+It includes the ```rbd-target-api``` daemon which is responsible for restoring
 the state of LIO following a gateway reboot/outage and replaces the existing
 'target' service.
 
