@@ -26,7 +26,18 @@ __author__ = 'pcuzner@redhat.com'
 
 class RBDDev(object):
 
-    rbd_feature_list = {
+    supported_features_list = {
+        USER_RBD: [
+            'RBD_FEATURE_LAYERING',
+            'RBD_FEATURE_EXCLUSIVE_LOCK',
+            'RBD_FEATURE_OBJECT_MAP',
+            'RBD_FEATURE_FAST_DIFF',
+            'RBD_FEATURE_DEEP_FLATTEN',
+            'RBD_FEATURE_JOURNALING'
+        ]
+    }
+
+    default_features_list = {
         USER_RBD: [
             'RBD_FEATURE_LAYERING',
             'RBD_FEATURE_EXCLUSIVE_LOCK',
@@ -69,7 +80,7 @@ class RBDDev(object):
                     rbd_inst.create(ioctx,
                                     self.image,
                                     self.size_bytes,
-                                    features=RBDDev.supported_features(self.backstore),
+                                    features=RBDDev.default_features(self.backstore),
                                     old_format=False)
 
                 except (rbd.ImageExists, rbd.InvalidArgument) as err:
@@ -235,7 +246,20 @@ class RBDDev(object):
         """
         # build the required feature settings into an int
         feature_int = 0
-        for feature in RBDDev.rbd_feature_list[backstore]:
+        for feature in RBDDev.supported_features_list[backstore]:
+            feature_int += getattr(rbd, feature)
+
+        return feature_int
+
+    @classmethod
+    def default_features(cls, backstore):
+        """
+        Return an int representing the default features for image creation
+        :return: int
+        """
+        # build the required feature settings into an int
+        feature_int = 0
+        for feature in RBDDev.default_features_list[backstore]:
             feature_int += getattr(rbd, feature)
 
         return feature_int
@@ -616,7 +640,7 @@ class LUN(GWObject):
             else:
                 # rbd image is not valid for export, so abort
                 self.error = True
-                features = ','.join(RBDDev.rbd_feature_list[self.backstore])
+                features = ','.join(RBDDev.supported_features_list[self.backstore])
                 self.error_msg = ("(LUN.allocate) rbd '{}' is not compatible "
                                   "with LIO\nOnly image features {} are"
                                   " supported".format(self.image, features))
