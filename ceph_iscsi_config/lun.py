@@ -33,7 +33,9 @@ class RBDDev(object):
             'RBD_FEATURE_OBJECT_MAP',
             'RBD_FEATURE_FAST_DIFF',
             'RBD_FEATURE_DEEP_FLATTEN',
-            'RBD_FEATURE_JOURNALING'
+            'RBD_FEATURE_JOURNALING',
+            'RBD_FEATURE_DATA_POOL',
+            'RBD_FEATURE_OPERATIONS'
         ]
     }
 
