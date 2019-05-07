@@ -2194,9 +2194,6 @@ def _clientinfo(target_iqn, client_iqn):
     target_config = config.config['targets'][target_iqn]
     if client_iqn not in target_config['clients']:
         return jsonify(message="Client {} does not exist".format(client_iqn)), 400
-    local_gw = this_host()
-    if local_gw not in target_config['portals']:
-        return jsonify(message="{} is not a portal of target {}".format(local_gw, target_iqn)), 400
 
     logged_in = GWClient.get_client_info(target_iqn, client_iqn)
     return jsonify(logged_in), 200

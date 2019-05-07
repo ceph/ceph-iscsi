@@ -9,7 +9,7 @@ import rtslib_fb.root as lio_root
 from socket import gethostname
 from rtslib_fb.target import NodeACL, Target, TPG
 from rtslib_fb.fabric import ISCSIFabricModule
-from rtslib_fb.utils import RTSLibError, normalize_wwn
+from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
 
@@ -242,7 +242,10 @@ class GWClient(GWObject):
             "ip_address": []
         }
         iscsi_fabric = ISCSIFabricModule()
-        target = Target(iscsi_fabric, target_iqn, 'lookup')
+        try:
+            target = Target(iscsi_fabric, target_iqn, 'lookup')
+        except RTSLibNotInCFS:
+            return result
         for tpg in target.tpgs:
             if tpg.enable:
                 for client in tpg.node_acls:
