@@ -68,7 +68,8 @@ Requires:       python3-configshell
 %endif
 %endif
 
-BuildRequires:  systemd
+BuildRequires: systemd-rpm-macros
+%{?systemd_requires}
 
 %description
 Python package providing the modules used to handle the configuration of an
@@ -132,22 +133,26 @@ ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
 
 %post
 %if 0%{?fedora} || 0%{?rhel}
-/bin/systemctl --system daemon-reload &> /dev/null || :
-/bin/systemctl --system enable rbd-target-gw &> /dev/null || :
-/bin/systemctl --system enable rbd-target-api &> /dev/null || :
+%systemd_post rbd-target-gw.service
+%systemd_post rbd-target-api.service
 %endif
 %if 0%{?suse_version}
 %service_add_post rbd-target-gw.service rbd-target-api.service
 %endif
 
 %preun
+%if 0%{?fedora} || 0%{?rhel}
+%systemd_preun rbd-target-gw.service
+%systemd_preun rbd-target-api.service
+%endif
 %if 0%{?suse_version}
 %service_del_preun rbd-target-gw.service rbd-target-api.service
 %endif
 
 %postun
 %if 0%{?fedora} || 0%{?rhel}
-/bin/systemctl --system daemon-reload &> /dev/null || :
+%systemd_postun rbd-target-gw.service
+%systemd_postun rbd-target-api.service
 %endif
 %if 0%{?suse_version}
 %service_del_postun rbd-target-gw.service rbd-target-api.service
