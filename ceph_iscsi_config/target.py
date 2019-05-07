@@ -656,42 +656,35 @@ class GWTarget(GWObject):
             # Called by API from CLI clearconfig command
             if self.exists():
                 self.load_config()
-            else:
-                self.error = True
-                self.error_msg = "Target {} does not exist on {}".format(self.iqn, local_gw)
-                return
-
+                self.clear_config(config)
             target_config = config.config["targets"][self.iqn]
-            self.clear_config(config)
+            if len(target_config['portals']) == 0:
+                config.del_item('targets', self.iqn)
+            else:
+                gw_ips = target_config['portals'][local_gw]['portal_ip_addresses']
 
-            if not self.error:
-                if len(target_config['portals']) == 0:
-                    config.del_item('targets', self.iqn)
+                target_config['portals'].pop(local_gw)
+
+                ip_list = target_config['ip_list']
+                for gw_ip in gw_ips:
+                    ip_list.remove(gw_ip)
+                if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
+                    config.update_item('targets', self.iqn, target_config)
                 else:
-                    gw_ips = target_config['portals'][local_gw]['portal_ip_addresses']
+                    # no more portals in the list, so delete the target
+                    config.del_item('targets', self.iqn)
 
-                    target_config['portals'].pop(local_gw)
+                remove_gateway = True
+                for _, target in config.config["targets"].items():
+                    if local_gw in target['portals']:
+                        remove_gateway = False
+                        break
 
-                    ip_list = target_config['ip_list']
-                    for gw_ip in gw_ips:
-                        ip_list.remove(gw_ip)
-                    if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
-                        config.update_item('targets', self.iqn, target_config)
-                    else:
-                        # no more portals in the list, so delete the target
-                        config.del_item('targets', self.iqn)
+                if remove_gateway:
+                    # gateway is no longer used, so delete it
+                    config.del_item('gateways', local_gw)
 
-                    remove_gateway = True
-                    for _, target in config.config["targets"].items():
-                        if local_gw in target['portals']:
-                            remove_gateway = False
-                            break
-
-                    if remove_gateway:
-                        # gateway is no longer used, so delete it
-                        config.del_item('gateways', local_gw)
-
-                config.commit()
+            config.commit()
 
     @staticmethod
     def get_num_sessions(target_iqn):
