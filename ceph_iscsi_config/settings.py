@@ -7,6 +7,7 @@ except ImportError:
     from configparser import ConfigParser
 from distutils.util import strtobool
 
+import logging
 import re
 
 
@@ -113,7 +114,8 @@ class Settings(object):
                 "pub_key": 'iscsi-gateway-pub.key',
                 "prometheus_exporter": "true",
                 "prometheus_port": 9287,
-                "prometheus_host": "::"
+                "prometheus_host": "::",
+                "logger_level": logging.DEBUG
                 }
 
     target_defaults = {"osd_op_timeout": 30,

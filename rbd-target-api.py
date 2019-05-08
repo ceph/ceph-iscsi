@@ -2807,6 +2807,9 @@ def signal_reload(*args):
 
 if __name__ == '__main__':
 
+    settings.init()
+    logger_level = logging.getLevelName(settings.config.logger_level)
+
     # Setup signal handlers for interaction with systemd
     signal.signal(signal.SIGTERM, signal_stop)
     signal.signal(signal.SIGHUP, signal_reload)
@@ -2825,7 +2828,7 @@ if __name__ == '__main__':
     file_handler = RotatingFileHandler('/var/log/rbd-target-api/rbd-target-api.log',
                                        maxBytes=5242880,
                                        backupCount=7)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logger_level)
     file_format = logging.Formatter(
         "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "
         "- %(message)s")
@@ -2833,8 +2836,6 @@ if __name__ == '__main__':
 
     logger.addHandler(syslog_handler)
     logger.addHandler(file_handler)
-
-    settings.init()
 
     # config is set in the outer scope, so it's easily accessible to all
     # api functions
