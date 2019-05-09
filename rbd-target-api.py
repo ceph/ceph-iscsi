@@ -834,6 +834,8 @@ def _target_disk(target_iqn=None):
     **RESTRICTED**
     """
 
+    config.refresh()
+
     disk = request.form.get('disk')
     pool, image = disk.split('/', 1)
     disk_config = config.config['disks'][disk]
