@@ -117,7 +117,8 @@ class Settings(object):
                 "prometheus_exporter": "true",
                 "prometheus_port": 9287,
                 "prometheus_host": "::",
-                "logger_level": logging.DEBUG
+                "logger_level": logging.DEBUG,
+                "fqdn_enabled": "false"
                 }
 
     exclude_from_hash = ["cluster_client_name",

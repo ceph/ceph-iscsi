@@ -752,10 +752,13 @@ class GatewayGroup(UIGroup):
                                         gateway_name,
                                         settings.config.api_port))
 
+        api = APIRequest('{}/sysinfo/hostname'.format(new_gw_endpoint))
+        api.get()
+        gateway_hostname = api.response.json()['data']
         config = self.parent.parent.parent._get_config(endpoint=new_gw_endpoint)
         target_config = config['targets'][target_iqn]
-        portal_config = target_config['portals'][gateway_name]
-        Gateway(self, gateway_name, portal_config)
+        portal_config = target_config['portals'][gateway_hostname]
+        Gateway(self, gateway_hostname, portal_config)
 
         self.logger.info('ok')
 

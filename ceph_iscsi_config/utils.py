@@ -278,9 +278,10 @@ def get_time():
 
 def this_host():
     """
-    return the local machine's shortname
+    return the local machine's fqdn or shortname
     """
-    return socket.gethostname().split('.')[0]
+    fqdn_enabled = settings.config.fqdn_enabled
+    return socket.gethostname() if fqdn_enabled else socket.gethostname().split('.')[0]
 
 
 def encryption_available():
