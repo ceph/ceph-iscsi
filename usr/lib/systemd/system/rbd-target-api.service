@@ -3,7 +3,7 @@ Description=Ceph iscsi target configuration API
 
 Requires=sys-kernel-config.mount
 After=sys-kernel-config.mount network-online.target tcmu-runner.service
-Wants=network-online.target rbd-target-gw.service tcmu-runner.service
+Wants=network-online.target tcmu-runner.service
 
 [Service]
 LimitNOFILE=1048576
