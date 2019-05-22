@@ -5,11 +5,11 @@ from gwcli.node import UIGroup, UINode, UIRoot
 from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks, TargetDisks
 from gwcli.client import Clients
-from gwcli.utils import (this_host, response_message, GatewayAPIError,
+from gwcli.utils import (response_message, GatewayAPIError,
                          GatewayError, APIRequest, console_message, get_config)
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
+from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no, this_host)
 from ceph_iscsi_config.target import GWTarget
 
 from gwcli.ceph import CephGroup

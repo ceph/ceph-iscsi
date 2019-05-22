@@ -13,9 +13,9 @@ from gwcli.node import UIGroup, UINode
 from gwcli.client import Clients
 
 from gwcli.utils import (console_message, response_message, GatewayAPIError,
-                         this_host, APIRequest, valid_snapshot_name, get_config)
+                         APIRequest, valid_snapshot_name, get_config)
 
-from ceph_iscsi_config.utils import valid_size, convert_2_bytes, human_size
+from ceph_iscsi_config.utils import valid_size, convert_2_bytes, human_size, this_host
 from ceph_iscsi_config.lun import LUN
 
 import ceph_iscsi_config.settings as settings

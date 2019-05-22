@@ -34,9 +34,9 @@ from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
                                      ip_addresses, read_os_release,
-                                     format_lio_yes_no, CephiSCSIError)
+                                     format_lio_yes_no, CephiSCSIError, this_host)
 
-from gwcli.utils import (this_host, APIRequest, valid_gateway, valid_client,
+from gwcli.utils import (APIRequest, valid_gateway, valid_client,
                          valid_credentials, get_remote_gateways, valid_snapshot_name,
                          GatewayAPIError)
 
