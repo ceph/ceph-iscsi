@@ -183,7 +183,7 @@ class HostGroup(UIGroup):
 
                  e.g.
                  host add|remove iqn.1994-05.com.redhat:rh7-client
-                 disk add|remove rbd.disk_1
+                 disk add|remove rbd/disk_1
     '''
 
     valid_actions = ['add', 'remove']
@@ -286,7 +286,7 @@ class HostGroup(UIGroup):
         operation will be executed across all hosts defined to the host group.
 
         e.g.
-        disk add|remove rbd.disk_1
+        disk add|remove rbd/disk_1
         """
 
         if action not in HostGroup.valid_actions:
