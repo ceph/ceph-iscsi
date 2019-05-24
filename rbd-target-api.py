@@ -397,7 +397,7 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
     target_config = config.config['targets'][target_iqn]
     for client_iqn in target_config['clients']:
         client_metadata = target_config['clients'][client_iqn]
-        image_list = client_metadata['luns'].keys()
+        image_list = list(client_metadata['luns'].keys())
         client_auth_config = client_metadata['auth']
         client_chap = CHAP(client_auth_config['username'],
                            client_auth_config['password'],
