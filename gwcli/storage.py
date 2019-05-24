@@ -459,10 +459,10 @@ class Disks(UIGroup):
 
         > detach <disk_name>
         e.g.
-        > detach rbd.disk_1
+        > detach rbd/disk_1
 
         "disk_name" refers to the name of the disk as shown in the UI, for
-        example rbd.disk_1.
+        example rbd/disk_1.
 
         """
         self.delete_disk(image_id, True)
@@ -475,10 +475,10 @@ class Disks(UIGroup):
 
         > delete <disk_name>
         e.g.
-        > delete rbd.disk_1
+        > delete rbd/disk_1
 
         "disk_name" refers to the name of the disk as shown in the UI, for
-        example rbd.disk_1.
+        example rbd/disk_1.
 
         Also note that the delete process is a synchronous task, so the larger
         the rbd image is, the longer the delete will take to run.

@@ -212,7 +212,7 @@ Create an iscsi client called 'iqn.1994-05.com.redhat:rh7-client'. The initial c
 \fB>/iscsi-target..eph-igw/hosts> cd iqn.1994-05.com.redhat:rh7-client\fR
 .PP
 .TP
-\fB>disk add rbd.disk_1
+\fB>disk add rbd/disk_1
 The first command navigates to the client's entry in the UI at which point the \fBdisk\fR or \fBauth\fR sub-commands may be used. In this example the disk subcommand is used to mask \fIdisk_1\fR in the \fIrbd\fR pool to the iSCSI client. The LUN id associated with this device is automatically assigned and maintained by the system.
 .PD 1
 .SH OTHER COMMANDS
