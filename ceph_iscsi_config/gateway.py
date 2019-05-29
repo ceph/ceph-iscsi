@@ -160,7 +160,7 @@ class CephiSCSIGateway(object):
         # 0, this is a boot time request
         self.logger.info("Setting up {}".format(target_iqn))
 
-        target = GWTarget(self.logger, target_iqn, gw_ip_list,
+        target = GWTarget(self.logger, self.config, target_iqn, gw_ip_list,
                           enable_portal=self.portals_active(target_iqn))
         if target.error:
             raise CephiSCSIError("Error initializing iSCSI target: "
@@ -241,7 +241,7 @@ class CephiSCSIGateway(object):
 
     def delete_target(self, target_iqn):
 
-        target = GWTarget(self.logger, target_iqn, {})
+        target = GWTarget(self.logger, self.config, target_iqn, {})
         if target.error:
             raise CephiSCSIError("Could not initialize target: {}".
                                  format(target.error_msg))
