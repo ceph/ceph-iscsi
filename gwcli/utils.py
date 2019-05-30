@@ -59,11 +59,11 @@ def get_config():
     return {}
 
 
-def valid_gateway(target_iqn, gw_name, gw_ip, config):
+def valid_gateway(target_iqn, gw_name, gw_ips, config):
     """
     validate the request for a new gateway
     :param gw_name: (str) host (shortname) of the gateway
-    :param gw_ip: (str) ip address on the gw that will be used for iSCSI
+    :param gw_ips: (str) ip addresses on the gw that will be used for iSCSI
     :param config: (dict) current config
     :return: (str) "ok" or error description
     """
@@ -75,17 +75,19 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
     if gw_name in target_config['portals']:
         return "Gateway name {} already defined".format(gw_name)
 
-    if gw_ip in target_config.get('ip_list', []):
-        return "IP address already defined to the configuration"
+    for gw_ip in gw_ips:
+        if gw_ip in target_config.get('ip_list', []):
+            return "IP address already defined to the configuration"
 
     # validate the gateway name is resolvable
     if not resolve_ip_addresses(gw_name):
         return ("Gateway '{}' is not resolvable to an IP address".format(gw_name))
 
     # validate the ip_address is valid ip
-    if not resolve_ip_addresses(gw_ip):
-        return ("IP address provided is not usable (name doesn't"
-                " resolve, or not a valid IPv4/IPv6 address)")
+    for gw_ip in gw_ips:
+        if not resolve_ip_addresses(gw_ip):
+            return ("IP address provided is not usable (name doesn't"
+                    " resolve, or not a valid IPv4/IPv6 address)")
 
     # At this point the request seems reasonable, so lets check a bit deeper
 
@@ -107,11 +109,12 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
     except Exception:
         return "Malformed REST API response"
 
-    if gw_ip not in target_ips:
-        return ("IP address of {} is not available on {}. Valid "
-                "IPs are :{}".format(gw_ip,
-                                     gw_name,
-                                     ','.join(target_ips)))
+    for gw_ip in gw_ips:
+        if gw_ip not in target_ips:
+            return ("IP address of {} is not available on {}. Valid "
+                    "IPs are :{}".format(gw_ip,
+                                         gw_name,
+                                         ','.join(target_ips)))
 
     # check that config file on the new gateway matches the local machine
     api = APIRequest(gw_api + '/sysinfo/checkconf')

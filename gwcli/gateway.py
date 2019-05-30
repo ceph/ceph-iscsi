@@ -657,15 +657,15 @@ class GatewayGroup(UIGroup):
             hosts_object = self.parent.get_child("hosts")
             hosts_object.reset()
 
-    def ui_command_create(self, gateway_name, ip_address, nosync=False,
+    def ui_command_create(self, gateway_name, ip_addresses, nosync=False,
                           skipchecks='false'):
         """
         Define a gateway to the gateway group for this iscsi target. The
         first host added should be the gateway running the command
 
         gateway_name ... should resolve to the hostname of the gateway
-        ip_address ..... is the IPv4/IPv6 address of the interface the iscsi
-                         portal should use
+        ip_addresses ... are the IPv4/IPv6 addresses of the interfaces the
+                         iSCSI portals should use
         nosync ......... by default new gateways are sync'd with the
                          existing configuration by cli. By specifying nosync
                          the sync step is bypassed - so the new gateway
@@ -678,10 +678,10 @@ class GatewayGroup(UIGroup):
                          to result in an unstable configuration.
         """
 
-        ip_address = normalize_ip_address(ip_address)
+        ip_addresses = [normalize_ip_address(ip_address) for ip_address in ip_addresses.split(',')]
         self.logger.debug("CMD: ../gateways/ create {} {} "
                           "nosync={} skipchecks={}".format(gateway_name,
-                                                           ip_address,
+                                                           ip_addresses,
                                                            nosync,
                                                            skipchecks))
 
@@ -730,7 +730,7 @@ class GatewayGroup(UIGroup):
         gw_rqst = gw_api + '/gateway/{}/{}'.format(target_iqn, gateway_name)
         gw_vars = {"nosync": nosync,
                    "skipchecks": skipchecks,
-                   "ip_address": ip_address}
+                   "ip_address": ','.join(ip_addresses)}
 
         api = APIRequest(gw_rqst, data=gw_vars)
         api.put()
