@@ -68,8 +68,12 @@ Requires:       python3-configshell
 %endif
 %endif
 
+%if 0%{?rhel} < 8
+BuildRequires: systemd
+%else
 BuildRequires: systemd-rpm-macros
 %{?systemd_requires}
+%endif
 
 %description
 Python package providing the modules used to handle the configuration of an
@@ -132,7 +136,12 @@ ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
 %endif
 
 %post
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?rhel} < 8
+/bin/systemctl --system daemon-reload &> /dev/null || :
+/bin/systemctl --system enable rbd-target-gw &> /dev/null || :
+/bin/systemctl --system enable rbd-target-api &> /dev/null || :
+%endif
+%if 0%{?fedora} || 0%{?rhel} >= 8
 %systemd_post rbd-target-gw.service
 %systemd_post rbd-target-api.service
 %endif
@@ -141,7 +150,7 @@ ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
 %endif
 
 %preun
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?fedora} || 0%{?rhel} >= 8
 %systemd_preun rbd-target-gw.service
 %systemd_preun rbd-target-api.service
 %endif
@@ -150,7 +159,10 @@ ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
 %endif
 
 %postun
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?rhel} < 8
+/bin/systemctl --system daemon-reload &> /dev/null || :
+%endif
+%if 0%{?fedora} || 0%{?rhel} >= 8
 %systemd_postun rbd-target-gw.service
 %systemd_postun rbd-target-api.service
 %endif
