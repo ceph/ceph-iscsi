@@ -129,7 +129,6 @@ mkdir -p %{buildroot}%{_mandir}/man8
 install -m 0644 gwcli.8 %{buildroot}%{_mandir}/man8/
 gzip %{buildroot}%{_mandir}/man8/gwcli.8
 mkdir -p %{buildroot}%{_unitdir}/rbd-target-gw.service.d
-install -m 0644 .%{_sysconfdir}/systemd/system/rbd-target-gw.service.d/dependencies.conf %{buildroot}%{_unitdir}/rbd-target-gw.service.d/
 %if 0%{?suse_version}
 mkdir -p %{buildroot}%{_sbindir}
 ln -s service %{buildroot}%{_sbindir}/rcrbd-target-gw
@@ -196,7 +195,6 @@ ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
 %attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-gw
 %attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-api
 %dir %{_unitdir}/rbd-target-gw.service.d
-%{_unitdir}/rbd-target-gw.service.d/dependencies.conf
 %if 0%{?suse_version}
 %{_sbindir}/rcrbd-target-gw
 %{_sbindir}/rcrbd-target-api
