@@ -11,7 +11,7 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 from ceph_iscsi_config.client import GWClient
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (resolve_ip_addresses, gen_file_hash,
+from ceph_iscsi_config.utils import (resolve_ip_addresses,
                                      CephiSCSIError)
 
 __author__ = 'Paul Cuzner'
@@ -122,7 +122,7 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
                               api.response.status_code))
 
     # compare the hash of the new gateways conf file with the local one
-    local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
+    local_hash = settings.config.hash()
     try:
         remote_hash = str(api.response.json()['data'])
     except Exception:

@@ -7,6 +7,8 @@ except ImportError:
     from configparser import ConfigParser
 from distutils.util import strtobool
 
+import hashlib
+import json
 import logging
 import re
 
@@ -118,6 +120,14 @@ class Settings(object):
                 "logger_level": logging.DEBUG
                 }
 
+    sync_required = ["cluster_name",
+                     "pool",
+                     "api_port",
+                     "api_secure",
+                     "minimum_gateways",
+                     "prometheus_port"
+                     ]
+
     target_defaults = {"osd_op_timeout": 30,
                        "dataout_timeout": 20,
                        "nopin_response_timeout": 5,
@@ -185,3 +195,17 @@ class Settings(object):
             v = self.normalize(k, settings[k])
 
             self.__setattr__(k, v)
+
+    def hash(self):
+        """
+        Generates a sha256 hash of the settings that are required to be in sync between gateways.
+        :return: checksum (str)
+        """
+
+        sync_settings = {}
+        for setting in Settings.sync_required:
+            sync_settings[setting] = getattr(self, setting)
+
+        h = hashlib.sha256()
+        h.update(json.dumps(sync_settings).encode('utf-8'))
+        return h.hexdigest()
