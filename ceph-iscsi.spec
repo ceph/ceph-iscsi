@@ -74,7 +74,7 @@ Requires:       python3-configshell
 %endif
 %endif
 
-%if 0%{?rhel} < 8
+%if 0%{?rhel} == 7
 BuildRequires: systemd
 %else
 BuildRequires: systemd-rpm-macros
@@ -142,7 +142,7 @@ ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
 %endif
 
 %post
-%if 0%{?rhel} < 8
+%if 0%{?rhel} == 7
 /bin/systemctl --system daemon-reload &> /dev/null || :
 /bin/systemctl --system enable rbd-target-gw &> /dev/null || :
 /bin/systemctl --system enable rbd-target-api &> /dev/null || :
@@ -165,7 +165,7 @@ ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
 %endif
 
 %postun
-%if 0%{?rhel} < 8
+%if 0%{?rhel} == 7
 /bin/systemctl --system daemon-reload &> /dev/null || :
 %endif
 %if 0%{?fedora} || 0%{?rhel} >= 8
