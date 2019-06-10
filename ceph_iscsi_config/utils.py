@@ -7,7 +7,6 @@ import re
 import datetime
 import hashlib
 import os
-import rpm
 
 import ceph_iscsi_config.settings as settings
 
@@ -309,31 +308,6 @@ def gen_file_hash(filename, hash_type='sha256'):
     return h.hexdigest()
 
 
-def valid_rpm(in_rpm):
-    """
-    check a given rpm matches the current installed rpm
-    :param in_rpm: a dict of name, version and release to check against
-    :return: bool representing whether the rpm is valid or not
-    """
-    ts = rpm.TransactionSet()
-    mi = ts.dbMatch('name', in_rpm['name'])
-    if mi:
-        # check the version is OK
-        rpm_hdr = mi.next()
-        rc = rpm.labelCompare(('1', rpm_hdr['version'], rpm_hdr['release']),
-                              ('1', in_rpm['version'], in_rpm['release']))
-
-        if rc < 0:
-            # -1 version old
-            return False
-        else:
-            # 0 = version match, 1 = version exceeds min requirement
-            return True
-    else:
-        # rpm not installed
-        return False
-
-
 def encryption_available():
     """
     Determine whether encryption is available by looking for the relevant
@@ -348,6 +322,18 @@ def encryption_available():
             for key_name in encryption_keys]
 
     return all([os.path.exists(key) for key in keys])
+
+
+def read_os_release():
+    os_release_file = '/etc/os-release'
+    if not os.path.exists(os_release_file):
+        return {}
+    with open(os_release_file) as f:
+        d = {}
+        for line in f:
+            k, v = line.rstrip().split("=")
+            d[k] = v.strip('"')
+    return d
 
 
 def gen_control_string(controls):
