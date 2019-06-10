@@ -11,7 +11,7 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 from ceph_iscsi_config.client import GWClient
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (resolve_ip_addresses, gen_file_hash,
+from ceph_iscsi_config.utils import (resolve_ip_addresses,
                                      CephiSCSIError)
 
 __author__ = 'Paul Cuzner'
@@ -112,26 +112,6 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
                 "IPs are :{}".format(gw_ip,
                                      gw_name,
                                      ','.join(target_ips)))
-
-    # check that config file on the new gateway matches the local machine
-    api = APIRequest(gw_api + '/sysinfo/checkconf')
-    api.get()
-    if api.response.status_code != 200:
-        return ("checkconf API call to {} failed with "
-                "code".format(gw_name,
-                              api.response.status_code))
-
-    # compare the hash of the new gateways conf file with the local one
-    local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
-    try:
-        remote_hash = str(api.response.json()['data'])
-    except Exception:
-        remote_hash = None
-
-    if local_hash != remote_hash:
-        return ("/etc/ceph/iscsi-gateway.cfg on {} does "
-                "not match the local version. Correct and "
-                "retry request".format(gw_name))
 
     # Check for package version dependencies
     api = APIRequest(gw_api + '/sysinfo/checkversions')

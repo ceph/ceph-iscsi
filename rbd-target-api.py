@@ -34,7 +34,7 @@ from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
-                                     ip_addresses, gen_file_hash, valid_rpm,
+                                     ip_addresses, valid_rpm,
                                      format_lio_yes_no, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway, valid_client,
@@ -166,7 +166,7 @@ def get_api_info():
 def get_sys_info(query_type=None):
     """
     Provide system information based on the query_type
-    Valid query types are: ip_addresses, checkconf and checkversions
+    Valid query types are: ip_addresses and checkversions
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/sysinfo/ip_addresses
@@ -179,11 +179,6 @@ def get_sys_info(query_type=None):
     if query_type == 'hostname':
 
         return jsonify(data=this_host()), 200
-
-    elif query_type == 'checkconf':
-
-        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
-        return jsonify(data=local_hash), 200
 
     elif query_type == 'checkversions':
 
