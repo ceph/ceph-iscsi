@@ -48,6 +48,11 @@ Requires:       rpm-python >= 4.11
 Requires:       python-cryptography
 Requires:       python-flask >= 0.10.1
 Requires:       python-configshell
+%if 0%{?rhel} == 7
+Requires:       pyOpenSSL
+%else
+Requires:       python-pyOpenSSL
+%endif
 %else
 BuildRequires:  python3-devel
 BuildRequires:  python3-setuptools
@@ -56,6 +61,7 @@ Requires:       python3-rbd >= 10.2.2
 Requires:       python3-netifaces >= 0.10.4
 Requires:       python3-rtslib >= 2.1.fb67
 Requires:       python3-cryptography
+Requires:       python3-pyOpenSSL
 Requires:       python3-rpm >= 4.11
 %if 0%{?suse_version}
 BuildRequires:  python-rpm-macros
