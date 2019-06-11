@@ -657,6 +657,8 @@ class GWTarget(GWObject):
             if self.exists():
                 self.load_config()
                 self.clear_config(config)
+                if self.error:
+                    return
             target_config = config.config["targets"][self.iqn]
             if len(target_config['portals']) == 0:
                 config.del_item('targets', self.iqn)
