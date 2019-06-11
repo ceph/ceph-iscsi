@@ -13,7 +13,6 @@ import OpenSSL
 import threading
 import time
 import inspect
-import platform
 import copy
 
 from functools import (reduce, wraps)
@@ -34,7 +33,7 @@ from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
-                                     ip_addresses, gen_file_hash, valid_rpm,
+                                     ip_addresses, gen_file_hash, read_os_release,
                                      format_lio_yes_no, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway, valid_client,
@@ -2599,48 +2598,38 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
 
 def pre_reqs_errors():
     """
-    function to check pre-req rpms are installed and at the relevant versions
+    function to check pre-reqs are installed and at the relevant versions
 
     :return: list of configuration errors detected
     """
 
     dist_translations = {
-        "centos": "redhat"}
+        "centos": "redhat",
+        "opensuse-leap": "suse"}
     valid_dists = {
-        "redhat": 7.4}
-
-    required_rpms = [
-        {"name": "python-rtslib",
-         "version": "2.1.fb64",
-         "release": "0.1"},
-        {"name": "tcmu-runner",
-         "version": "1.3.0",
-         "release": "0.2.3"}
-    ]
+        "redhat": 7.4,
+        "suse": 15.1}
 
     k_vers = '3.10.0'
     k_rel = '823.el7'
 
     errors_found = []
 
-    dist, rel, dist_id = platform.linux_distribution(full_distribution_name=0)
+    os_release = read_os_release()
+    dist = os_release.get('ID', '')
+    rel = os_release.get('VERSION_ID')
 
     dist = dist.lower()
     dist = dist_translations.get(dist, dist)
     if dist in valid_dists:
+        if dist == 'redhat':
+            import platform
+            _, rel, _ = platform.linux_distribution(full_distribution_name=0)
         # CentOS formats a release similar 7.4.1708
         rel = float(".".join(rel.split('.')[:2]))
         if rel < valid_dists[dist]:
             errors_found.append("OS version is unsupported")
 
-        # check rpm versions are OK
-        for rpm in required_rpms:
-            if not valid_rpm(rpm):
-                logger.error("RPM check for {} failed".format(rpm['name']))
-                errors_found.append("{} rpm must be installed at >= "
-                                    "{}-{}".format(rpm['name'],
-                                                   rpm['version'],
-                                                   rpm['release']))
     else:
         errors_found.append("OS is unsupported")
 

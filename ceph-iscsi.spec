@@ -37,6 +37,7 @@ BuildArch:      noarch
 Obsoletes:      ceph-iscsi-config
 Obsoletes:      ceph-iscsi-cli
 
+Requires:       tcmu-runner >= 1.4.0
 %if 0%{?with_python2}
 BuildRequires:  python2-devel
 BuildRequires:  python2-setuptools
