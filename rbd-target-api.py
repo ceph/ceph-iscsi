@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 import sys
 import os
 import signal
@@ -929,6 +928,84 @@ def get_disks():
         response = {"disks": disk_names}
 
     return jsonify(response), 200
+
+
+@app.route('/api/disk/qos/<pool>/<image>', methods=['GET', 'PUT'])
+@requires_restricted_auth
+def qos(pool, image):
+    """
+    set qos parameters to a rbd image
+
+    :param pool: (str) pool name
+    :param image: (str) rbd image name
+    :param conf_rbd_qos_iops_limit: (str) total iops limit for this iamge
+    :param conf_rbd_qos_read_iops_limit: (str) read iops limit for this iamge
+    :param conf_rbd_qos_write_iops_limit: (str) read iops limit for this iamge
+    :param conf_rbd_qos_bps_limit: (str) total bps limit for this iamge
+    :param conf_rbd_qos_read_bps_limit: (str) read bps limit for this iamge
+    :param conf_rbd_qos_write_bps_limit: (str) read bps limit for this iamge
+
+    **RESTRICTED**
+    Examples:
+    curl --insecure --user admin:admin -d conf_rbd_qos_iops_limit=100
+         -d conf_rbd_qos_read_iops_lim=40
+         -d conf_rbd_qos_write_iops_limit=50
+         -X PUT https://192.168.122.69:5000/api/disk/qos/rbd/test
+    curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/qos/rbd/test
+    """
+    # we only process disks existing in our current configuration
+    image_id = '{}/{}'.format(pool, image)
+
+    if image_id not in config.config['disks']:
+        return jsonify(message="rbd image {} not found".format(image_id)), 404
+
+    if request.method == 'PUT':
+        qos = {}
+        qos_keys = [
+            "conf_rbd_qos_iops_limit",
+            "conf_rbd_qos_read_iops_limit",
+            "conf_rbd_qos_write_iops_limit",
+            "conf_rbd_qos_bps_limit",
+            "conf_rbd_qos_read_bps_limit",
+            "conf_rbd_qos_write_bps_limit"
+        ]
+
+        for limit in qos_keys:
+            v = request.form.get(limit)
+            if v:
+                try:
+                    int(v)
+                except ValueError:
+                    return jsonify(message="{} must be integer".format(image_id, limit)), 400
+                if int(v) < 0:
+                    return jsonify(message="{} must be positive".format(image_id, limit)), 400
+
+                qos[limit] = v
+
+        if qos:
+            try:
+                rbd_image = RBDDev(image, 0, LUN.DEFAULT_BACKSTORE, pool)
+                rbd_image.rbd_setqos(qos)
+                if rbd_image.error:
+                    msg = rbd_image.error_msg
+                    return jsonify(message="setqos failed, error: {}".format(msg)), 500
+            except rbd.ImageNotFound:
+                return jsonify(message="Image {} does not exist".format(image_id)), 404
+
+            return jsonify(message="set qos parameters successfully"), 200
+        else:
+            return jsonify(message="no qos parameter"), 400
+    elif request.method == "GET":
+        try:
+            rbd_image = RBDDev(image, 0, LUN.DEFAULT_BACKSTORE, pool)
+        except rbd.ImageNotFound:
+            return jsonify(message="Image {} does not exist".format(image_id)), 404
+        qos = rbd_image.rbd_getqos()
+        if rbd_image.error:
+            msg = rbd_image.error_msg
+            return jsonify(message="getqos failed, error: {}".format(image_id, msg)), 500
+        else:
+            return jsonify({"qos": qos}), 200
 
 
 @app.route('/api/disk/<pool>/<image>', methods=['GET', 'PUT', 'DELETE'])

@@ -158,6 +158,72 @@ class RBDDev(object):
                         else:
                             self.changed = True
 
+    def rbd_setqos(self, qos):
+        """
+        set qos parameters
+        :param qos: qos parameters (dict) qos parameters to control the iops/bps rate
+        """
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
+            with cluster.open_ioctx(self.pool) as ioctx:
+                with rbd.Image(ioctx, self.image) as rbd_image:
+                    lock_info = rbd_image.list_lockers()
+                    if lock_info:
+                        lockers = lock_info.get("lockers")
+                        for holder in lockers:
+                            try:
+                                rbd_image.break_lock(holder[0], holder[1])
+                            except Exception:
+                                self.error = True
+                                self.error_msg = ("failed to break lock for {}".format(self.image))
+                                return
+
+                        try:
+                            rbd_image.lock_acquire(rbd.RBD_LOCK_MODE_EXCLUSIVE)
+                        except Exception:
+                            self.error = True
+                            self.error_msg = ("failed to acquire lock for {}".format(self.image))
+                            return
+
+                        for key, limit in qos.items():
+                            try:
+                                rbd_image.metadata_set(key, limit)
+                            except Exception:
+                                self.error = True
+                                self.error_msg = ("metadata_set failed for param {}".format(key))
+                                rbd_image.lock_release()
+                                return
+                    else:
+                        for key, limit in qos.items():
+                            try:
+                                rbd_image.metadata_set(key, limit)
+                            except Exception:
+                                self.error = True
+                                self.error_msg = ("metadata_set failed for param {}".format(key))
+                                return
+        return
+
+    def rbd_getqos(self):
+        """
+        get qos parameters
+        :return: dict qos parameters to control the iops/bps rate
+        """
+        with rados.Rados(conffile=settings.config.cephconf,
+                         name=settings.config.cluster_client_name) as cluster:
+            with cluster.open_ioctx(self.pool) as ioctx:
+                with rbd.Image(ioctx, self.image) as rbd_image:
+                    try:
+                        ml = rbd_image.metadata_list()
+                        qos = {}
+                        for key, limit in ml:
+                            if key.startswith('conf_rbd_qos_'):
+                                qos[key] = limit
+                        return qos
+                    except Exception as err:
+                        self.error = True
+                        self.error_msg = ("get qos param failed, error is {}".format(err))
+        return
+
     def _get_size_bytes(self):
         """
         Return the current size of the rbd image
