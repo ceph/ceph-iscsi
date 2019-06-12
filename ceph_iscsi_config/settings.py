@@ -120,13 +120,9 @@ class Settings(object):
                 "logger_level": logging.DEBUG
                 }
 
-    sync_required = ["cluster_name",
-                     "pool",
-                     "api_port",
-                     "api_secure",
-                     "minimum_gateways",
-                     "prometheus_port"
-                     ]
+    exclude_from_hash = ["cluster_client_name",
+                         "logger_level"
+                         ]
 
     target_defaults = {"osd_op_timeout": 30,
                        "dataout_timeout": 20,
@@ -150,6 +146,7 @@ class Settings(object):
 
         self.error = False
         self.error_msg = ''
+        self._defined_settings = []
 
         config = ConfigParser()
         dataset = config.read(conffile)
@@ -194,6 +191,7 @@ class Settings(object):
             v = settings[k]
             v = self.normalize(k, settings[k])
 
+            self._defined_settings.append(k)
             self.__setattr__(k, v)
 
     def hash(self):
@@ -203,8 +201,9 @@ class Settings(object):
         """
 
         sync_settings = {}
-        for setting in Settings.sync_required:
-            sync_settings[setting] = getattr(self, setting)
+        for setting in self._defined_settings:
+            if setting not in Settings.exclude_from_hash:
+                sync_settings[setting] = getattr(self, setting)
 
         h = hashlib.sha256()
         h.update(json.dumps(sync_settings).encode('utf-8'))
