@@ -326,13 +326,15 @@ def encryption_available():
 
 def read_os_release():
     os_release_file = '/etc/os-release'
+    d = {}
     if not os.path.exists(os_release_file):
-        return {}
+        return d
     with open(os_release_file) as f:
-        d = {}
         for line in f:
-            k, v = line.rstrip().split("=")
-            d[k] = v.strip('"')
+            rs = line.rstrip()
+            if rs:
+                k, v = rs.split("=")
+                d[k] = v.strip('"')
     return d
 
 
