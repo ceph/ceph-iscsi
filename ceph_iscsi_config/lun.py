@@ -511,7 +511,7 @@ class LUN(GWObject):
 
             # Add the mapping for the lun to ensure the block device is
             # present on all TPG's
-            gateway = GWTarget(self.logger, self.config, target_iqn, ip_list)
+            gateway = GWTarget(self.logger, target_iqn, ip_list)
             gateway.map_lun(self.config, so)
             if gateway.error:
                 raise CephiSCSIError("LUN mapping failed - {}".format(gateway.error_msg))

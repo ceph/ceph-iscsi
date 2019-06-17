@@ -39,7 +39,7 @@ class GWTarget(GWObject):
     # gwcli to get/set all tpgs/clients under the target instead of per obj.
     SETTINGS = TPG_SETTINGS + GWClient.SETTINGS
 
-    def __init__(self, logger, config, iqn, gateway_ip_list, enable_portal=True):
+    def __init__(self, logger, iqn, gateway_ip_list, enable_portal=True):
         """
         Instantiate the class
         :param iqn: iscsi iqn name for the gateway
@@ -53,7 +53,6 @@ class GWTarget(GWObject):
 
         self.enable_portal = enable_portal  # boolean to trigger portal IP creation
         self.logger = logger                # logger object
-        self.config = config
 
         try:
             iqn, iqn_type = normalize_wwn(['iqn'], iqn)
