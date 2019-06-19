@@ -5,7 +5,6 @@ import rados
 import rbd
 import re
 import datetime
-import hashlib
 import os
 
 import ceph_iscsi_config.settings as settings
@@ -282,30 +281,6 @@ def this_host():
     return the local machine's shortname
     """
     return socket.gethostname().split('.')[0]
-
-
-def gen_file_hash(filename, hash_type='sha256'):
-    """
-    generate a hash(default sha256) of a file and return the result
-    :param filename: filename to generate the checksum for
-    :param hash_type: type of checksum to generate
-    :return: checkum (str)
-    """
-
-    if (hash_type not in ['sha1', 'sha256', 'sha512', 'md5'] or not
-            os.path.exists(filename)):
-        return ''
-
-    hash_function = getattr(hashlib, hash_type)
-    h = hash_function()
-
-    with open(filename, 'rb') as file_in:
-        chunk = 0
-        while chunk != b'':
-            chunk = file_in.read(1024)
-            h.update(chunk)
-
-    return h.hexdigest()
 
 
 def encryption_available():

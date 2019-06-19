@@ -33,7 +33,7 @@ from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
-                                     ip_addresses, gen_file_hash, read_os_release,
+                                     ip_addresses, read_os_release,
                                      format_lio_yes_no, CephiSCSIError)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway, valid_client,
@@ -181,7 +181,7 @@ def get_sys_info(query_type=None):
 
     elif query_type == 'checkconf':
 
-        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
+        local_hash = settings.config.hash()
         return jsonify(data=local_hash), 200
 
     elif query_type == 'checkversions':
