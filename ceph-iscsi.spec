@@ -48,7 +48,7 @@ Requires:       python-rtslib >= 2.1.fb68
 Requires:       rpm-python >= 4.11
 Requires:       python-cryptography
 Requires:       python-flask >= 0.10.1
-Requires:       python-configshell
+Requires:       python-configshell >= 1.1.fb25
 %if 0%{?rhel} == 7
 Requires:       pyOpenSSL
 %else
@@ -68,10 +68,10 @@ Requires:       python3-rpm >= 4.11
 BuildRequires:  python-rpm-macros
 BuildRequires:  fdupes
 Requires:       python3-Flask >= 0.10.1
-Requires:       python3-configshell-fb
+Requires:       python3-configshell-fb >= 1.1.25
 %else
 Requires:       python3-flask >= 0.10.1
-Requires:       python3-configshell
+Requires:       python3-configshell >= 1.1.fb25
 %endif
 %endif
 

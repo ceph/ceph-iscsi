@@ -566,7 +566,7 @@ def gateway(target_iqn=None, gateway_name=None):
     required for PUT only.
     :param target_iqn: (str) target iqn
     :param gateway_name: (str) gateway name
-    :param ip_address: (str) IPv4/IPv6 address iSCSI should use
+    :param ip_address: (str) IPv4/IPv6 addresses iSCSI should use
     :param nosync: (bool) whether to sync the LIO objects to the new gateway
            default: FALSE
     :param skipchecks: (bool) whether to skip OS/software versions checks
@@ -595,7 +595,11 @@ def gateway(target_iqn=None, gateway_name=None):
     target_config = config.config['targets'][target_iqn]
 
     if request.method == 'PUT':
-        ip_address = request.form.get('ip_address')
+        if gateway_name in target_config['portals']:
+            err_str = "Gateway already exists in configuration"
+            logger.error(err_str)
+            return jsonify(message=err_str), 400
+        ip_address = request.form.get('ip_address').split(',')
         nosync = request.form.get('nosync', 'false')
         skipchecks = request.form.get('skipchecks', 'false')
 
@@ -623,7 +627,7 @@ def gateway(target_iqn=None, gateway_name=None):
             nosync = 'true'
 
         gateway_ip_list = target_config.get('ip_list', [])
-        gateway_ip_list.append(ip_address)
+        gateway_ip_list += ip_address
 
         op = 'creation'
         api_vars = {"gateway_ip_list": ",".join(gateway_ip_list),
