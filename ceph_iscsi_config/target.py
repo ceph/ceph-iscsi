@@ -97,6 +97,7 @@ class GWTarget(GWObject):
         self.target = None
         self.tpg = None
         self.tpg_list = []
+        self.tpg_tag_by_gateway_name = {}
 
         try:
             super(GWTarget, self).__init__('targets', iqn, logger,
@@ -242,10 +243,27 @@ class GWTarget(GWObject):
                 tpg.set_attribute('generate_node_acls', 1)
                 tpg.set_attribute('demo_mode_write_protect', 0)
 
+    def _get_gateway_name(self, ip):
+        if ip in self.active_portal_ips:
+            return this_host()
+        target_config = self.config.config['targets'][self.iqn]
+        for portal_name, portal_config in target_config['portals'].items():
+            if ip in portal_config['portal_ip_addresses']:
+                return portal_name
+        return None
+
     def create_tpg(self, ip):
 
         try:
-            tpg = TPG(self.target)
+            tpg = None
+            gateway_name = self._get_gateway_name(ip)
+            tpg_tag = self.tpg_tag_by_gateway_name.get(gateway_name)
+            if tpg_tag:
+                for tpg_item in self.tpg_list:
+                    if tpg_item.tag == tpg_tag:
+                        tpg = tpg_item
+            if not tpg:
+                tpg = TPG(self.target)
 
             # Use initiator name based ACL by default.
             tpg.set_attribute('authentication', '0')
@@ -269,6 +287,7 @@ class GWTarget(GWObject):
                                   "portal ip {} as disabled".format(ip))
 
             self.tpg_list.append(tpg)
+            self.tpg_tag_by_gateway_name[gateway_name] = tpg.tag
 
         except RTSLibError as err:
             self.error_msg = err
@@ -335,10 +354,16 @@ class GWTarget(GWObject):
             # clear list so we can rebuild with the current values below
             if self.tpg_list:
                 del self.tpg_list[:]
+            if self.tpg_tag_by_gateway_name:
+                self.tpg_tag_by_gateway_name = {}
 
             # there could/should be multiple tpg's for the target
             for tpg in self.target.tpgs:
                 self.tpg_list.append(tpg)
+                ip_address = list(tpg.network_portals)[0].ip_address
+                gateway_name = self._get_gateway_name(ip_address)
+                if gateway_name:
+                    self.tpg_tag_by_gateway_name[gateway_name] = tpg.tag
 
             # self.portal = self.tpg.network_portals.next()
 
@@ -386,7 +411,7 @@ class GWTarget(GWObject):
         # they do not have a common gw the owning gw may not exist here.
         # The LUN will just have all ANO paths then.
         if gw_config:
-            if gw_config["portal_ip_addresses"][0] == tpg_ip_address:
+            if tpg_ip_address in gw_config["portal_ip_addresses"]:
                 is_owner = True
 
         try:
