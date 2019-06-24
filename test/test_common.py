@@ -25,11 +25,26 @@ class ChapTest(unittest.TestCase):
 
     def test_upgrade_config(self):
         gateway_conf_initial = json.dumps(self.gateway_conf_initial)
+
+        # First, the upgrade is executed on node1
         with mock.patch.object(Config, 'init_config', return_value=True), \
                 mock.patch.object(Config, '_read_config_object',
                                   return_value=gateway_conf_initial), \
-                mock.patch.object(Config, 'commit'):
+                mock.patch.object(Config, 'commit'), \
+                mock.patch("socket.gethostname", return_value='node1'), \
+                mock.patch("socket.getfqdn", return_value='node1.ceph.local'):
             config = Config(self.logger)
+
+        # And then, the upgrade is executed on node2
+        current_config = json.dumps(config.config)
+        with mock.patch.object(Config, 'init_config', return_value=True), \
+                mock.patch.object(Config, '_read_config_object',
+                                  return_value=current_config), \
+                mock.patch.object(Config, 'commit'), \
+                mock.patch("socket.gethostname", return_value='node2'),\
+                mock.patch("socket.getfqdn", return_value='node2.ceph.local'):
+            config = Config(self.logger)
+
             self.maxDiff = None
 
             iqn = 'iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw'
@@ -148,7 +163,7 @@ class ChapTest(unittest.TestCase):
                 },
                 "created": "2018/12/07 09:18:04",
                 "image": "disk_1",
-                "owner": "node1",
+                "owner": "node1.ceph.local",
                 "backstore": "user:rbd",
                 "backstore_object_name": "rbd.disk_1",
                 "pool": "rbd",
@@ -167,12 +182,12 @@ class ChapTest(unittest.TestCase):
         },
         "epoch": 19,
         "gateways": {
-            "node1": {
+            "node1.ceph.local": {
                 "active_luns": 1,
                 "created": "2018/12/07 09:18:07",
                 "updated": "2018/12/07 09:18:08"
             },
-            "node2": {
+            "node2.ceph.local": {
                 "active_luns": 0,
                 "created": "2018/12/07 09:18:09",
                 "updated": "2018/12/07 09:18:10"
@@ -224,7 +239,7 @@ class ChapTest(unittest.TestCase):
                     "192.168.100.202"
                 ],
                 "portals": {
-                    "node1": {
+                    "node1.ceph.local": {
                         "gateway_ip_list": [
                             "192.168.100.201",
                             "192.168.100.202"
@@ -235,7 +250,7 @@ class ChapTest(unittest.TestCase):
                         "portal_ip_addresses": ["192.168.100.201"],
                         "tpgs": 2
                     },
-                    "node2": {
+                    "node2.ceph.local": {
                         "gateway_ip_list": [
                             "192.168.100.201",
                             "192.168.100.202"
@@ -251,5 +266,5 @@ class ChapTest(unittest.TestCase):
             }
         },
         "updated": "2018/12/07 09:18:13",
-        "version": 9
+        "version": 10
     }

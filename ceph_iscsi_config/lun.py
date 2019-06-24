@@ -302,9 +302,7 @@ class LUN(GWObject):
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}/{}'.format(self.pool, self.image)
 
-        # the allocating host could be fqdn or shortname
-        fqdn_enabled = settings.config.fqdn_enabled
-        self.allocating_host = allocating_host if fqdn_enabled else allocating_host.split('.')[0]
+        self.allocating_host = allocating_host
         self.backstore = backstore
         self.backstore_object_name = backstore_object_name
 
