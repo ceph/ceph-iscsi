@@ -6,7 +6,6 @@ import os
 
 import rtslib_fb.root as lio_root
 
-from socket import gethostname
 from rtslib_fb.target import NodeACL, Target, TPG
 from rtslib_fb.fabric import ISCSIFabricModule
 from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS, normalize_wwn
@@ -14,7 +13,7 @@ from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS, normalize_wwn
 import ceph_iscsi_config.settings as settings
 
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.utils import encryption_available, CephiSCSIError
+from ceph_iscsi_config.utils import encryption_available, CephiSCSIError, this_host
 from ceph_iscsi_config.gateway_object import GWObject
 
 
@@ -639,7 +638,7 @@ class GWClient(GWObject):
 
                 if self.commit_enabled:
 
-                    if update_host == gethostname().split('.')[0]:
+                    if update_host == this_host():
                         # update the config object with this clients settings
                         self.logger.debug("Updating config object metadata "
                                           "for '{}'".format(self.iqn))
@@ -666,7 +665,7 @@ class GWClient(GWObject):
                 else:
                     # remove this client from the config
 
-                    if update_host == gethostname().split('.')[0]:
+                    if update_host == this_host():
                         self.logger.debug("Removing {} from the config "
                                           "object".format(self.iqn))
                         target_config['clients'].pop(self.iqn)

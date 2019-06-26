@@ -1,4 +1,3 @@
-import socket
 import requests
 from requests import Response
 import sys
@@ -12,7 +11,7 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 from ceph_iscsi_config.client import GWClient
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (resolve_ip_addresses,
-                                     CephiSCSIError)
+                                     CephiSCSIError, this_host)
 
 __author__ = 'Paul Cuzner'
 
@@ -29,13 +28,6 @@ def readcontents(filename):
     with open(filename, 'r') as input_file:
         content = input_file.read().rstrip()
     return content
-
-
-def this_host():
-    """
-    return the local machine's shortname
-    """
-    return socket.gethostname().split('.')[0]
 
 
 def get_config():

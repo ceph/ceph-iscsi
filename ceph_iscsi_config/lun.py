@@ -3,7 +3,6 @@ import rbd
 import re
 
 from time import sleep
-from socket import gethostname
 
 from rtslib_fb import UserBackedStorageObject, root
 from rtslib_fb.utils import RTSLibError
@@ -303,9 +302,7 @@ class LUN(GWObject):
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}/{}'.format(self.pool, self.image)
 
-        # the allocating host could be fqdn or shortname - but the config
-        # only uses shortname so it needs to be converted to shortname format
-        self.allocating_host = allocating_host.split('.')[0]
+        self.allocating_host = allocating_host
         self.backstore = backstore
         self.backstore_object_name = backstore_object_name
 
@@ -333,7 +330,7 @@ class LUN(GWObject):
                               "continue".format(self.pool))
 
     def remove_lun(self, preserve_image):
-        this_host = gethostname().split('.')[0]
+        local_gw = this_host()
         self.logger.info("LUN deletion request received, rbd removal to be "
                          "performed by {}".format(self.allocating_host))
 
@@ -360,7 +357,7 @@ class LUN(GWObject):
 
         rbd_image = RBDDev(self.image, '0G', self.backstore, self.pool)
 
-        if this_host == self.allocating_host:
+        if local_gw == self.allocating_host:
             # by using the allocating host we ensure the delete is not
             # issue by several hosts when initiated through ansible
             if not preserve_image:
@@ -376,7 +373,7 @@ class LUN(GWObject):
             self.config.commit()
 
     def unmap_lun(self, target_iqn):
-        this_host = gethostname().split('.')[0]
+        local_gw = this_host()
         self.logger.info("LUN unmap request received, config commit to be "
                          "performed by {}".format(self.allocating_host))
 
@@ -405,7 +402,7 @@ class LUN(GWObject):
         if self.error:
             return
 
-        if this_host == self.allocating_host:
+        if local_gw == self.allocating_host:
             # by using the allocating host we ensure the delete is not
             # issue by several hosts when initiated through ansible
 
@@ -582,9 +579,9 @@ class LUN(GWObject):
         self.logger.debug("rados pool '{}' contains the following - "
                           "{}".format(self.pool, disk_list))
 
-        this_host = gethostname().split('.')[0]
+        local_gw = this_host()
         self.logger.debug("Hostname Check - this host is {}, target host for "
-                          "allocations is {}".format(this_host,
+                          "allocations is {}".format(local_gw,
                                                      self.allocating_host))
 
         rbd_image = RBDDev(self.image, self.size_bytes, self.backstore, self.pool)
@@ -593,7 +590,7 @@ class LUN(GWObject):
         # if the image required isn't defined, create it!
         if self.image not in disk_list:
             # create the requested disk if this is the 'owning' host
-            if this_host == self.allocating_host:
+            if local_gw == self.allocating_host:
 
                 rbd_image.create()
 
@@ -644,7 +641,7 @@ class LUN(GWObject):
 
         # if updates_made is not set, the disk pre-exists so on the owning
         # host see if it needs to be resized
-        if self.num_changes == 0 and this_host == self.allocating_host:
+        if self.num_changes == 0 and local_gw == self.allocating_host:
 
             # check the size, and update if needed
             rbd_image.rbd_size()
@@ -672,7 +669,7 @@ class LUN(GWObject):
             # this image has not been defined to this hosts LIO, so check the
             # config for the details and if it's  missing define the
             # wwn/alua_state and update the config
-            if this_host == self.allocating_host:
+            if local_gw == self.allocating_host:
                 # first check to see if the device needs adding
                 try:
                     wwn = self.config.config['disks'][self.config_key]['wwn']
@@ -779,7 +776,7 @@ class LUN(GWObject):
 
         # the owning host for an image is the only host that commits to the
         # config
-        if this_host == self.allocating_host and self.config.changed:
+        if local_gw == self.allocating_host and self.config.changed:
 
             self.logger.debug("(LUN.allocate) Committing change(s) to the "
                               "config object in pool {}".format(self.pool))

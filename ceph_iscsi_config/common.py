@@ -1,4 +1,5 @@
 import rados
+import socket
 import time
 import json
 import traceback
@@ -55,7 +56,7 @@ class Config(object):
                                       'mutual_username': '',
                                       'mutual_password': '',
                                       'mutual_password_encryption_enabled': False},
-                   "version": 9,
+                   "version": 10,
                    "epoch": 0,
                    "created": '',
                    "updated": ''
@@ -314,6 +315,44 @@ class Config(object):
                     portal.pop('portal_ip_address')
                 self.update_item("targets", target_iqn, target)
             self.update_item("version", None, 9)
+
+        if self.config['version'] == 9 or self.config['version'] == 9.5:
+            # temporary field to store the gateways already upgraded from v9 to v10
+            gateways_upgraded = self.config.get('gateways_upgraded')
+            if not gateways_upgraded:
+                gateways_upgraded = []
+                self.add_item('gateways_upgraded', None, gateways_upgraded)
+            this_shortname = socket.gethostname().split('.')[0]
+            this_fqdn = socket.getfqdn()
+            if this_fqdn not in gateways_upgraded:
+                gateways_config = self.config['gateways']
+                gateway_config = gateways_config.get(this_shortname)
+                if gateway_config:
+                    gateways_config[this_fqdn] = gateway_config
+                    gateways_config.pop(this_shortname)
+                    self.update_item("gateways", None, gateways_config)
+                for target_iqn, target in self.config['targets'].items():
+                    portals_config = target['portals']
+                    portal_config = portals_config.get(this_shortname)
+                    if portal_config:
+                        portals_config[this_fqdn] = portal_config
+                        portals_config.pop(this_shortname)
+                        self.update_item("targets", target_iqn, target)
+                for disk_id, disk in self.config['disks'].items():
+                    if disk.get('allocating_host') == this_shortname:
+                        disk['allocating_host'] = this_fqdn
+                    if disk.get('owner') == this_shortname:
+                        disk['owner'] = this_fqdn
+                    self.update_item("disks", disk_id, disk)
+                gateways_upgraded.append(this_fqdn)
+                self.update_item("gateways_upgraded", None, gateways_upgraded)
+            if any(gateway_name not in gateways_upgraded
+                   for gateway_name in self.config['gateways'].keys()):
+                # upgrade from v9 to v10 is still in progress, some gateways are not upgraded yet
+                self.update_item("version", None, 9.5)
+            else:
+                self.del_item("gateways_upgraded", None)
+                self.update_item("version", None, 10)
 
         self.commit("retain")
 

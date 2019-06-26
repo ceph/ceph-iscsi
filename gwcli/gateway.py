@@ -5,11 +5,11 @@ from gwcli.node import UIGroup, UINode, UIRoot
 from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks, TargetDisks
 from gwcli.client import Clients
-from gwcli.utils import (this_host, response_message, GatewayAPIError,
+from gwcli.utils import (response_message, GatewayAPIError,
                          GatewayError, APIRequest, console_message, get_config)
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
+from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no, this_host)
 from ceph_iscsi_config.target import GWTarget
 
 from gwcli.ceph import CephGroup
@@ -752,10 +752,13 @@ class GatewayGroup(UIGroup):
                                         gateway_name,
                                         settings.config.api_port))
 
+        api = APIRequest('{}/sysinfo/hostname'.format(new_gw_endpoint))
+        api.get()
+        gateway_hostname = api.response.json()['data']
         config = self.parent.parent.parent._get_config(endpoint=new_gw_endpoint)
         target_config = config['targets'][target_iqn]
-        portal_config = target_config['portals'][gateway_name]
-        Gateway(self, gateway_name, portal_config)
+        portal_config = target_config['portals'][gateway_hostname]
+        Gateway(self, gateway_hostname, portal_config)
 
         self.logger.info('ok')
 
