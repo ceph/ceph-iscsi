@@ -75,7 +75,7 @@ Requires:       python3-configshell >= 1.1.fb25
 %endif
 %endif
 
-%if 0%{?rhel} == 7
+%if 0%{?rhel}
 BuildRequires: systemd
 %else
 BuildRequires: systemd-rpm-macros
