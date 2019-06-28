@@ -38,18 +38,16 @@ python-configshell
 python-cryptography
 python-flask
 
-To install the python package that provides the application logic, run the
-provided setup.py script i.e. ```> python setup.py install```
+To install the python package that provides the CLI tool, daemons and
+application logic, run the provided setup.py script i.e.
+```> python setup.py install```
 
-For the daemons (```rbd-target-gw``` and ```rbd-target-api```), simply copy the
-following files into their equivalent places on each gateway:
+If using systemd, copy the following unit files into their equivalent places
+on each gateway:
 - <archive_root>/usr/lib/systemd/system/rbd-target-gw.service  --> /lib/systemd/system
 - <archive_root>/usr/lib/systemd/system/rbd-target-api.service  --> /lib/systemd/system
-- <archive_root>/usr/bin/rbd-target-gw --> /usr/bin
-- <archive_root>/usr/bin/rbd-target-api --> /usr/bin
-- <archive_root>/usr/bin/gwcli --> /usr/bin
 
-Once the daemon is in place, reload the configuration with
+Once the unit files are in place, reload the configuration with
 ```
 systemctl daemon-reload
 systemctl enable rbd-target-api
