@@ -328,15 +328,15 @@ class Config(object):
                 gateways_config = self.config['gateways']
                 gateway_config = gateways_config.get(this_shortname)
                 if gateway_config:
-                    gateways_config[this_fqdn] = gateway_config
                     gateways_config.pop(this_shortname)
+                    gateways_config[this_fqdn] = gateway_config
                     self.update_item("gateways", None, gateways_config)
                 for target_iqn, target in self.config['targets'].items():
                     portals_config = target['portals']
                     portal_config = portals_config.get(this_shortname)
                     if portal_config:
-                        portals_config[this_fqdn] = portal_config
                         portals_config.pop(this_shortname)
+                        portals_config[this_fqdn] = portal_config
                         self.update_item("targets", target_iqn, target)
                 for disk_id, disk in self.config['disks'].items():
                     if disk.get('allocating_host') == this_shortname:
