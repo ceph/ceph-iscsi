@@ -2361,27 +2361,36 @@ def get_settings():
     """
 
     target_default_controls = {}
+    target_controls_limits = {}
     settings_list = GWTarget.SETTINGS
     for k in settings_list:
         default_val = getattr(settings.config, k, None)
         if k in settings.Settings.LIO_YES_NO_SETTINGS:
             default_val = format_lio_yes_no(default_val)
+        elif k in settings.Settings.LIO_INT_SETTINGS_LIMITS:
+            target_controls_limits[k] = settings.Settings.LIO_INT_SETTINGS_LIMITS[k]
         target_default_controls[k] = default_val
 
     disk_default_controls = {}
+    disk_controls_limits = {}
     required_rbd_features = {}
     unsupported_rbd_features = {}
     for backstore, ks in LUN.SETTINGS.items():
         disk_default_controls[backstore] = {}
+        disk_controls_limits[backstore] = {}
         for k in ks:
             default_val = getattr(settings.config, k, None)
             disk_default_controls[backstore][k] = default_val
+            if k in settings.Settings.LIO_INT_SETTINGS_LIMITS:
+                disk_controls_limits[backstore][k] = settings.Settings.LIO_INT_SETTINGS_LIMITS[k]
         required_rbd_features[backstore] = RBDDev.required_features(backstore)
         unsupported_rbd_features[backstore] = RBDDev.unsupported_features(backstore)
 
     return jsonify({
         'target_default_controls': target_default_controls,
+        'target_controls_limits': target_controls_limits,
         'disk_default_controls': disk_default_controls,
+        'disk_controls_limits': disk_controls_limits,
         'unsupported_rbd_features': unsupported_rbd_features,
         'required_rbd_features': required_rbd_features,
         'backstores': LUN.BACKSTORES,
