@@ -24,6 +24,36 @@ def init():
 class Settings(object):
     LIO_YES_NO_SETTINGS = ["immediate_data", "initial_r2t"]
 
+    LIO_INT_SETTINGS_LIMITS = {
+        "cmdsn_depth": {
+            "min": 1, "max": 512},
+        "dataout_timeout": {
+            "min": 2, "max": 60},
+        "nopin_response_timeout": {
+            "min": 3, "max": 60},
+        "nopin_timeout": {
+            "min": 3, "max": 60},
+        "first_burst_length": {
+            "min": 512, "max": 16777215},
+        "max_burst_length": {
+            "min": 512, "max": 16777215},
+        "max_outstanding_r2t": {
+            "min": 1, "max": 65535},
+        "max_recv_data_segment_length": {
+            "min": 512, "max": 16777215},
+        "max_xmit_data_segment_length": {
+            "min": 512, "max": 16777215},
+
+        "qfull_timeout": {
+            "min": 0, "max": 600},
+        "hw_max_sectors": {
+            "min": 1, "max": 8192},
+        "max_data_area_mb": {
+            "min": 1, "max": 2048},
+        "osd_op_timeout": {
+            "min": 0, "max": 600}
+    }
+
     _float_regex = re.compile(r"^[0-9]*\.{1}[0-9]$")
     _int_regex = re.compile(r"^[0-9]+$")
 
@@ -56,7 +86,14 @@ class Settings(object):
                     value = int(raw_value)
                 except ValueError:
                     raise ValueError("expected integer for {}".format(key))
-
+                limits = Settings.LIO_INT_SETTINGS_LIMITS.get(key)
+                if limits is not None:
+                    min = limits.get('min')
+                    if min is not None and value < min:
+                        raise ValueError("expected integer >= {} for {}".format(min, key))
+                    max = limits.get('max')
+                    if max is not None and value > max:
+                        raise ValueError("expected integer <= {} for {}".format(max, key))
             controls[key] = value
 
         return controls
