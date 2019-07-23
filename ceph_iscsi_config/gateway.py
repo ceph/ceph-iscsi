@@ -40,7 +40,7 @@ class CephiSCSIGateway(object):
                                                 client_name=conf.cluster_client_name,
                                                 cephconf=conf.cephconf),
                                          stderr=subprocess.STDOUT, shell=True)
-        if "un-blacklisting" in result:
+        if ("un-blacklisting" in result) or ("isn't blacklisted" in result):
             self.logger.info("Successfully removed blacklist entry")
             return True
         else:
