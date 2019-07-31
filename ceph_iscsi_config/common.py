@@ -166,7 +166,7 @@ class Config(object):
 
         if self.config['version'] <= 2:
             self.add_item("groups", element_name=None, initial_value={})
-            self.update_item("version", element_name=None, element_value=3)
+            self.update_version(3)
 
         if self.config['version'] == 3:
             iqn = self.config['gateways']['iqn']
@@ -215,19 +215,19 @@ class Config(object):
             self.del_item('clients', None)
             self.del_item('groups', None)
             self.update_item("gateways", None, gateways)
-            self.update_item("version", None, 4)
+            self.update_version(4)
 
         if self.config['version'] == 4:
             for disk_id, disk in self.config['disks'].items():
                 disk['backstore'] = USER_RBD
                 self.update_item("disks", disk_id, disk)
-            self.update_item("version", None, 5)
+            self.update_version(5)
 
         if self.config['version'] == 5:
             for target_iqn, target in self.config['targets'].items():
                 target['acl_enabled'] = True
                 self.update_item("targets", target_iqn, target)
-            self.update_item("version", None, 6)
+            self.update_version(6)
 
         if self.config['version'] == 6:
             new_disks = {}
@@ -260,7 +260,7 @@ class Config(object):
                         new_group_disks[new_group_disk_id] = group_disk
                         group['disks'] = new_group_disks
                 self.update_item("targets", iqn, target)
-            self.update_item("version", None, 7)
+            self.update_version(7)
 
         if self.config['version'] == 7:
             if '/' in self.config['discovery_auth']['chap']:
@@ -306,7 +306,7 @@ class Config(object):
                     client['auth'].pop('chap_mutual', None)
 
                 self.update_item("targets", target_iqn, target)
-            self.update_item("version", None, 8)
+            self.update_version(8)
 
         if self.config['version'] == 8:
             for target_iqn, target in self.config['targets'].items():
@@ -314,7 +314,7 @@ class Config(object):
                     portal['portal_ip_addresses'] = [portal['portal_ip_address']]
                     portal.pop('portal_ip_address')
                 self.update_item("targets", target_iqn, target)
-            self.update_item("version", None, 9)
+            self.update_version(9)
 
         if self.config['version'] == 9 or self.config['version'] == 9.5:
             # temporary field to store the gateways already upgraded from v9 to v10
@@ -349,10 +349,10 @@ class Config(object):
             if any(gateway_name not in gateways_upgraded
                    for gateway_name in self.config['gateways'].keys()):
                 # upgrade from v9 to v10 is still in progress, some gateways are not upgraded yet
-                self.update_item("version", None, 9.5)
+                self.update_version(9.5)
             else:
                 self.del_item("gateways_upgraded", None)
-                self.update_item("version", None, 10)
+                self.update_version(10)
 
         self.commit("retain")
 
@@ -487,6 +487,11 @@ class Config(object):
 
         txn = ConfigTransaction(cfg_type, element_name, 'delete')
         self.txn_list.append(txn)
+
+    def update_version(self, version):
+        if self.config.get('version', 0) == version:
+            return
+        self.update_item('version', None, version)
 
     def update_item(self, cfg_type, element_name, element_value):
         now = get_time()
