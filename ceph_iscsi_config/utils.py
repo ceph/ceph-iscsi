@@ -82,13 +82,13 @@ def resolve_ip_addresses(addr):
             pass
 
     addrs = set()
-    for family in families:
-        try:
-            infos = socket.getaddrinfo(addr, 0, family)
-            for info in infos:
+    try:
+        infos = socket.getaddrinfo(addr, 0)
+        for info in infos:
+            if info[0] in families:
                 addrs.add(info[4][0])
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     return list(addrs)
 
