@@ -154,8 +154,7 @@ class Disks(UIGroup):
 
     def ui_command_attach(self, pool=None, image=None, backstore=None):
         """
-        Create a LUN and assign to the gateway(s)
-        (RBD image must exist).
+        Assign a previously created RBD image to the gateway(s)
 
         The attach command supports two request formats;
 
@@ -191,7 +190,7 @@ class Disks(UIGroup):
 
     def ui_command_create(self, pool=None, image=None, size=None, backstore=None, count=1):
         """
-        Create a LUN and assign to the gateway(s).
+        Create a RBD image and assign to the gateway(s).
 
         The create command supports two request formats;
 
@@ -199,7 +198,7 @@ class Disks(UIGroup):
         Short format : create pool/image <size>
 
         e.g.
-        create pool=rbd image=testimage size=100g max_data_area_mb=16
+        create pool=rbd image=testimage size=100g
         create rbd.testimage 100g
 
         The syntax of each parameter is as follows;
@@ -210,16 +209,16 @@ class Disks(UIGroup):
         backstore  : lio backstore
         count : integer (default is 1)[2]. If the request provides a count=<n>
                 parameter the image name will be used as a prefix, and the count
-                used as a suffix to create multiple LUNs from the same request.
+                used as a suffix to create multiple images from the same request.
                 e.g.
                 create rbd.test 1g count=5
-                -> create 5 LUNs called test1..test5 each of 1GB in size
+                -> create 5 images called test1..test5 each of 1GB in size
                    from the rbd pool
 
         Notes.
         1) size does not support decimal representations
-        2) Using a count to create multiple LUNs will lock the CLI until all
-           LUNs have been created
+        2) Using a count to create multiple images will lock the CLI until all
+           images have been created
         """
         # NB the text above is shown on a help create request in the CLI
 

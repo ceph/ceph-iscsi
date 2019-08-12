@@ -972,6 +972,8 @@ def disk(pool, image):
 
     image_id = '{}/{}'.format(pool, image)
 
+    config.refresh()
+
     if request.method == 'GET':
 
         if image_id in config.config['disks']:
@@ -1111,6 +1113,8 @@ def _disk(pool, image):
 
     image_id = '{}/{}'.format(pool, image)
 
+    config.refresh()
+
     if request.method == 'GET':
         if image_id in config.config['disks']:
             return jsonify(config.config["disks"][image_id]), 200
@@ -1178,7 +1182,6 @@ def _disk(pool, image):
                 return jsonify(message="LUN resized"), 200
 
         elif mode in ['activate', 'deactivate']:
-            config.refresh()
             disk = config.config['disks'].get(image_id, None)
             if not disk:
                 return jsonify(message="rbd image {} not "
