@@ -11,6 +11,7 @@ from gwcli.utils import (response_message, GatewayAPIError,
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no, this_host)
 from ceph_iscsi_config.target import GWTarget
+from ceph_iscsi_config.client import CHAP
 
 from gwcli.ceph import CephGroup
 
@@ -393,7 +394,7 @@ class ISCSITargets(UIGroup):
 
 class Target(UINode):
 
-    display_attributes = ["target_iqn", "control_values"]
+    display_attributes = ["target_iqn", "auth", "control_values"]
 
     help_intro = '''
                  The iscsi target is the name that the group of gateways are
@@ -412,6 +413,33 @@ class Target(UINode):
         self.host_groups = HostGroups(self)
         self.target_disks = TargetDisks(self)
 
+        config = self.parent.parent._get_config()
+        if not config:
+            self.logger.error("Unable to refresh local config")
+
+        self.auth = config['targets'][target_iqn]['auth']
+        # decode the chap password if necessary
+        if 'username' in self.auth and 'password' in self.auth:
+            self.chap = CHAP(self.auth['username'],
+                             self.auth['password'],
+                             self.auth['password_encryption_enabled'])
+            self.auth['username'] = self.chap.user
+            self.auth['password'] = self.chap.password
+        else:
+            self.auth['username'] = ''
+            self.auth['password'] = ''
+
+        # decode the chap_mutual password if necessary
+        if 'mutual_username' in self.auth and 'mutual_password' in self.auth:
+            self.chap_mutual = CHAP(self.auth['mutual_username'],
+                                    self.auth['mutual_password'],
+                                    self.auth['mutual_password_encryption_enabled'])
+            self.auth['mutual_username'] = self.chap_mutual.user
+            self.auth['mutual_password'] = self.chap_mutual.password
+        else:
+            self.auth['mutual_username'] = ''
+            self.auth['mutual_password'] = ''
+
     def _get_controls(self):
         return self._controls.copy()
 
@@ -422,7 +450,21 @@ class Target(UINode):
     controls = property(_get_controls, _set_controls)
 
     def summary(self):
-        return "Gateways: {}".format(len(self.gateway_group.children)), None
+        msg = []
+
+        auth_text = "Auth: None"
+        status = None
+        if self.auth.get('mutual_username'):
+            auth_text = "Auth: CHAP_MUTUAL"
+            status = True
+        elif self.auth.get('username'):
+            auth_text = "Auth: CHAP"
+            status = True
+        msg.append(auth_text)
+
+        msg.append("Gateways: {}".format(len(self.gateway_group.children)))
+
+        return ", ".join(msg), status
 
     def ui_command_reconfigure(self, attribute, value):
         """
@@ -496,6 +538,74 @@ class Target(UINode):
                 self.control_values[k] = default_val
             else:
                 self.control_values[k] = "{} (override)".format(val)
+
+    def ui_command_auth(self, username=None, password=None, mutual_username=None,
+                        mutual_password=None):
+        """
+        Target authentication can be set to use CHAP/CHAP_MUTUAL by supplying
+        username, password, mutual_username, mutual_password
+
+        e.g.
+        auth username=<user> password=<pass> mutual_username=<m_user> mutual_password=<m_pass>
+
+        username / mutual_username ... the username is 8-64 character string. Each character
+                                       may either be an alphanumeric or use one of the following
+                                       special characters .,:,-,@.
+                                       Consider using the hosts 'shortname' or the initiators IQN
+                                       value as the username
+
+        password / mutual_password ... the password must be between 12-16 chars in length
+                                       containing alphanumeric characters, plus the following
+                                       special characters @,_,-,/
+        """
+
+        self.logger.debug("CMD: /iscsi-targets/<target_iqn> auth *")
+
+        if not username:
+            self.logger.error("To set authentication, specify "
+                              "username=<user> password=<password> "
+                              "[mutual_username]=<user> [mutual_password]=<password> "
+                              "or nochap")
+            return
+
+        if username == 'nochap':
+            username = ''
+            password = ''
+            mutual_username = ''
+            mutual_password = ''
+
+        self.logger.debug("auth to be set to username='{}', password='{}', mutual_username='{}', "
+                          "mutual_password='{}'".format(username, password,
+                                                        mutual_username, mutual_password))
+        target_iqn = self.name
+
+        api_vars = {
+            "username": username,
+            "password": password,
+            "mutual_username": mutual_username,
+            "mutual_password": mutual_password
+        }
+
+        targetauth_api = ('{}://localhost:{}/api/'
+                          'targetauth/{}'.format(self.http_mode,
+                                                 settings.config.api_port,
+                                                 target_iqn))
+        api = APIRequest(targetauth_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code == 200:
+            self.logger.debug("- target credentials updated")
+            self.auth['username'] = username
+            self.auth['password'] = password
+            self.auth['mutual_username'] = mutual_username
+            self.auth['mutual_password'] = mutual_password
+            self.logger.info('ok')
+
+        else:
+            self.logger.error("Failed to update target auth: "
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
+            return
 
 
 class GatewayGroup(UIGroup):

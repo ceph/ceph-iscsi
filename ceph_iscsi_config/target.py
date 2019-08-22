@@ -13,7 +13,7 @@ from ceph_iscsi_config.utils import (normalize_ip_address, normalize_ip_literal,
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
-from ceph_iscsi_config.client import GWClient
+from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.gateway_object import GWObject
 from ceph_iscsi_config.backstore import lookup_storage_object_by_disk
 
@@ -252,16 +252,32 @@ class GWTarget(GWObject):
                 return portal_name
         return None
 
+    def get_tpg_by_gateway_name(self, gateway_name):
+        tpg_tag = self.tpg_tag_by_gateway_name.get(gateway_name)
+        if tpg_tag:
+            for tpg_item in self.tpg_list:
+                if tpg_item.tag == tpg_tag:
+                    return tpg_item
+        return None
+
+    def update_auth(self, tpg, username=None, password=None,
+                    mutual_username=None, mutual_password=None):
+        tpg.chap_userid = username
+        tpg.chap_password = password
+        tpg.chap_mutual_userid = mutual_username
+        tpg.chap_mutual_password = mutual_password
+
+        auth_enabled = (username and password)
+        if auth_enabled:
+            tpg.set_attribute('authentication', '1')
+        else:
+            GWClient.try_disable_auth(tpg)
+
     def create_tpg(self, ip):
 
         try:
-            tpg = None
             gateway_name = self._get_gateway_name(ip)
-            tpg_tag = self.tpg_tag_by_gateway_name.get(gateway_name)
-            if tpg_tag:
-                for tpg_item in self.tpg_list:
-                    if tpg_item.tag == tpg_tag:
-                        tpg = tpg_item
+            tpg = self.get_tpg_by_gateway_name(gateway_name)
             if not tpg:
                 tpg = TPG(self.target)
 
@@ -271,6 +287,24 @@ class GWTarget(GWObject):
             self.logger.debug("(Gateway.create_tpg) Added tpg for portal "
                               "ip {}".format(ip))
             if ip in self.active_portal_ips:
+                target_config = self.config.config['targets'][self.iqn]
+                auth_config = target_config['auth']
+                config_chap = CHAP(auth_config['username'],
+                                   auth_config['password'],
+                                   auth_config['password_encryption_enabled'])
+                if config_chap.error:
+                    self.error = True
+                    self.error_msg = config_chap.error_msg
+                    return
+                config_chap_mutual = CHAP(auth_config['mutual_username'],
+                                          auth_config['mutual_password'],
+                                          auth_config['mutual_password_encryption_enabled'])
+                if config_chap_mutual.error:
+                    self.error = True
+                    self.error_msg = config_chap_mutual.error_msg
+                    return
+                self.update_auth(tpg, config_chap.user, config_chap.password,
+                                 config_chap_mutual.user, config_chap_mutual.password)
                 if self.enable_portal:
                     NetworkPortal(tpg, normalize_ip_literal(ip))
                 tpg.enable = True
@@ -660,6 +694,13 @@ class GWTarget(GWObject):
                     'disks': [],
                     'clients': {},
                     'acl_enabled': True,
+                    'auth': {
+                        'username': '',
+                        'password': '',
+                        'password_encryption_enabled': False,
+                        'mutual_username': '',
+                        'mutual_password': '',
+                        'mutual_password_encryption_enabled': False},
                     'portals': {},
                     'groups': {},
                     'controls': {}

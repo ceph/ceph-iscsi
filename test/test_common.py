@@ -214,6 +214,14 @@ class ChapTest(unittest.TestCase):
                     }
                 },
                 "acl_enabled": True,
+                "auth": {
+                    "username": "",
+                    "password": "",
+                    "password_encryption_enabled": False,
+                    "mutual_username": "",
+                    "mutual_password": "",
+                    "mutual_password_encryption_enabled": False
+                },
                 "controls": {
                     "immediate_data": False,
                     "nopin_response_timeout": 17
@@ -266,5 +274,5 @@ class ChapTest(unittest.TestCase):
             }
         },
         "updated": "2018/12/07 09:18:13",
-        "version": 10
+        "version": 11
     }

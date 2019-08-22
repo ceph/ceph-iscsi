@@ -251,6 +251,13 @@ def valid_client(**kwargs):
             return ("A client with the name '{}' is "
                     "already defined".format(client_iqn))
 
+        # Mixing TPG/target auth with ACL is not supported
+        target_username = target_config['auth']['username']
+        target_password = target_config['auth']['password']
+        target_auth_enabled = (target_username and target_password)
+        if target_auth_enabled:
+            return "Cannot create client because target CHAP authentication is enabled"
+
         # Creates can only be done with a minimum number of gw's in place
         num_gws = len([gw_name for gw_name in config['gateways']
                        if isinstance(config['gateways'][gw_name], dict)])
