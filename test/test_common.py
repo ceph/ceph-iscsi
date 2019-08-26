@@ -227,9 +227,11 @@ class ChapTest(unittest.TestCase):
                     "nopin_response_timeout": 17
                 },
                 "created": "2018/12/07 09:19:01",
-                "disks": [
-                    "rbd/disk_1"
-                ],
+                "disks": {
+                    "rbd/disk_1": {
+                        "lun_id": 0
+                    }
+                },
                 "groups": {
                     "mygroup": {
                         "disks": {

@@ -481,11 +481,11 @@ class GWTarget(GWObject):
                                                            tpg.tag,
                                                            alua_tpg.name))
 
-    def _map_lun(self, config, stg_object):
+    def _map_lun(self, config, stg_object, target_disk_config):
         for tpg in self.tpg_list:
             self.logger.debug("processing tpg{}".format(tpg.tag))
 
-            lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
+            lun_id = target_disk_config['lun_id']
 
             try:
                 mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
@@ -509,9 +509,9 @@ class GWTarget(GWObject):
                 self.error_msg = err
                 return
 
-    def map_lun(self, config, stg_object):
+    def map_lun(self, config, stg_object, target_disk_config):
         self.load_config()
-        self._map_lun(config, stg_object)
+        self._map_lun(config, stg_object, target_disk_config)
 
     def map_luns(self, config):
         """
@@ -521,16 +521,16 @@ class GWTarget(GWObject):
 
         target_config = config.config["targets"][self.iqn]
 
-        for disk in target_config['disks']:
-            stg_object = lookup_storage_object_by_disk(config, disk)
+        for disk_id, disk in target_config['disks'].items():
+            stg_object = lookup_storage_object_by_disk(config, disk_id)
             if stg_object is None:
-                err_msg = "Could not map {} to LUN. Disk not found".format(disk)
+                err_msg = "Could not map {} to LUN. Disk not found".format(disk_id)
                 self.logger.error(err_msg)
                 self.error = True
                 self.error_msg = err_msg
                 return
 
-            self._map_lun(config, stg_object)
+            self._map_lun(config, stg_object, disk)
             if self.error:
                 return
 
@@ -551,7 +551,7 @@ class GWTarget(GWObject):
                 saved_err = err
                 # drop down and try to delete disks
 
-        for disk in config.config['targets'][self.iqn]['disks']:
+        for disk in config.config['targets'][self.iqn]['disks'].keys():
             so = lookup_storage_object_by_disk(config, disk)
             if so is None:
                 self.logger.debug("lio disk lookup failed {}")
@@ -691,7 +691,7 @@ class GWTarget(GWObject):
                 # create the target
                 self.create_target()
                 seed_target = {
-                    'disks': [],
+                    'disks': {},
                     'clients': {},
                     'acl_enabled': True,
                     'auth': {

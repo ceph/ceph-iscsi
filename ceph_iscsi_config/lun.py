@@ -406,7 +406,7 @@ class LUN(GWObject):
             # by using the allocating host we ensure the delete is not
             # issue by several hosts when initiated through ansible
 
-            target_config['disks'].remove(self.config_key)
+            target_config['disks'].pop(self.config_key)
             self.config.update_item("targets", target_iqn, target_config)
 
             # determine which host was the path owner
@@ -430,13 +430,25 @@ class LUN(GWObject):
 
             self.config.commit()
 
+    def _get_next_lun_id(self, target_disks):
+        lun_ids_in_use = [t['lun_id'] for t in target_disks.values()]
+        lun_id_candidate = 0
+        while lun_id_candidate in lun_ids_in_use:
+            lun_id_candidate += 1
+        return lun_id_candidate
+
     def map_lun(self, gateway, owner, disk):
         target_config = self.config.config['targets'][gateway.iqn]
         disk_metadata = self.config.config['disks'][disk]
         disk_metadata['owner'] = owner
         self.config.update_item("disks", disk, disk_metadata)
 
-        target_config['disks'].append(disk)
+        target_disk_config = target_config['disks'].get(disk)
+        if not target_disk_config:
+            lun_id = self._get_next_lun_id(target_config['disks'])
+            target_config['disks'][disk] = {
+                'lun_id': lun_id
+            }
         self.config.update_item("targets", gateway.iqn, target_config)
 
         gateway_dict = self.config.config['gateways'][owner]
@@ -447,7 +459,7 @@ class LUN(GWObject):
         if self.error:
             raise CephiSCSIError(self.error_msg)
 
-        gateway.map_lun(self.config, so)
+        gateway.map_lun(self.config, so, target_config['disks'][disk])
         if gateway.error:
             raise CephiSCSIError(gateway.error_msg)
 
@@ -509,7 +521,7 @@ class LUN(GWObject):
             # Add the mapping for the lun to ensure the block device is
             # present on all TPG's
             gateway = GWTarget(self.logger, target_iqn, ip_list)
-            gateway.map_lun(self.config, so)
+            gateway.map_lun(self.config, so, target['disks'][self.config_key])
             if gateway.error:
                 raise CephiSCSIError("LUN mapping failed - {}".format(gateway.error_msg))
 
@@ -1191,7 +1203,7 @@ class LUN(GWObject):
             return
 
         disks = {}
-        for disk in target_disks:
+        for disk in target_disks.keys():
             disks[disk] = config.config['disks'][disk]
 
         # sort the disks dict keys, so the disks are registered in a specific
@@ -1242,7 +1254,7 @@ class LUN(GWObject):
                                 RBDDev.rbd_lock_cleanup(logger, ips,
                                                         rbd_image)
 
-                            target._map_lun(config, so)
+                            target._map_lun(config, so, target_disks[disk_key])
                             if target.error:
                                 raise CephiSCSIError("Mapping for {} failed: {}"
                                                      .format(disk_key,

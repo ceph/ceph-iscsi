@@ -364,6 +364,12 @@ class Config(object):
                     'mutual_password': '',
                     'mutual_password_encryption_enabled': False
                 }
+                disks = {}
+                for disk_index, disk in enumerate(sorted(target['disks'])):
+                    disks[disk] = {
+                        'lun_id': disk_index
+                    }
+                target['disks'] = disks
                 self.update_item("targets", target_iqn, target)
             self.update_item("version", None, 11)
 
