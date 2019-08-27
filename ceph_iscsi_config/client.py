@@ -339,8 +339,8 @@ class GWClient(GWObject):
 
         try:
             self.logger.debug("Updating the ACL")
-            if username != self.acl.chap_userid or \
-                    password != self.acl.chap_password:
+            if username != acl_chap_userid or \
+                    password != acl_chap_password:
                 self.acl.chap_userid = username
                 self.acl.chap_password = password
 
@@ -353,8 +353,8 @@ class GWClient(GWObject):
                     self.error_msg = new_chap.error_msg
                     return
 
-            if mutual_username != self.acl.chap_mutual_userid or \
-                    mutual_password != self.acl.chap_mutual_password:
+            if mutual_username != acl_chap_mutual_userid or \
+                    mutual_password != acl_chap_mutual_password:
                 self.acl.chap_mutual_userid = mutual_username
                 self.acl.chap_mutual_password = mutual_password
 
