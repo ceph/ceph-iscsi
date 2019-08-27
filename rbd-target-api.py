@@ -16,7 +16,6 @@ import inspect
 import copy
 
 from functools import (reduce, wraps)
-from rpm import labelCompare
 import rados
 import rbd
 
@@ -2624,10 +2623,8 @@ def pre_reqs_errors():
         "opensuse-leap": "suse"}
     valid_dists = {
         "redhat": 7.4,
-        "suse": 15.1}
-
-    k_vers = '3.10.0'
-    k_rel = '823.el7'
+        "suse": 15.1,
+        "debian": 10}
 
     errors_found = []
 
@@ -2648,19 +2645,6 @@ def pre_reqs_errors():
 
     else:
         errors_found.append("OS is unsupported")
-
-    # check the running kernel is OK (required kernel has patches to rbd.ko)
-    os_info = os.uname()
-    this_arch = os_info[-1]
-    this_kernel = os_info[2].replace(".{}".format(this_arch), '')
-    this_ver, this_rel = this_kernel.split('-', 1)
-
-    # use labelCompare from the rpm module to handle the comparison
-    if labelCompare(('1', this_ver, this_rel), ('1', k_vers, k_rel)) < 0:
-        logger.error("Kernel version check failed")
-        errors_found.append("Kernel version too old - {}-{} "
-                            "or above needed".format(k_vers,
-                                                     k_rel))
 
     return errors_found
 

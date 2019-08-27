@@ -45,7 +45,6 @@ Requires:       python-rados >= 10.2.2
 Requires:       python-rbd >= 10.2.2
 Requires:       python-netifaces >= 0.10.4
 Requires:       python-rtslib >= 2.1.fb68
-Requires:       rpm-python >= 4.11
 Requires:       python-cryptography
 Requires:       python-flask >= 0.10.1
 Requires:       python-configshell >= 1.1.fb25
@@ -63,7 +62,6 @@ Requires:       python3-netifaces >= 0.10.4
 Requires:       python3-rtslib >= 2.1.fb68
 Requires:       python3-cryptography
 Requires:       python3-pyOpenSSL
-Requires:       python3-rpm >= 4.11
 %if 0%{?suse_version}
 BuildRequires:  python-rpm-macros
 BuildRequires:  fdupes
