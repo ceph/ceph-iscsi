@@ -2361,6 +2361,8 @@ def get_settings():
     Examples:
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/settings
     """
+    type_int = "int"
+    type_bool = "bool"
 
     target_default_controls = {}
     target_controls_limits = {}
@@ -2369,8 +2371,12 @@ def get_settings():
         default_val = getattr(settings.config, k, None)
         if k in settings.Settings.LIO_YES_NO_SETTINGS:
             default_val = format_lio_yes_no(default_val)
+            target_controls_limits[k] = {"type": type_bool}
         elif k in settings.Settings.LIO_INT_SETTINGS_LIMITS:
             target_controls_limits[k] = settings.Settings.LIO_INT_SETTINGS_LIMITS[k]
+            target_controls_limits[k]["type"] = type_int
+        else:
+            target_controls_limits[k] = {"type": type_int}
         target_default_controls[k] = default_val
 
     disk_default_controls = {}
@@ -2382,9 +2388,15 @@ def get_settings():
         disk_controls_limits[backstore] = {}
         for k in ks:
             default_val = getattr(settings.config, k, None)
-            disk_default_controls[backstore][k] = default_val
-            if k in settings.Settings.LIO_INT_SETTINGS_LIMITS:
+            if k in settings.Settings.LIO_YES_NO_SETTINGS:
+                default_val = format_lio_yes_no(default_val)
+                disk_controls_limits[backstore][k] = {"type": type_bool}
+            elif k in settings.Settings.LIO_INT_SETTINGS_LIMITS:
                 disk_controls_limits[backstore][k] = settings.Settings.LIO_INT_SETTINGS_LIMITS[k]
+                disk_controls_limits[backstore][k]["type"] = type_int
+            else:
+                disk_controls_limits[backstore][k] = {"type": type_int}
+            disk_default_controls[backstore][k] = default_val
         required_rbd_features[backstore] = RBDDev.required_features(backstore)
         unsupported_rbd_features[backstore] = RBDDev.unsupported_features(backstore)
 
