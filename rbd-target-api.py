@@ -789,8 +789,18 @@ def target_disk(target_iqn=None):
         owner = LUN.get_owner(config.config['gateways'], target_config['portals'])
         logger.debug("{} owner will be {}".format(disk, owner))
 
+        lun_id = request.form.get('lun_id')
+        if lun_id is not None:
+            try:
+                lun_id_int = int(lun_id)
+            except ValueError:
+                return jsonify(message="Lun id must be a number"), 400
+            for target_disk in target_config['disks'].values():
+                if lun_id_int == target_disk['lun_id']:
+                    return jsonify(message="Lun id {} already in use".format(lun_id)), 400
         api_vars = {
             'disk': disk,
+            'lun_id': lun_id,
             'owner': owner,
             'allocating_host': local_gw
         }
@@ -883,9 +893,11 @@ def _target_disk(target_iqn=None):
             logger.error("Error initializing the LUN : "
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
-
+        lun_id = request.form.get('lun_id')
+        if lun_id is not None:
+            lun_id = int(lun_id)
         try:
-            lun.map_lun(gateway, owner, disk)
+            lun.map_lun(gateway, owner, disk, lun_id)
         except CephiSCSIError as err:
             status_code = 400 if str(err) else 500
             logger.error("LUN add failed : {}".format(err))

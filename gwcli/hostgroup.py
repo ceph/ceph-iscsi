@@ -325,7 +325,7 @@ class HostGroup(UIGroup):
         mapped_disks = [mapped_disk.name
                         for mapped_disk in self.parent.parent.target_disks.children]
         if disk_name not in mapped_disks:
-            rc = self.parent.parent.target_disks.add_disk(disk_name, None)
+            rc = self.parent.parent.target_disks.add_disk(disk_name, None, None)
             if rc == 0:
                 self.logger.debug("disk auto-map successful")
             else:

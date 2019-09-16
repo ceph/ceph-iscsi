@@ -433,7 +433,7 @@ class LUN(GWObject):
             lun_id_candidate += 1
         return lun_id_candidate
 
-    def map_lun(self, gateway, owner, disk):
+    def map_lun(self, gateway, owner, disk, lun_id=None):
         target_config = self.config.config['targets'][gateway.iqn]
         disk_metadata = self.config.config['disks'][disk]
         disk_metadata['owner'] = owner
@@ -441,7 +441,8 @@ class LUN(GWObject):
 
         target_disk_config = target_config['disks'].get(disk)
         if not target_disk_config:
-            lun_id = self._get_next_lun_id(target_config['disks'])
+            if lun_id is None:
+                lun_id = self._get_next_lun_id(target_config['disks'])
             target_config['disks'][disk] = {
                 'lun_id': lun_id
             }

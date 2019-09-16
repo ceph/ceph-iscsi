@@ -1003,15 +1003,15 @@ class TargetDisks(UIGroup):
         self.target_iqn = self.parent.name
 
     def load(self, disks):
-        for disk in disks:
-            TargetDisk(self, disk)
+        for image_id, image in disks.items():
+            TargetDisk(self, image_id, image['lun_id'])
 
-    def ui_command_add(self, disk):
-        self.add_disk(disk)
+    def ui_command_add(self, disk, lun_id=None):
+        self.add_disk(disk, lun_id)
 
-    def add_disk(self, disk, success_msg='ok'):
+    def add_disk(self, disk, lun_id, success_msg='ok'):
         rc = 0
-        api_vars = {"disk": disk}
+        api_vars = {"disk": disk, "lun_id": lun_id}
         targetdisk_api = ('{}://localhost:{}/api/'
                           'targetlun/{}'.format(self.http_mode,
                                                 settings.config.api_port,
@@ -1026,7 +1026,9 @@ class TargetDisks(UIGroup):
             disk.owner = owner
             self.logger.debug("- Disk '{}' owner updated to {}"
                               .format(disk.image_id, owner))
-            TargetDisk(self, disk.image_id)
+            target_config = config['targets'][self.target_iqn]
+            lun_id = target_config['disks'][disk.image_id]['lun_id']
+            TargetDisk(self, disk.image_id, lun_id)
             self.logger.debug("- TargetDisk '{}' added".format(disk.image_id))
             if success_msg:
                 self.logger.info(success_msg)
@@ -1075,11 +1077,12 @@ class TargetDisk(UINode):
 
     display_attributes = ['name', 'owner']
 
-    def __init__(self, parent, name):
+    def __init__(self, parent, name, lun_id):
         UINode.__init__(self, name, parent)
         ui_root = self.get_ui_root()
         disk = ui_root.disks.disk_lookup[name]
         self.owner = disk.owner
+        self.lun_id = lun_id
 
     def summary(self):
-        return "Owner: {}".format(self.owner), True
+        return "Owner: {}, Lun: {}".format(self.owner, self.lun_id), True
