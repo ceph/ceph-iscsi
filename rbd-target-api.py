@@ -1642,7 +1642,7 @@ def targetinfo(target_iqn):
         http://192.168.122.69:5000/api/targetinfo/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
     if target_iqn not in config.config['targets']:
-        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 404
     target_config = config.config['targets'][target_iqn]
     gateways = target_config['portals']
     num_sessions = 0
@@ -1672,7 +1672,7 @@ def _targetinfo(target_iqn):
         http://192.168.122.69:5000/api/_targetinfo/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
     if target_iqn not in config.config['targets']:
-        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 404
     num_sessions = GWTarget.get_num_sessions(target_iqn)
     return jsonify({
         "num_sessions": num_sessions
@@ -1691,7 +1691,7 @@ def gatewayinfo():
     """
     local_gw = this_host()
     if local_gw not in config.config['gateways']:
-        return jsonify(message="Gateway {} does not exist in configuration".format(local_gw)), 400
+        return jsonify(message="Gateway {} does not exist in configuration".format(local_gw)), 404
     num_sessions = 0
     for target_iqn, target in config.config['targets'].items():
         if local_gw in target['portals']:
@@ -2154,10 +2154,10 @@ def clientinfo(target_iqn, client_iqn):
         iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw-client
     """
     if target_iqn not in config.config['targets']:
-        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 404
     target_config = config.config['targets'][target_iqn]
     if client_iqn not in target_config['clients']:
-        return jsonify(message="Client {} does not exist".format(client_iqn)), 400
+        return jsonify(message="Client {} does not exist".format(client_iqn)), 404
     gateways = target_config['portals']
     response = {
         "alias": '',
@@ -2197,10 +2197,10 @@ def _clientinfo(target_iqn, client_iqn):
         iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw-client
     """
     if target_iqn not in config.config['targets']:
-        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 404
     target_config = config.config['targets'][target_iqn]
     if client_iqn not in target_config['clients']:
-        return jsonify(message="Client {} does not exist".format(client_iqn)), 400
+        return jsonify(message="Client {} does not exist".format(client_iqn)), 404
 
     logged_in = GWClient.get_client_info(target_iqn, client_iqn)
     return jsonify(logged_in), 200
