@@ -196,14 +196,38 @@ def valid_credentials(username, password, mutual_username, mutual_password):
     if not mutual_username and mutual_password:
         return 'Mutual username is required'
 
+    if username and len(username) < 8:
+        return 'Minimum length of username is 8 characters'
+
+    if username and len(username) > 64:
+        return 'Maximum length of username is 64 characters'
+
     if username and not usr_regex.search(username):
         return 'Invalid username'
+
+    if mutual_username and len(mutual_username) < 8:
+        return 'Minimum length of mutual username is 8 characters'
+
+    if mutual_username and len(mutual_username) > 64:
+        return 'Maximum length of mutual username is 64 characters'
 
     if mutual_username and not usr_regex.search(mutual_username):
         return 'Invalid mutual username'
 
+    if password and len(password) < 12:
+        return 'Minimum length of password is 12 characters'
+
+    if password and len(password) > 16:
+        return 'Maximum length of password is 16 characters'
+
     if password and not pw_regex.search(password):
         return 'Invalid password'
+
+    if mutual_password and len(mutual_password) < 12:
+        return 'Minimum length of mutual password is 12 characters'
+
+    if mutual_password and len(mutual_password) > 16:
+        return 'Maximum length of mutual password is 16 characters'
 
     if mutual_password and not pw_regex.search(mutual_password):
         return 'Invalid mutual password'
