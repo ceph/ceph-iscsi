@@ -32,7 +32,7 @@ from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
-                                     ip_addresses, read_os_release,
+                                     ip_addresses, read_os_release, encryption_available,
                                      format_lio_yes_no, CephiSCSIError, this_host)
 
 from gwcli.utils import (APIRequest, valid_gateway, valid_client,
@@ -519,6 +519,15 @@ def get_config():
                         discovery_auth_config['mutual_password_encryption_enabled'])
             discovery_auth_config['mutual_password'] = chap.password
             for _, target in result_config['targets'].items():
+                target_auth_config = target['auth']
+                chap = CHAP(target_auth_config['username'],
+                            target_auth_config['password'],
+                            target_auth_config['password_encryption_enabled'])
+                target_auth_config['password'] = chap.password
+                chap = CHAP(target_auth_config['mutual_username'],
+                            target_auth_config['mutual_password'],
+                            target_auth_config['mutual_password_encryption_enabled'])
+                target_auth_config['mutual_password'] = chap.password
                 for _, client in target['clients'].items():
                     auth_config = client['auth']
                     chap = CHAP(auth_config['username'],
@@ -1560,9 +1569,19 @@ def _discoveryauth():
 @requires_restricted_auth
 def targetauth(target_iqn=None):
     """
-    Coordinate the gen-acls across each gateway node
+    Coordinate the gen-acls or CHAP/MUTUAL_CHAP across each gateway node
     :param target_iqn: (str) IQN of the target
     :param action: (str) action to be performed
+    :param username: (str) username string is 8-64 chars long containing any alphanumeric in
+                           [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+    :param password: (str) password string is 12-16 chars long containing any alphanumeric in
+                           [0-9a-zA-Z] and '@' '-' '_' '/'
+    :param mutual_username: (str) mutual_username string is 8-64 chars long containing any
+                            alphanumeric in
+                            [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+    :param mutual_password: (str) mutual_password string is 12-16 chars long containing any
+                            alphanumeric in
+                            [0-9a-zA-Z] and '@' '-' '_' '/'
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d auth='disable_acl'
@@ -1570,7 +1589,7 @@ def targetauth(target_iqn=None):
     """
 
     action = request.form.get('action')
-    if action not in ['disable_acl', 'enable_acl']:
+    if action and action not in ['disable_acl', 'enable_acl']:
         return jsonify(message='Invalid auth {}'.format(action)), 400
 
     target_config = config.config['targets'][target_iqn]
@@ -1578,6 +1597,30 @@ def targetauth(target_iqn=None):
     if action == 'disable_acl' and target_config['clients'].keys():
         return jsonify(message='Cannot disable ACL authentication '
                                'because target has clients'), 400
+
+    # Mixing TPG/target auth with ACL is not supported
+    if action == 'enable_acl':
+        target_username = target_config['auth']['username']
+        target_password = target_config['auth']['password']
+        target_auth_enabled = (target_username and target_password)
+        if target_auth_enabled:
+            return jsonify(message="Cannot enable ACL authentication "
+                                   "because target CHAP authentication is enabled"), 400
+
+    username = request.form.get('username', '')
+    password = request.form.get('password', '')
+    mutual_username = request.form.get('mutual_username', '')
+    mutual_password = request.form.get('mutual_password', '')
+
+    # Mixing TPG/target auth with ACL is not supported
+    auth_enabled = (username and password)
+    if auth_enabled and target_config['acl_enabled']:
+        return jsonify(message="Cannot enable target CHAP authentication "
+                               "because ACL authentication is enabled"), 400
+
+    error_msg = valid_credentials(username, password, mutual_username, mutual_password)
+    if error_msg:
+        return jsonify(message=error_msg), 400
 
     try:
         gateways = get_remote_gateways(target_config['portals'], logger)
@@ -1589,7 +1632,11 @@ def targetauth(target_iqn=None):
     # Apply to all gateways
     api_vars = {
         "committing_host": local_gw,
-        "action": action
+        "action": action,
+        "username": username,
+        "password": password,
+        "mutual_username": mutual_username,
+        "mutual_password": mutual_password,
     }
     resp_text, resp_code = call_api(gateways, '_targetauth',
                                     target_iqn,
@@ -1603,7 +1650,7 @@ def targetauth(target_iqn=None):
 @requires_restricted_auth
 def _targetauth(target_iqn=None):
     """
-    Apply gen-acls on the local gateway
+    Apply gen-acls or CHAP/MUTUAL_CHAP on the local gateway
     Internal Use ONLY
     **RESTRICTED**
     """
@@ -1612,19 +1659,49 @@ def _targetauth(target_iqn=None):
 
     local_gw = this_host()
     committing_host = request.form['committing_host']
-    action = request.form['action']
+    action = request.form.get('action')
+    username = request.form['username']
+    password = request.form['password']
+    mutual_username = request.form['mutual_username']
+    mutual_password = request.form['mutual_password']
 
     target = GWTarget(logger, target_iqn, [])
 
-    acl_enabled = (action == 'enable_acl')
+    target_config = config.config['targets'][target_iqn]
 
     if target.exists():
         target.load_config()
-        target.update_acl(acl_enabled)
+        if action in ['disable_acl', 'enable_acl']:
+            acl_enabled = (action == 'enable_acl')
+            target.update_acl(acl_enabled)
+        else:
+            tpg = target.get_tpg_by_gateway_name(local_gw)
+            target.update_auth(tpg, username, password,
+                               mutual_username, mutual_password)
 
     if committing_host == local_gw:
-        target_config = config.config['targets'][target_iqn]
-        target_config['acl_enabled'] = acl_enabled
+        if action in ['disable_acl', 'enable_acl']:
+            acl_enabled = (action == 'enable_acl')
+            target_config['acl_enabled'] = acl_enabled
+        else:
+            encryption_enabled = encryption_available()
+            auth_config = {
+                'username': '',
+                'password': '',
+                'password_encryption_enabled': encryption_enabled,
+                'mutual_username': '',
+                'mutual_password': '',
+                'mutual_password_encryption_enabled': encryption_enabled
+            }
+            if username != '':
+                chap = CHAP(username, password, encryption_enabled)
+                chap_mutual = CHAP(mutual_username, mutual_password, encryption_enabled)
+                auth_config['username'] = chap.user
+                auth_config['password'] = chap.encrypted_password(encryption_enabled)
+                auth_config['mutual_username'] = chap_mutual.user
+                auth_config['mutual_password'] = chap_mutual.encrypted_password(encryption_enabled)
+            target_config['auth'] = auth_config
+
         config.update_item('targets', target_iqn, target_config)
         config.commit("retain")
 

@@ -356,7 +356,7 @@ class CephiSCSIGateway(object):
                 if not target_config['portals']:
                     # Last gw for the target so delete everything that lives
                     # under the tpg in LIO since we can't create it
-                    target_config['disks'] = []
+                    target_config['disks'] = {}
                     target_config['clients'] = {}
                     target_config['controls'] = {}
                     target_config['groups'] = {}

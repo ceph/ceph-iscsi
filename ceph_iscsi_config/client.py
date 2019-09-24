@@ -307,7 +307,8 @@ class GWClient(GWObject):
 
             client.manage('present')  # ensure the client exists
 
-    def try_disable_auth(self, tpg):
+    @staticmethod
+    def try_disable_auth(tpg):
         """
         Disable authentication (enable ACL mode) if this is the last CHAP user.
 
@@ -318,6 +319,9 @@ class GWClient(GWObject):
         for client in tpg.node_acls:
             if client.chap_userid or client.chap_password:
                 return
+
+        if tpg.chap_userid or tpg.chap_password:
+            return
 
         tpg.set_attribute('authentication', '0')
 
@@ -371,7 +375,7 @@ class GWClient(GWObject):
             if auth_enabled:
                 self.tpg.set_attribute('authentication', '1')
             else:
-                self.try_disable_auth(self.tpg)
+                GWClient.try_disable_auth(self.tpg)
 
             self.logger.debug("Updating config object meta data")
             encryption_enabled = encryption_available()
@@ -485,7 +489,7 @@ class GWClient(GWObject):
 
         try:
             self.acl.delete()
-            self.try_disable_auth(self.tpg)
+            GWClient.try_disable_auth(self.tpg)
             self.change_count += 1
             self.logger.info("(Client.delete) deleted NodeACL for "
                              "{}".format(self.iqn))

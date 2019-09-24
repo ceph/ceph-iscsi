@@ -235,38 +235,31 @@ class Clients(UIGroup):
     def summary(self):
         chap_enabled = False
         chap_disabled = False
-        chap_mutual_enabled = False
-        chap_mutual_disabled = False
-        status = False
         target_iqn = self.parent.name
-        auth_stat_str = "ACL" if self.config['targets'][target_iqn]['acl_enabled'] else "None"
 
-        for client in self.children:
-            if not client.auth['username']:
-                chap_disabled = True
-            else:
-                chap_enabled = True
+        target_auth = self.parent.auth
+        target_auth_enabled = target_auth['username'] and target_auth['password']
 
-            if not client.auth['mutual_username']:
-                chap_mutual_disabled = True
-            else:
-                chap_mutual_enabled = True
+        if self.config['targets'][target_iqn]['acl_enabled']:
+            auth_stat_str = "ACL_ENABLED"
+            status = True
+        else:
+            auth_stat_str = "ACL_DISABLED"
+            status = None if target_auth_enabled else False
 
-            if chap_enabled and chap_disabled or \
-                    chap_mutual_enabled and chap_mutual_disabled:
-                auth_stat_str = "MISCONFIG"
-                status = False
-                break
+        if not target_auth_enabled:
+            for client in self.children:
+                if not client.auth['username']:
+                    chap_disabled = True
+                else:
+                    chap_enabled = True
 
-        if auth_stat_str != "MISCONFIG":
-            if chap_mutual_enabled:
-                auth_stat_str = "CHAP_MUTUAL"
-                status = True
-            elif chap_enabled:
-                auth_stat_str = "CHAP"
-                status = True
+                if chap_enabled and chap_disabled:
+                    auth_stat_str = "MISCONFIG"
+                    status = False
+                    break
 
-        return "Hosts: {}: Auth: {}".format(len(self.children), auth_stat_str),\
+        return "Auth: {}, Hosts: {}".format(auth_stat_str, len(self.children)),\
             status
 
 
@@ -354,7 +347,6 @@ class Client(UINode):
 
         msg = ['LOGGED-IN'] if self.logged_in else []
 
-        # Default stance is no chap, so we need to detect it
         auth_text = "Auth: None"
         status = False
 
@@ -463,13 +455,8 @@ class Client(UINode):
         if not username:
             self.logger.error("To set authentication, specify "
                               "username=<user> password=<password> "
-                              "[mutual_username]=<user> [mutual_password]=<password>")
-            return
-
-        if username == 'nochap':
-            self.logger.error("CHAP must be disabled for all clients at the "
-                              "same time. Run the 'auth nochap' command from "
-                              "the hosts node within gwcli.")
+                              "[mutual_username]=<user> [mutual_password]=<password> "
+                              "or nochap")
             return
 
         self.set_auth(username, password, mutual_username, mutual_password)

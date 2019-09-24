@@ -56,7 +56,7 @@ class Config(object):
                                       'mutual_username': '',
                                       'mutual_password': '',
                                       'mutual_password_encryption_enabled': False},
-                   "version": 10,
+                   "version": 11,
                    "epoch": 0,
                    "created": '',
                    "updated": ''
@@ -353,6 +353,25 @@ class Config(object):
             else:
                 self.del_item("gateways_upgraded", None)
                 self.update_item("version", None, 10)
+
+        if self.config['version'] == 10:
+            for target_iqn, target in self.config['targets'].items():
+                target['auth'] = {
+                    'username': '',
+                    'password': '',
+                    'password_encryption_enabled': False,
+                    'mutual_username': '',
+                    'mutual_password': '',
+                    'mutual_password_encryption_enabled': False
+                }
+                disks = {}
+                for disk_index, disk in enumerate(sorted(target['disks'])):
+                    disks[disk] = {
+                        'lun_id': disk_index
+                    }
+                target['disks'] = disks
+                self.update_item("targets", target_iqn, target)
+            self.update_item("version", None, 11)
 
         self.commit("retain")
 
