@@ -104,19 +104,25 @@ class CephCluster(UIGroup):
                  "HEALTH_ERR": "red"}
 
         status = self.ceph_status
-        osdmap = status['osdmap']['osdmap']
+        # backward compatibility (< octopus)
+        if 'osdmap' in status['osdmap']:
+            osdmap = status['osdmap']['osdmap']
+        else:
+            osdmap = status['osdmap']
         output = "Cluster name: {}\n".format(self.cluster_name)
         output += "Ceph version: {}\n".format(self.version)
         output += "Health      : {}\n".format(self.health_status)
         if self.health_status != 'HEALTH_OK':
             output += " - {}\n".format(','.join(self.health_list))
 
-        mon_names = [mon.get('name') for mon in status["monmap"]["mons"]]
-
-        q_str = "quorum {}".format(','.join(status['quorum_names']))
-        q_out = set(mon_names) - set(status['quorum_names'])
-        if q_out:
-            q_str += ", out of quorum: {}".format(','.join(q_out))
+        # backward compatibility (< octopus)
+        if 'mons' in status['monmap']:
+            num_mons = len(status['monmap']['mons'])
+        else:
+            num_mons = status['monmap']['num_mons']
+        num_quorum = len(status['quorum_names'])
+        num_out_of_quorum = num_mons - num_quorum
+        q_str = "quorum {}, out of quorum: {}".format(num_quorum, num_out_of_quorum)
         output += "\nMONs : {:>4} ({})\n".format(self.topology.num_mons,
                                                  q_str)
         output += "OSDs : {:>4} ({} up, {} in)\n".format(self.topology.num_osds,
@@ -322,8 +328,17 @@ class CephTopology(UINode):
     def __init__(self, parent):
         UINode.__init__(self, 'topology', parent)
 
-        self.num_osds = self.parent.ceph_status['osdmap']['osdmap']['num_osds']
-        self.num_mons = len(self.parent.ceph_status['monmap']['mons'])
+        # backward compatibility (< octopus)
+        if 'osdmap' in self.parent.ceph_status['osdmap']:
+            self.num_osds = self.parent.ceph_status['osdmap']['osdmap']['num_osds']
+        else:
+            self.num_osds = self.parent.ceph_status['osdmap']['num_osds']
+
+        # backward compatibility (< octopus)
+        if 'mons' in self.parent.ceph_status['monmap']:
+            self.num_mons = len(self.parent.ceph_status['monmap']['mons'])
+        else:
+            self.num_mons = self.parent.ceph_status['monmap']['num_mons']
 
     def summary(self):
         msg = ["OSDs: {}".format(self.num_osds)]
