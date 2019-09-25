@@ -10,8 +10,8 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 from ceph_iscsi_config.client import GWClient
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (resolve_ip_addresses,
-                                     CephiSCSIError, this_host)
+from ceph_iscsi_config.utils import (resolve_ip_addresses, CephiSCSIError,
+                                     this_host)
 
 __author__ = 'Paul Cuzner'
 
@@ -383,6 +383,21 @@ def valid_snapshot_name(name):
     if not regex.search(name):
         return False
     return True
+
+
+def refresh_control_values(control_values, controls, def_settings):
+    for key, setting in def_settings.items():
+        val = controls.get(setting.name)
+        if val is not None:
+            # config values may be normalized or raw
+            val = setting.to_str(setting.normalize(val))
+
+        def_val = setting.to_str(getattr(settings.config, key))
+
+        if val is None or val == def_val:
+            control_values[setting.name] = def_val
+        else:
+            control_values[setting.name] = "{} (override)".format(val)
 
 
 class GatewayError(Exception):
