@@ -24,6 +24,7 @@ from flask import Flask, jsonify, request
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.gateway_setting import IntSetting, EnumSetting
 from ceph_iscsi_config.gateway import CephiSCSIGateway
 from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.target import GWTarget
@@ -33,7 +34,7 @@ from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
                                      ip_addresses, read_os_release, encryption_available,
-                                     format_lio_yes_no, CephiSCSIError, this_host)
+                                     CephiSCSIError, this_host)
 
 from gwcli.utils import (APIRequest, valid_gateway, valid_client,
                          valid_credentials, get_remote_gateways, valid_snapshot_name,
@@ -210,7 +211,7 @@ def parse_target_controls(request):
 
     controls = _parse_controls(request.form['controls'], GWTarget.SETTINGS)
     for k, v in controls.items():
-        if k in GWClient.SETTINGS:
+        if GWClient.SETTINGS.get(k):
             client_controls[k] = v
         else:
             tpg_controls[k] = v
@@ -2429,6 +2430,25 @@ def hostgroup(target_iqn, group_name):
                                                          api.response.json()['message'])), 400
 
 
+def fill_settings_dict(def_settings):
+    defaults = {}
+    limits = {}
+
+    for k, setting in def_settings.items():
+        # Return normalized value to match get_config()'s format
+        defaults[k] = getattr(settings.config, k)
+
+        if isinstance(setting, IntSetting):
+            limits[k] = {'min': setting.min_val, 'max': setting.max_val,
+                         'type': setting.type_str}
+        elif isinstance(setting, EnumSetting):
+            limits[k] = {'values': setting.valid_vals, 'type': setting.type_str}
+        else:
+            limits[k] = {'type': setting.type_str}
+
+    return defaults, limits
+
+
 @app.route('/api/settings', methods=['GET'])
 @requires_restricted_auth
 def get_settings():
@@ -2438,44 +2458,18 @@ def get_settings():
     Examples:
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/settings
     """
-    type_int = "int"
-    type_bool = "bool"
 
-    target_default_controls = {}
-    target_controls_limits = {}
-    settings_list = GWTarget.SETTINGS
-    for k in settings_list:
-        default_val = getattr(settings.config, k, None)
-        if k in settings.Settings.LIO_YES_NO_SETTINGS:
-            default_val = format_lio_yes_no(default_val)
-            target_controls_limits[k] = {"type": type_bool}
-        elif k in settings.Settings.LIO_INT_SETTINGS_LIMITS:
-            target_controls_limits[k] = settings.Settings.LIO_INT_SETTINGS_LIMITS[k]
-            target_controls_limits[k]["type"] = type_int
-        else:
-            target_controls_limits[k] = {"type": type_int}
-        target_default_controls[k] = default_val
+    target_default_controls, target_controls_limits = fill_settings_dict(GWTarget.SETTINGS)
 
     disk_default_controls = {}
     disk_controls_limits = {}
     required_rbd_features = {}
     unsupported_rbd_features = {}
-    for backstore, ks in LUN.SETTINGS.items():
-        disk_default_controls[backstore] = {}
-        disk_controls_limits[backstore] = {}
-        for k in ks:
-            default_val = getattr(settings.config, k, None)
-            if k in settings.Settings.LIO_YES_NO_SETTINGS:
-                default_val = format_lio_yes_no(default_val)
-                disk_controls_limits[backstore][k] = {"type": type_bool}
-            elif k in settings.Settings.LIO_INT_SETTINGS_LIMITS:
-                disk_controls_limits[backstore][k] = settings.Settings.LIO_INT_SETTINGS_LIMITS[k]
-                disk_controls_limits[backstore][k]["type"] = type_int
-            else:
-                disk_controls_limits[backstore][k] = {"type": type_int}
-            disk_default_controls[backstore][k] = default_val
-        required_rbd_features[backstore] = RBDDev.required_features(backstore)
-        unsupported_rbd_features[backstore] = RBDDev.unsupported_features(backstore)
+    for bs, bs_settings in LUN.SETTINGS.items():
+        disk_default_controls[bs], disk_controls_limits[bs] = fill_settings_dict(bs_settings)
+
+        required_rbd_features[bs] = RBDDev.required_features(bs)
+        unsupported_rbd_features[bs] = RBDDev.unsupported_features(bs)
 
     return jsonify({
         'target_default_controls': target_default_controls,
