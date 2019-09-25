@@ -12,6 +12,7 @@ from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
 
+from ceph_iscsi_config.gateway_setting import CLIENT_SETTINGS
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import encryption_available, CephiSCSIError, this_host
 from ceph_iscsi_config.gateway_object import GWObject
@@ -21,10 +22,7 @@ class GWClient(GWObject):
     """
     This class holds a representation of a client connecting to LIO
     """
-    SETTINGS = ["dataout_timeout",
-                "nopin_response_timeout",
-                "nopin_timeout",
-                "cmdsn_depth"]
+    SETTINGS = CLIENT_SETTINGS
 
     seed_metadata = {"auth": {"username": '',
                               "password": '',

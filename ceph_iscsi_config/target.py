@@ -7,6 +7,7 @@ from rtslib_fb.alua import ALUATargetPortGroup
 
 import ceph_iscsi_config.settings as settings
 
+from ceph_iscsi_config.gateway_setting import TGT_SETTINGS
 from ceph_iscsi_config.utils import (normalize_ip_address, normalize_ip_literal,
                                      ip_addresses, this_host, format_lio_yes_no,
                                      CephiSCSIError, CephiSCSIInval)
@@ -24,20 +25,10 @@ class GWTarget(GWObject):
     """
     Class representing the state of the local LIO environment
     """
-    # iscsi tpg specific settings.
-    TPG_SETTINGS = [
-        "dataout_timeout",
-        "immediate_data",
-        "initial_r2t",
-        "max_outstanding_r2t",
-        "first_burst_length",
-        "max_burst_length",
-        "max_recv_data_segment_length",
-        "max_xmit_data_segment_length"]
 
     # Settings for all transport/fabric objects. Using this allows apps like
     # gwcli to get/set all tpgs/clients under the target instead of per obj.
-    SETTINGS = TPG_SETTINGS + GWClient.SETTINGS
+    SETTINGS = TGT_SETTINGS
 
     def __init__(self, logger, iqn, gateway_ip_list, enable_portal=True):
         """
