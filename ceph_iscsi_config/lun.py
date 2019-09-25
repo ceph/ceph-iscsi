@@ -9,6 +9,7 @@ from rtslib_fb.utils import RTSLibError
 
 import ceph_iscsi_config.settings as settings
 
+from ceph_iscsi_config.gateway_setting import TCMU_SETTINGS
 from ceph_iscsi_config.backstore import USER_RBD
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      valid_size, get_pool_id, ip_addresses,
@@ -285,12 +286,7 @@ class LUN(GWObject):
     DEFAULT_BACKSTORE = USER_RBD
 
     SETTINGS = {
-        USER_RBD: [
-            "max_data_area_mb",
-            "qfull_timeout",
-            "osd_op_timeout",
-            "hw_max_sectors"
-        ]
+        USER_RBD: TCMU_SETTINGS
     }
 
     def __init__(self, logger, pool, image, size, allocating_host,

@@ -13,7 +13,8 @@ from gwcli.node import UIGroup, UINode
 from gwcli.client import Clients
 
 from gwcli.utils import (console_message, response_message, GatewayAPIError,
-                         APIRequest, valid_snapshot_name, get_config)
+                         APIRequest, valid_snapshot_name, get_config,
+                         refresh_control_values)
 
 from ceph_iscsi_config.utils import valid_size, convert_2_bytes, human_size, this_host
 from ceph_iscsi_config.lun import LUN
@@ -688,13 +689,9 @@ class Disk(UINode):
         for k, v in image_config.items():
             disk_map[self.image_id][k] = v
             self.__setattr__(k, v)
-        for k in LUN.SETTINGS[image_config['backstore']]:
-            val = self.controls.get(k)
-            default_val = getattr(settings.config, k, None)
-            if val is None or str(val) == str(default_val):
-                self.control_values[k] = default_val
-            else:
-                self.control_values[k] = "{} (override)".format(val)
+
+        refresh_control_values(self.control_values, self.controls,
+                               LUN.SETTINGS[image_config['backstore']])
 
     def summary(self):
         if not self.exists:

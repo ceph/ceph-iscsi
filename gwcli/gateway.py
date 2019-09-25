@@ -6,10 +6,11 @@ from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks, TargetDisks
 from gwcli.client import Clients
 from gwcli.utils import (response_message, GatewayAPIError,
-                         GatewayError, APIRequest, console_message, get_config)
+                         GatewayError, APIRequest, console_message, get_config,
+                         refresh_control_values)
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no, this_host)
+from ceph_iscsi_config.utils import (normalize_ip_address, this_host)
 from ceph_iscsi_config.target import GWTarget
 from ceph_iscsi_config.client import CHAP
 
@@ -445,7 +446,9 @@ class Target(UINode):
 
     def _set_controls(self, controls):
         self._controls = controls.copy()
-        self._refresh_control_values()
+        self.control_values = {}
+        refresh_control_values(self.control_values, self.controls,
+                               GWTarget.SETTINGS)
 
     controls = property(_get_controls, _set_controls)
 
@@ -490,10 +493,9 @@ class Target(UINode):
         reset cmdsn_depth
           - reconfigure attribute=cmdsn_depth value=
         """
-        settings_list = GWTarget.SETTINGS
-        if attribute not in settings_list:
+        if not GWTarget.SETTINGS.get(attribute):
             self.logger.error("supported attributes: {}".format(",".join(
-                sorted(settings_list))))
+                sorted(GWTarget.SETTINGS.keys()))))
             return
 
         # Issue the api request for the reconfigure
@@ -522,22 +524,6 @@ class Target(UINode):
         self.controls = config['targets'][self.target_iqn]['controls']
 
         self.logger.info('ok')
-
-    def _refresh_control_values(self):
-        self.control_values = {}
-        settings_list = GWTarget.SETTINGS
-        for k in settings_list:
-            val = self._controls.get(k)
-            default_val = getattr(settings.config, k, None)
-            if k in settings.Settings.LIO_YES_NO_SETTINGS:
-                if val is not None:
-                    val = format_lio_yes_no(val)
-                default_val = format_lio_yes_no(default_val)
-
-            if val is None or str(val) == str(default_val):
-                self.control_values[k] = default_val
-            else:
-                self.control_values[k] = "{} (override)".format(val)
 
     def ui_command_auth(self, username=None, password=None, mutual_username=None,
                         mutual_password=None):
