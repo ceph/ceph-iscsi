@@ -50,8 +50,10 @@ Requires:       python-flask >= 0.10.1
 Requires:       python-configshell >= 1.1.fb25
 %if 0%{?rhel} == 7
 Requires:       pyOpenSSL
+Requires:       python-requests
 %else
 Requires:       python-pyOpenSSL
+Requires:       python2-requests
 %endif
 %else
 BuildRequires:  python3-devel
@@ -62,6 +64,7 @@ Requires:       python3-netifaces >= 0.10.4
 Requires:       python3-rtslib >= 2.1.fb68
 Requires:       python3-cryptography
 Requires:       python3-pyOpenSSL
+Requires:       python3-requests
 %if 0%{?suse_version}
 BuildRequires:  python-rpm-macros
 BuildRequires:  fdupes
