@@ -160,8 +160,25 @@ class Config(object):
 
         return cfg_dict
 
+    def needs_hostname_update(self):
+        if self.config['version'] == 9:
+            # No gateway has been updated yet.
+            return True
+
+        updated = self.config.get('gateways_upgraded')
+        if updated is None:
+            # Everything has been updated or we are < 9
+            return False
+
+        if socket.getfqdn() in updated:
+            return False
+
+        return True
+
     def _upgrade_config(self):
-        if self.config['version'] >= Config.seed_config['version']:
+        update_hostname = self.needs_hostname_update()
+
+        if self.config['version'] >= Config.seed_config['version'] and not update_hostname:
             return
 
         if self.config['version'] <= 2:
@@ -316,7 +333,7 @@ class Config(object):
                 self.update_item("targets", target_iqn, target)
             self.update_item("version", None, 9)
 
-        if self.config['version'] == 9 or self.config['version'] == 9.5:
+        if self.config['version'] == 9 or update_hostname:
             # temporary field to store the gateways already upgraded from v9 to v10
             gateways_upgraded = self.config.get('gateways_upgraded')
             if not gateways_upgraded:
@@ -346,14 +363,25 @@ class Config(object):
                     self.update_item("disks", disk_id, disk)
                 gateways_upgraded.append(this_fqdn)
                 self.update_item("gateways_upgraded", None, gateways_upgraded)
+
             if any(gateway_name not in gateways_upgraded
                    for gateway_name in self.config['gateways'].keys()):
-                # upgrade from v9 to v10 is still in progress, some gateways are not upgraded yet
-                self.update_item("version", None, 9.5)
+                self.logger.debug("gateways upgraded to 10: {}".
+                                  format(gateways_upgraded))
             else:
                 self.del_item("gateways_upgraded", None)
+
+            if self.config['version'] == 9:
+                # Upgrade from v9 to v10 is still in progress. Update the
+                # version now, so we can update the other config fields and
+                # setup the target to execute IO while the other gws upgrade.
                 self.update_item("version", None, 10)
 
+        # Currently, the versions below do not rely on fields being updated
+        # in the 9->10 upgrade which needs to execute on every node before
+        # completing. If this changes, we will need to fix how we handle
+        # rolling upgrades, so new versions have access to the updated fields
+        # on all gws before completing the upgrade.
         if self.config['version'] == 10:
             for target_iqn, target in self.config['targets'].items():
                 target['auth'] = {
