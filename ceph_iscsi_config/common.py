@@ -30,8 +30,18 @@ class CephCluster(object):
 
         self.error = False
         self.error_msg = ''
-        self.cluster = rados.Rados(conffile=settings.config.cephconf,
-                                   name=settings.config.cluster_client_name)
+        self.cluster = None
+
+        conf = settings.config.cephconf
+
+        try:
+            self.cluster = rados.Rados(conffile=conf,
+                                       name=settings.config.cluster_client_name)
+        except rados.Error as err:
+            self.error = True
+            self.error_msg = "Invaid cluster_client_name or setting in {} - {}".format(conf, err)
+            return
+
         try:
             self.cluster.connect()
         except rados.Error as err:
@@ -39,7 +49,8 @@ class CephCluster(object):
             self.error_msg = "Unable to connect to the cluster (keyring missing?) - {}".format(err)
 
     def __del__(self):
-        self.cluster.shutdown()
+        if self.cluster:
+            self.cluster.shutdown()
 
     def shutdown(self):
         self.cluster.shutdown()
