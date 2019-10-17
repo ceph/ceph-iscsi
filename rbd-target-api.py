@@ -2498,7 +2498,8 @@ def get_settings():
         'default_backstore': LUN.DEFAULT_BACKSTORE,
         'config': {
             'minimum_gateways': settings.config.minimum_gateways
-        }
+        },
+        'api_version': 1
     }), 200
 
 
