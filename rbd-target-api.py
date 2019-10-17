@@ -2702,10 +2702,10 @@ def pre_reqs_errors():
     """
 
     dist_translations = {
-        "centos": "redhat",
+        "centos": "rhel",
         "opensuse-leap": "suse"}
     valid_dists = {
-        "redhat": 7.4,
+        "rhel": 7.4,
         "suse": 15.1,
         "debian": 10}
 
@@ -2717,8 +2717,9 @@ def pre_reqs_errors():
 
     dist = dist.lower()
     dist = dist_translations.get(dist, dist)
+
     if dist in valid_dists:
-        if dist == 'redhat':
+        if dist == 'rhel':
             import platform
             _, rel, _ = platform.linux_distribution(full_distribution_name=0)
         # CentOS formats a release similar 7.4.1708
