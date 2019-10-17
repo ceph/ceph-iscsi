@@ -153,7 +153,7 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_attach(self, pool=None, image=None, backstore=None):
+    def ui_command_attach(self, pool=None, image=None, backstore=None, wwn=None):
         """
         Assign a previously created RBD image to the gateway(s)
 
@@ -187,9 +187,10 @@ class Disks(UIGroup):
 
         self.logger.debug("CMD: /disks/ attach pool={} "
                           "image={}".format(pool, image))
-        self.create_disk(pool=pool, image=image, create_image=False, backstore=backstore)
+        self.create_disk(pool=pool, image=image, create_image=False, backstore=backstore, wwn=wwn)
 
-    def ui_command_create(self, pool=None, image=None, size=None, backstore=None, count=1):
+    def ui_command_create(self, pool=None, image=None, size=None, backstore=None, wwn=None,
+                          count=1):
         """
         Create a RBD image and assign to the gateway(s).
 
@@ -208,6 +209,7 @@ class Disks(UIGroup):
         size  : integer, suffixed by the allocation unit - either m/M, g/G or
                 t/T representing the MB/GB/TB [1]
         backstore  : lio backstore
+        wwn   : unit serial number
         count : integer (default is 1)[2]. If the request provides a count=<n>
                 parameter the image name will be used as a prefix, and the count
                 used as a suffix to create multiple images from the same request.
@@ -258,7 +260,8 @@ class Disks(UIGroup):
         self.logger.debug("CMD: /disks/ create pool={} "
                           "image={} size={} "
                           "count={} ".format(pool, image, size, count))
-        self.create_disk(pool=pool, image=image, size=size, count=count, backstore=backstore)
+        self.create_disk(pool=pool, image=image, size=size, count=count, backstore=backstore,
+                         wwn=wwn)
 
     def _valid_pool(self, pool=None):
         """
@@ -283,7 +286,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    parent=None, create_image=True, backstore=None):
+                    parent=None, create_image=True, backstore=None, wwn=None):
 
         rc = 0
 
@@ -307,7 +310,7 @@ class Disks(UIGroup):
         api_vars = {'pool': pool, 'owner': local_gw,
                     'count': count, 'mode': 'create',
                     'create_image': 'true' if create_image else 'false',
-                    'backstore': backstore}
+                    'backstore': backstore, 'wwn': wwn}
         if size:
             api_vars['size'] = size.upper()
 

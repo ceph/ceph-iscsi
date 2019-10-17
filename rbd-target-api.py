@@ -978,6 +978,7 @@ def disk(pool, image):
     :param preserve_image: (bool) do NOT delete RBD image
     :param create_image: (bool) create RBD image if not exists
     :param backstore: (str) lio backstore
+    :param wwn: (str) unit serial number
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
@@ -1038,9 +1039,11 @@ def disk(pool, image):
                                        "{}".format(err)), 500
             logger.debug("{} controls {}".format(mode, controls))
 
+        wwn = request.form.get('wwn')
         disk_usable = LUN.valid_disk(config, logger, pool=pool,
                                      image=image, size=size, mode=mode,
-                                     count=count, controls=controls, backstore=backstore)
+                                     count=count, controls=controls,
+                                     backstore=backstore, wwn=wwn)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
@@ -1077,7 +1080,8 @@ def disk(pool, image):
                         'size': size,
                         'owner': local_gw,
                         'mode': mode,
-                        'backstore': backstore}
+                        'backstore': backstore,
+                        'wwn': wwn}
             if 'controls' in request.form:
                 api_vars['controls'] = request.form['controls']
 
@@ -1189,7 +1193,7 @@ def _disk(pool, image):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            lun.allocate(False)
+            lun.allocate(False, request.form.get('wwn'))
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
                 return jsonify(message="LUN allocation failure"), 500

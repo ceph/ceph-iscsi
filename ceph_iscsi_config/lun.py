@@ -574,7 +574,7 @@ class LUN(GWObject):
             if client_err:
                 raise CephiSCSIError(client_err)
 
-    def allocate(self, keep_dev_in_lio=True):
+    def allocate(self, keep_dev_in_lio=True, in_wwn=None):
         """
         Create image and add to LIO and config.
 
@@ -685,10 +685,10 @@ class LUN(GWObject):
                 except KeyError:
                     wwn = ''
 
-                if wwn == '':
+                if wwn == '' or in_wwn is not None:
                     # disk hasn't been defined to LIO yet, it' not been defined
                     # to the config yet and this is the allocating host
-                    so = self.add_dev_to_lio()
+                    so = self.add_dev_to_lio(in_wwn)
                     if self.error:
                         return None
 
@@ -1013,9 +1013,16 @@ class LUN(GWObject):
             if not disk_regex.search(kwargs['image']):
                 return "Invalid image name (use alphanumeric, '_', '.', or '-' characters)"
 
+            if kwargs['wwn'] is not None:
+                for disk_id, disk_config in config['disks'].items():
+                    if disk_config['wwn'] == kwargs['wwn']:
+                        return "WWN {} is already in use by {}".format(kwargs['wwn'], disk_id)
+
             if kwargs['count'].isdigit():
                 if not 1 <= int(kwargs['count']) <= 10:
                     return "invalid count specified, must be an integer (1-10)"
+                if int(kwargs['count']) > 1 and kwargs['wwn'] is not None:
+                    return "WWN cannot be specified when count > 1"
             else:
                 return "invalid count specified, must be an integer (1-10)"
 
