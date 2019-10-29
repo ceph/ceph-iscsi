@@ -789,8 +789,18 @@ def target_disk(target_iqn=None):
         owner = LUN.get_owner(config.config['gateways'], target_config['portals'])
         logger.debug("{} owner will be {}".format(disk, owner))
 
+        lun_id = request.form.get('lun_id')
+        if lun_id is not None:
+            try:
+                lun_id_int = int(lun_id)
+            except ValueError:
+                return jsonify(message="Lun id must be a number"), 400
+            for target_disk in target_config['disks'].values():
+                if lun_id_int == target_disk['lun_id']:
+                    return jsonify(message="Lun id {} already in use".format(lun_id)), 400
         api_vars = {
             'disk': disk,
+            'lun_id': lun_id,
             'owner': owner,
             'allocating_host': local_gw
         }
@@ -883,9 +893,11 @@ def _target_disk(target_iqn=None):
             logger.error("Error initializing the LUN : "
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
-
+        lun_id = request.form.get('lun_id')
+        if lun_id is not None:
+            lun_id = int(lun_id)
         try:
-            lun.map_lun(gateway, owner, disk)
+            lun.map_lun(gateway, owner, disk, lun_id)
         except CephiSCSIError as err:
             status_code = 400 if str(err) else 500
             logger.error("LUN add failed : {}".format(err))
@@ -966,6 +978,7 @@ def disk(pool, image):
     :param preserve_image: (bool) do NOT delete RBD image
     :param create_image: (bool) create RBD image if not exists
     :param backstore: (str) lio backstore
+    :param wwn: (str) unit serial number
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
@@ -1026,9 +1039,11 @@ def disk(pool, image):
                                        "{}".format(err)), 500
             logger.debug("{} controls {}".format(mode, controls))
 
+        wwn = request.form.get('wwn')
         disk_usable = LUN.valid_disk(config, logger, pool=pool,
                                      image=image, size=size, mode=mode,
-                                     count=count, controls=controls, backstore=backstore)
+                                     count=count, controls=controls,
+                                     backstore=backstore, wwn=wwn)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
@@ -1065,7 +1080,8 @@ def disk(pool, image):
                         'size': size,
                         'owner': local_gw,
                         'mode': mode,
-                        'backstore': backstore}
+                        'backstore': backstore,
+                        'wwn': wwn}
             if 'controls' in request.form:
                 api_vars['controls'] = request.form['controls']
 
@@ -1177,7 +1193,7 @@ def _disk(pool, image):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            lun.allocate(False)
+            lun.allocate(False, request.form.get('wwn'))
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
                 return jsonify(message="LUN allocation failure"), 500
@@ -2482,7 +2498,8 @@ def get_settings():
         'default_backstore': LUN.DEFAULT_BACKSTORE,
         'config': {
             'minimum_gateways': settings.config.minimum_gateways
-        }
+        },
+        'api_version': 1
     }), 200
 
 

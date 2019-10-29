@@ -52,22 +52,6 @@ class GWClient(GWObject):
         self.target_iqn = target_iqn
         self.lun_lookup = {}        # only used for hostgroup based definitions
         self.requested_images = []
-
-        # image_list is normally a list of strings (pool/image_name) but
-        # group processing forces a specific lun id allocation to masked disks
-        # in this scenario the image list is a tuple
-        if image_list:
-
-            if isinstance(image_list[0], tuple):
-                # tuple format ('disk_name', {'lun_id': 0})...
-                for disk_item in image_list:
-                    disk_name = disk_item[0]
-                    lun_id = disk_item[1].get('lun_id')
-                    self.requested_images.append(disk_name)
-                    self.lun_lookup[disk_name] = lun_id
-            else:
-                self.requested_images = image_list
-
         self.username = username
         self.password = password
         self.mutual_username = mutual_username
@@ -113,6 +97,34 @@ class GWClient(GWObject):
         except CephiSCSIError as err:
             self.error = True
             self.error_msg = err
+
+        # image_list is normally a list of strings (pool/image_name) but
+        # group processing forces a specific lun id allocation to masked disks
+        # in this scenario the image list is a tuple
+        if image_list:
+
+            if isinstance(image_list[0], tuple):
+                # tuple format ('disk_name', {'lun_id': 0})...
+                for disk_item in image_list:
+                    disk_name = disk_item[0]
+                    lun_id = disk_item[1].get('lun_id')
+                    self.requested_images.append(disk_name)
+                    self.lun_lookup[disk_name] = lun_id
+            else:
+                target_config = self.config.config['targets'][self.target_iqn]
+                used_lun_ids = self._get_lun_ids(target_config['clients'])
+                for disk_name in image_list:
+                    disk_lun_id = target_config['disks'][disk_name]['lun_id']
+                    if disk_lun_id not in used_lun_ids:
+                        self.lun_lookup[disk_name] = disk_lun_id
+                self.requested_images = image_list
+
+    def _get_lun_ids(self, clients_config):
+        lun_ids = []
+        for client_config in clients_config.values():
+            for lun_config in client_config['luns'].values():
+                lun_ids.append(lun_config['lun_id'])
+        return lun_ids
 
     def setup_luns(self, disks_config):
         """
@@ -422,12 +434,12 @@ class GWClient(GWObject):
         tpg_lun = lun['tpg_lun']
 
         # lunid allocated from the current config object setting, or if this is
-        # a new device from the next free lun id 'position'
+        # a new device from the target disk lun id or next free lun id 'position'
+        # if target disk lun id is already in use
         if image in self.metadata['luns'].keys():
             lun_id = self.metadata['luns'][image]['lun_id']
         else:
             if image in self.lun_lookup:
-                # this indicates a lun map for a group managed client
                 lun_id = self.lun_lookup[image]
             else:
                 lun_id = self.lun_id_list[0]  # pick lowest available lun ID
