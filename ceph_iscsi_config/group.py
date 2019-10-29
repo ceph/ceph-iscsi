@@ -172,7 +172,7 @@ class Group(object):
 
         members = ListComparison(this_group.get('members'),
                                  self.group_members)
-        disks = ListComparison(this_group.get('disks').keys(),
+        disks = ListComparison(list(this_group.get('disks').keys()),
                                self.disks)
 
         if set(self.disks) != set(this_group.get('disks')) or \
