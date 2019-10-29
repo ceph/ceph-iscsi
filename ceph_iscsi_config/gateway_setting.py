@@ -181,7 +181,7 @@ SYS_SETTINGS = {
     "api_password": StrSetting("api_password", "admin"),
     "ceph_user": StrSetting("ceph_user", "admin"),
     "debug": BoolSetting("debug", False),
-    "minimum_gateways": IntSetting("minimum_gateways", 2, 9999, 2),
+    "minimum_gateways": IntSetting("minimum_gateways", 1, 9999, 2),
     "ceph_config_dir": StrSetting("ceph_config_dir", '/etc/ceph'),
     "priv_key": StrSetting("priv_key", 'iscsi-gateway.key'),
     "pub_key": StrSetting("pub_key", 'iscsi-gateway-pub.key'),
