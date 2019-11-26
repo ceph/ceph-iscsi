@@ -298,8 +298,11 @@ class RadosPool(UINode):
                     potential_demand += image_child.size
 
         self.commit = potential_demand
-        self.overcommit_PCT = int(
-            (potential_demand / float(self.max_bytes)) * 100)
+        if self.max_bytes == 0:
+            self.overcommit_PCT = 0
+        else:
+            self.overcommit_PCT = int(
+                (potential_demand / float(self.max_bytes)) * 100)
 
     def update(self, pool_metadata):
 
