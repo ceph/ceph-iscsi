@@ -580,6 +580,7 @@ def gateway(target_iqn=None, gateway_name=None):
            default: FALSE
     :param skipchecks: (bool) whether to skip OS/software versions checks
            default: FALSE
+    :param force: (bool) if True will force removal of gateway.
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d ip_address=192.168.122.69
@@ -657,10 +658,21 @@ def gateway(target_iqn=None, gateway_name=None):
     if first_gateway:
         gateways = ['localhost']
     elif request.method == 'DELETE':
-        # Update the deleted gw first, so the other gws see the updated
-        # portal list
         gateways.remove(gateway_name)
-        gateways.insert(0, gateway_name)
+
+        if request.form.get('force', 'false').lower() == 'true':
+            # The gw we want to delete is down and the user has decided to
+            # force the deletion, so we do the config modification locally
+            # then only tell the other gws to update their state.
+            try:
+                ceph_gw = CephiSCSIGateway(logger, config, gateway_name)
+                ceph_gw.remove_from_config(target_iqn)
+            except CephiSCSIError as err:
+                return jsonify(message="Could not update config: {}.".format(err)), 400
+        else:
+            # Update the deleted gw first, so the other gws see the updated
+            # portal list
+            gateways.insert(0, gateway_name)
     else:
         # Update the new gw first, so other gws see the updated gateways list.
         gateways.insert(0, gateway_name)

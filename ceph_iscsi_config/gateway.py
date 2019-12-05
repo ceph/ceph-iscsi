@@ -18,10 +18,13 @@ __author__ = 'pcuzner@redhat.com'
 
 class CephiSCSIGateway(object):
 
-    def __init__(self, logger, config):
+    def __init__(self, logger, config, name=None):
         self.logger = logger
         self.config = config
-        self.hostname = this_host()
+        if name:
+            self.hostname = name
+        else:
+            self.hostname = this_host()
 
     def ceph_rm_blacklist(self, blacklisted_ip):
         """
