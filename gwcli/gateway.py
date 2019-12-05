@@ -756,7 +756,7 @@ class GatewayGroup(UIGroup):
 
         config = self.parent.parent.parent._get_config()
         if not config:
-            self.logger.error("Could not refresh disaply. Restart gwcli.")
+            self.logger.error("Could not refresh display. Restart gwcli.")
         elif not config['targets'][target_iqn]['portals']:
             # no more gws so everything but the target is dropped.
             disks_object = self.parent.get_child("disks")
