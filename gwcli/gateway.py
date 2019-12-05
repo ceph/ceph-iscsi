@@ -749,8 +749,10 @@ class GatewayGroup(UIGroup):
         self.logger.debug("{}".format(msg))
         self.logger.debug("Removing gw from UI")
 
+        self.thread_lock.acquire()
         gw_object = self.get_child(gateway_name)
         self.remove_child(gw_object)
+        self.thread_lock.release()
 
         config = self.parent.parent.parent._get_config()
         if not config:
