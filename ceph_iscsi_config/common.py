@@ -197,52 +197,58 @@ class Config(object):
             self.update_item("version", element_name=None, element_value=3)
 
         if self.config['version'] == 3:
-            iqn = self.config['gateways']['iqn']
+            iqn = self.config['gateways'].get('iqn', None)
             gateways = {}
             portals = {}
-            for host, gateway_v3 in self.config['gateways'].items():
-                if isinstance(gateway_v3, dict):
-                    portal = gateway_v3
-                    portal.pop('iqn')
-                    active_luns = portal.pop('active_luns')
-                    updated = portal.pop('updated', None)
-                    created = portal.pop('created', None)
-                    gateway = {
-                        'active_luns': active_luns
-                    }
-                    if created:
-                        gateway['created'] = created
-                    if updated:
-                        gateway['updated'] = updated
-                    gateways[host] = gateway
-                    portals[host] = portal
-            for _, client in self.config['clients'].items():
-                client.pop('created', None)
-                client.pop('updated', None)
-                client['auth']['chap_mutual'] = ''
-            for _, group in self.config['groups'].items():
-                group.pop('created', None)
-                group.pop('updated', None)
-            target = {
-                'disks': list(self.config['disks'].keys()),
-                'clients': self.config['clients'],
-                'portals': portals,
-                'groups': self.config['groups'],
-                'controls': self.config.get('controls', {}),
-                'ip_list': self.config['gateways']['ip_list']
-            }
+
+            self.add_item("targets", None, {})
             self.add_item('discovery_auth', None, {
                 'chap': '',
                 'chap_mutual': ''
             })
-            self.add_item("targets", None, {})
-            self.add_item("targets", iqn, target)
-            self.update_item("targets", iqn, target)
+
+            if iqn:
+                for host, gateway_v3 in self.config['gateways'].items():
+                    if isinstance(gateway_v3, dict):
+                        portal = gateway_v3
+                        portal.pop('iqn')
+                        active_luns = portal.pop('active_luns')
+                        updated = portal.pop('updated', None)
+                        created = portal.pop('created', None)
+                        gateway = {
+                            'active_luns': active_luns
+                        }
+                        if created:
+                            gateway['created'] = created
+                        if updated:
+                            gateway['updated'] = updated
+                        gateways[host] = gateway
+                        portals[host] = portal
+                for _, client in self.config['clients'].items():
+                    client.pop('created', None)
+                    client.pop('updated', None)
+                    client['auth']['chap_mutual'] = ''
+                for _, group in self.config['groups'].items():
+                    group.pop('created', None)
+                    group.pop('updated', None)
+                target = {
+                    'disks': list(self.config['disks'].keys()),
+                    'clients': self.config['clients'],
+                    'portals': portals,
+                    'groups': self.config['groups'],
+                    'controls': self.config.get('controls', {}),
+                    'ip_list': self.config['gateways']['ip_list']
+                }
+                self.add_item("targets", iqn, target)
+                self.update_item("targets", iqn, target)
+
+            self.update_item("gateways", None, gateways)
+
             if 'controls' in self.config:
                 self.del_item('controls', None)
             self.del_item('clients', None)
             self.del_item('groups', None)
-            self.update_item("gateways", None, gateways)
+
             self.update_item("version", None, 4)
 
         if self.config['version'] == 4:
