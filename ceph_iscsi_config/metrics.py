@@ -28,7 +28,7 @@ class TPGMapper(threading.Thread):
     def __init__(self, tpg):
         self.tpg = tpg
         self.tpg_id = tpg.tag
-        self.portal_ip = tpg.network_portals.next().ip_address
+        self.portal_ip = next(tpg.network_portals).ip_address
         self.owned_luns = dict()
         threading.Thread.__init__(self)
 
@@ -98,7 +98,7 @@ class GatewayStats(object):
     def _get_tpg(self):
         stat = Metric("target portal groups defined within gateway group",
                       "gauge")
-        labels = {"gw_iqn": self._root.targets.next().wwn}
+        labels = {"gw_iqn": next(self._root.targets).wwn}
         v = len([tpg for tpg in self._root.tpgs])
         stat.add(labels, v)
 
