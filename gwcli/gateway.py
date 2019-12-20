@@ -700,6 +700,8 @@ class GatewayGroup(UIGroup):
 
         self.logger.info("Deleting gateway, {}".format(gateway_name))
 
+        confirm = self.ui_eval_param(confirm, 'bool', False)
+
         config = self.parent.parent.parent._get_config()
         if not config:
             self.logger.error("Unable to refresh local config over API - sync "
@@ -715,7 +717,6 @@ class GatewayGroup(UIGroup):
             return
 
         if gw_cnt == 1:
-            confirm = self.ui_eval_param(confirm, 'bool', False)
             if not confirm:
                 self.logger.error("Deleting the last gateway will remove all "
                                   "objects on this target. Use confirm=true")
@@ -724,24 +725,38 @@ class GatewayGroup(UIGroup):
         gw_api = '{}://{}:{}/api'.format(self.http_mode, "localhost",
                                          settings.config.api_port)
         gw_rqst = gw_api + '/gateway/{}/{}'.format(target_iqn, gateway_name)
+        if confirm:
+            gw_vars = {"force": 'true'}
+        else:
+            gw_vars = {"force": 'false'}
 
-        api = APIRequest(gw_rqst)
+        api = APIRequest(gw_rqst, data=gw_vars)
         api.delete()
 
         msg = response_message(api.response, self.logger)
         if api.response.status_code != 200:
-            self.logger.error("Failed : {}".format(msg))
+            if "unavailable:" + gateway_name in msg:
+                self.logger.error("Could not contact {}. If the gateway is "
+                                  "permanently down. Use confirm=true to "
+                                  "force removal. WARNING: Forcing removal of "
+                                  "a gateway that can still be reached by an "
+                                  "initiator may result in data corruption.".
+                                  format(gateway_name))
+            else:
+                self.logger.error("Failed : {}".format(msg))
             return
 
         self.logger.debug("{}".format(msg))
         self.logger.debug("Removing gw from UI")
 
+        self.thread_lock.acquire()
         gw_object = self.get_child(gateway_name)
         self.remove_child(gw_object)
+        self.thread_lock.release()
 
         config = self.parent.parent.parent._get_config()
         if not config:
-            self.logger.error("Could not refresh disaply. Restart gwcli.")
+            self.logger.error("Could not refresh display. Restart gwcli.")
         elif not config['targets'][target_iqn]['portals']:
             # no more gws so everything but the target is dropped.
             disks_object = self.parent.get_child("disks")
