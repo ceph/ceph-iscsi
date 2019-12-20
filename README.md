@@ -22,6 +22,13 @@ gateway. The Python ```ceph_iscsi_config``` modules are used by:
 * **API/CLI** configuration tools
 
 ## Installation
+### Repository
+A YUM repository is available with the lastest releases.  The repository is available at `https://download.ceph.com/ceph-iscsi/{version}/rpm/{distribution}/noarch/`.  For example, https://download.ceph.com/ceph-iscsi/latest/rpm/el7/noarch/
+
+Alternatively, you may download the YUM repo description at https://download.ceph.com/ceph-iscsi/latest/rpm/el7/ceph-iscsi.repo
+
+Packages are signed with the following key: https://download.ceph.com/keys/release.asc
+
 ### Via RPM
 Simply install the provided rpm with:
 ```rpm -ivh ceph-iscsi-<ver>.el7.noarch.rpm```
