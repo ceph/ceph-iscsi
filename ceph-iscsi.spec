@@ -20,7 +20,7 @@
 
 
 Name:           ceph-iscsi
-Version:        3.3
+Version:        3.4
 Release:        1%{?dist}
 Group:          System/Filesystems
 Summary:        Python modules for Ceph iSCSI gateway configuration management
