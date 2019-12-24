@@ -2736,7 +2736,8 @@ def pre_reqs_errors():
     valid_dists = {
         "rhel": 7.4,
         "suse": 15.1,
-        "debian": 10}
+        "debian": 10,
+        "ubuntu": 19.04}
 
     errors_found = []
 
