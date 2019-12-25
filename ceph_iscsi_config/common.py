@@ -75,7 +75,7 @@ class Config(object):
 
     lock_time_limit = 30
 
-    def __init__(self, logger, cfg_name='gateway.conf', pool=None):
+    def __init__(self, logger, cfg_name='iscsi-gateway.cfg', pool=None):
         self.logger = logger
         self.config_name = cfg_name
         if pool is None:
