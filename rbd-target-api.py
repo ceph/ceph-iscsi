@@ -230,7 +230,7 @@ def get_targets():
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/targets
     """
 
-    return jsonify({'targets': config.config['targets'].keys()}), 200
+    return jsonify({'targets': list(config.config['targets'].keys())}), 200
 
 
 @app.route('/api/target/<target_iqn>', methods=['PUT', 'DELETE'])
@@ -962,7 +962,7 @@ def get_disks():
         disk_names = config.config['disks']
         response = {"disks": disk_names}
     else:
-        disk_names = config.config['disks'].keys()
+        disk_names = list(config.config['disks'].keys())
         response = {"disks": disk_names}
 
     return jsonify(response), 200
@@ -1827,7 +1827,7 @@ def get_clients(target_iqn=None):
         return jsonify(message=err_str), 500
 
     target_config = config.config['targets'][target_iqn]
-    client_list = target_config['clients'].keys()
+    client_list = list(target_config['clients'].keys())
     response = {"clients": client_list}
 
     return jsonify(response), 200
@@ -2331,7 +2331,7 @@ def hostgroups(target_iqn=None):
 
     target_config = config.config['targets'][target_iqn]
     if request.method == 'GET':
-        return jsonify({"groups": target_config['groups'].keys()}), 200
+        return jsonify({"groups": list(target_config['groups'].keys())}), 200
 
 
 @app.route('/api/hostgroup/<target_iqn>/<group_name>', methods=['GET', 'PUT', 'DELETE'])
@@ -2736,7 +2736,8 @@ def pre_reqs_errors():
     valid_dists = {
         "rhel": 7.4,
         "suse": 15.1,
-        "debian": 10}
+        "debian": 10,
+        "ubuntu": 19.04}
 
     errors_found = []
 
