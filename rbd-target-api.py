@@ -660,7 +660,7 @@ def gateway(target_iqn=None, gateway_name=None):
     elif request.method == 'DELETE':
         gateways.remove(gateway_name)
 
-        if request.form.get('force', 'false').lower() == 'true':
+        if gateway_name != this_host() and request.form.get('force', 'false').lower() == 'true':
             # The gw we want to delete is down and the user has decided to
             # force the deletion, so we do the config modification locally
             # then only tell the other gws to update their state.
