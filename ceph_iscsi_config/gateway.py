@@ -98,9 +98,14 @@ class CephiSCSIGateway(object):
                     dev_info = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
                     ipv4_list += [dev['addr'] for dev in dev_info]
 
-                # process the entries (first entry just says "Listed X entries,
-                # last entry is just null)
-                for blacklist_entry in blacklist_output[1:]:
+                # process the entries. last entry is just null)
+                for blacklist_entry in blacklist_output:
+
+                    # blacklist_output is not gauranteed to be in order returned
+                    # from the ceph command. 'listed N entries' line could be
+                    # at any index.
+                    if "listed" in blacklist_entry:
+                        continue
 
                     # valid entries to process look like -
                     # 192.168.122.101:0/3258528596 2016-09-28 18:23:15.307227
