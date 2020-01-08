@@ -4,11 +4,12 @@ import logging
 import logging.handlers
 from logging.handlers import RotatingFileHandler
 
-from flask import Flask, Response
+from flask import Flask, Response, jsonify
 
 from ceph_iscsi_config.metrics import GatewayStats
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.utils import CephiSCSIInval
 
 # Create a flask instance
 app = Flask(__name__)
@@ -32,7 +33,10 @@ def prom_metrics():
     """ Collect the stats and send back to the caller"""
 
     stats = GatewayStats()
-    stats.collect()
+    try:
+        stats.collect()
+    except CephiSCSIInval as err:
+        return jsonify(message="Could not get metrics: {}".format(err)), 404
 
     return Response(stats.formatted(),
                     content_type="text/plain")

@@ -37,23 +37,25 @@ class CephiSCSIGateway(object):
                          "{}".format(blacklisted_ip))
 
         conf = settings.config
-        result = subprocess.check_output("ceph -n {client_name} --conf {cephconf} "
-                                         "osd blacklist rm {blacklisted_ip}".
-                                         format(blacklisted_ip=blacklisted_ip,
-                                                client_name=conf.cluster_client_name,
-                                                cephconf=conf.cephconf),
-                                         stderr=subprocess.STDOUT, shell=True)
-        if ("un-blacklisting" in result) or ("isn't blacklisted" in result):
-            self.logger.info("Successfully removed blacklist entry")
-            return True
-        else:
-            self.logger.critical("blacklist removal failed. Run"
+        try:
+            subprocess.check_output("ceph -n {client_name} --conf {cephconf} "
+                                    "osd blacklist rm {blacklisted_ip}".
+                                    format(blacklisted_ip=blacklisted_ip,
+                                           client_name=conf.cluster_client_name,
+                                           cephconf=conf.cephconf),
+                                    stderr=subprocess.STDOUT, shell=True)
+        except subprocess.CalledProcessError as err:
+            self.logger.critical("blacklist removal failed: {}. Run"
                                  " 'ceph -n {client_name} --conf {cephconf} "
                                  "osd blacklist rm {blacklisted_ip}'".
-                                 format(blacklisted_ip=blacklisted_ip,
+                                 format(err.output.decode('utf-8').strip(),
+                                        blacklisted_ip=blacklisted_ip,
                                         client_name=conf.cluster_client_name,
                                         cephconf=conf.cephconf))
             return False
+
+        self.logger.info("Successfully removed blacklist entry")
+        return True
 
     def osd_blacklist_cleanup(self):
         """
