@@ -2737,7 +2737,7 @@ def pre_reqs_errors():
         "rhel": 7.4,
         "suse": 15.1,
         "debian": 10,
-        "ubuntu": 19.04}
+        "ubuntu": 18.04}
 
     errors_found = []
 
