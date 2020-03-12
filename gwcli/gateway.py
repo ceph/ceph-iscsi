@@ -222,7 +222,7 @@ class ISCSITargets(UIGroup):
 
         gw_api = ('{}://{}:{}/api/'
                   'target/{}'.format(self.http_mode,
-                                    settings.config.api_host,
+                                     settings.config.api_host,
                                      settings.config.api_port,
                                      target_iqn))
 
