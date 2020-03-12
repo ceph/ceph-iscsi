@@ -45,8 +45,9 @@ def get_config():
     """
 
     http_mode = "https" if settings.config.api_secure else "http"
-    api_rqst = "{}://localhost:{}/api/config".format(http_mode,
-                                                     settings.config.api_port)
+    api_rqst = "{}://{}:{}/api/config".format(http_mode,
+                                              settings.config.api_host,
+                                              settings.config.api_port)
     api = APIRequest(api_rqst)
     api.get()
 

@@ -97,7 +97,7 @@ class Settings(object):
                 "pool": "rbd",
                 "cluster_client_name": "client.admin",
                 "time_out": 30,
-                "api_host": "::",
+                "api_host": "localhost",
                 "api_port": 5000,
                 "api_secure": "true",
                 "api_ssl_verify": "false",
