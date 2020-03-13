@@ -2439,7 +2439,7 @@ def hostgroup(target_iqn, group_name):
         # At this point the group name is valid, so go ahead and remove it
         api_endpoint = ("{}://{}:{}/api/"
                         "_hostgroup/{}/{}".format(http_mode,
-                                                  'localhost',
+                                                  settings.config.api_host,
                                                   settings.config.api_port,
                                                   target_iqn,
                                                   group_name
