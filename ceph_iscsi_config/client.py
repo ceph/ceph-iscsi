@@ -6,15 +6,15 @@ import os
 
 import rtslib_fb.root as lio_root
 
-from socket import gethostname
 from rtslib_fb.target import NodeACL, Target, TPG
 from rtslib_fb.fabric import ISCSIFabricModule
-from rtslib_fb.utils import RTSLibError, normalize_wwn
+from rtslib_fb.utils import RTSLibError, RTSLibNotInCFS, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
 
+from ceph_iscsi_config.gateway_setting import CLIENT_SETTINGS
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.utils import encryption_available, CephiSCSIError
+from ceph_iscsi_config.utils import encryption_available, CephiSCSIError, this_host
 from ceph_iscsi_config.gateway_object import GWObject
 
 
@@ -22,10 +22,7 @@ class GWClient(GWObject):
     """
     This class holds a representation of a client connecting to LIO
     """
-    SETTINGS = ["dataout_timeout",
-                "nopin_response_timeout",
-                "nopin_timeout",
-                "cmdsn_depth"]
+    SETTINGS = CLIENT_SETTINGS
 
     seed_metadata = {"auth": {"username": '',
                               "password": '',
@@ -55,22 +52,6 @@ class GWClient(GWObject):
         self.target_iqn = target_iqn
         self.lun_lookup = {}        # only used for hostgroup based definitions
         self.requested_images = []
-
-        # image_list is normally a list of strings (pool/image_name) but
-        # group processing forces a specific lun id allocation to masked disks
-        # in this scenario the image list is a tuple
-        if image_list:
-
-            if isinstance(image_list[0], tuple):
-                # tuple format ('disk_name', {'lun_id': 0})...
-                for disk_item in image_list:
-                    disk_name = disk_item[0]
-                    lun_id = disk_item[1].get('lun_id')
-                    self.requested_images.append(disk_name)
-                    self.lun_lookup[disk_name] = lun_id
-            else:
-                self.requested_images = image_list
-
         self.username = username
         self.password = password
         self.mutual_username = mutual_username
@@ -116,6 +97,34 @@ class GWClient(GWObject):
         except CephiSCSIError as err:
             self.error = True
             self.error_msg = err
+
+        # image_list is normally a list of strings (pool/image_name) but
+        # group processing forces a specific lun id allocation to masked disks
+        # in this scenario the image list is a tuple
+        if image_list:
+
+            if isinstance(image_list[0], tuple):
+                # tuple format ('disk_name', {'lun_id': 0})...
+                for disk_item in image_list:
+                    disk_name = disk_item[0]
+                    lun_id = disk_item[1].get('lun_id')
+                    self.requested_images.append(disk_name)
+                    self.lun_lookup[disk_name] = lun_id
+            else:
+                target_config = self.config.config['targets'][self.target_iqn]
+                used_lun_ids = self._get_lun_ids(target_config['clients'])
+                for disk_name in image_list:
+                    disk_lun_id = target_config['disks'][disk_name]['lun_id']
+                    if disk_lun_id not in used_lun_ids:
+                        self.lun_lookup[disk_name] = disk_lun_id
+                self.requested_images = image_list
+
+    def _get_lun_ids(self, clients_config):
+        lun_ids = []
+        for client_config in clients_config.values():
+            for lun_config in client_config['luns'].values():
+                lun_ids.append(lun_config['lun_id'])
+        return lun_ids
 
     def setup_luns(self, disks_config):
         """
@@ -242,7 +251,10 @@ class GWClient(GWObject):
             "ip_address": []
         }
         iscsi_fabric = ISCSIFabricModule()
-        target = Target(iscsi_fabric, target_iqn, 'lookup')
+        try:
+            target = Target(iscsi_fabric, target_iqn, 'lookup')
+        except RTSLibNotInCFS:
+            return result
         for tpg in target.tpgs:
             if tpg.enable:
                 for client in tpg.node_acls:
@@ -305,7 +317,8 @@ class GWClient(GWObject):
 
             client.manage('present')  # ensure the client exists
 
-    def try_disable_auth(self, tpg):
+    @staticmethod
+    def try_disable_auth(tpg):
         """
         Disable authentication (enable ACL mode) if this is the last CHAP user.
 
@@ -316,6 +329,9 @@ class GWClient(GWObject):
         for client in tpg.node_acls:
             if client.chap_userid or client.chap_password:
                 return
+
+        if tpg.chap_userid or tpg.chap_password:
+            return
 
         tpg.set_attribute('authentication', '0')
 
@@ -337,8 +353,8 @@ class GWClient(GWObject):
 
         try:
             self.logger.debug("Updating the ACL")
-            if username != self.acl.chap_userid or \
-                    password != self.acl.chap_password:
+            if username != acl_chap_userid or \
+                    password != acl_chap_password:
                 self.acl.chap_userid = username
                 self.acl.chap_password = password
 
@@ -351,8 +367,8 @@ class GWClient(GWObject):
                     self.error_msg = new_chap.error_msg
                     return
 
-            if mutual_username != self.acl.chap_mutual_userid or \
-                    mutual_password != self.acl.chap_mutual_password:
+            if mutual_username != acl_chap_mutual_userid or \
+                    mutual_password != acl_chap_mutual_password:
                 self.acl.chap_mutual_userid = mutual_username
                 self.acl.chap_mutual_password = mutual_password
 
@@ -369,7 +385,7 @@ class GWClient(GWObject):
             if auth_enabled:
                 self.tpg.set_attribute('authentication', '1')
             else:
-                self.try_disable_auth(self.tpg)
+                GWClient.try_disable_auth(self.tpg)
 
             self.logger.debug("Updating config object meta data")
             encryption_enabled = encryption_available()
@@ -418,12 +434,12 @@ class GWClient(GWObject):
         tpg_lun = lun['tpg_lun']
 
         # lunid allocated from the current config object setting, or if this is
-        # a new device from the next free lun id 'position'
+        # a new device from the target disk lun id or next free lun id 'position'
+        # if target disk lun id is already in use
         if image in self.metadata['luns'].keys():
             lun_id = self.metadata['luns'][image]['lun_id']
         else:
             if image in self.lun_lookup:
-                # this indicates a lun map for a group managed client
                 lun_id = self.lun_lookup[image]
             else:
                 lun_id = self.lun_id_list[0]  # pick lowest available lun ID
@@ -483,7 +499,7 @@ class GWClient(GWObject):
 
         try:
             self.acl.delete()
-            self.try_disable_auth(self.tpg)
+            GWClient.try_disable_auth(self.tpg)
             self.change_count += 1
             self.logger.info("(Client.delete) deleted NodeACL for "
                              "{}".format(self.iqn))
@@ -636,7 +652,7 @@ class GWClient(GWObject):
 
                 if self.commit_enabled:
 
-                    if update_host == gethostname().split('.')[0]:
+                    if update_host == this_host():
                         # update the config object with this clients settings
                         self.logger.debug("Updating config object metadata "
                                           "for '{}'".format(self.iqn))
@@ -663,7 +679,7 @@ class GWClient(GWObject):
                 else:
                     # remove this client from the config
 
-                    if update_host == gethostname().split('.')[0]:
+                    if update_host == this_host():
                         self.logger.debug("Removing {} from the config "
                                           "object".format(self.iqn))
                         target_config['clients'].pop(self.iqn)

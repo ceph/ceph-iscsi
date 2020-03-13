@@ -5,12 +5,14 @@ from gwcli.node import UIGroup, UINode, UIRoot
 from gwcli.hostgroup import HostGroups
 from gwcli.storage import Disks, TargetDisks
 from gwcli.client import Clients
-from gwcli.utils import (this_host, response_message, GatewayAPIError,
-                         GatewayError, APIRequest, console_message, get_config)
+from gwcli.utils import (response_message, GatewayAPIError,
+                         GatewayError, APIRequest, console_message, get_config,
+                         refresh_control_values)
 
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (normalize_ip_address, format_lio_yes_no)
+from ceph_iscsi_config.utils import (normalize_ip_address, this_host)
 from ceph_iscsi_config.target import GWTarget
+from ceph_iscsi_config.client import CHAP
 
 from gwcli.ceph import CephGroup
 
@@ -397,7 +399,7 @@ class ISCSITargets(UIGroup):
 
 class Target(UINode):
 
-    display_attributes = ["target_iqn", "control_values"]
+    display_attributes = ["target_iqn", "auth", "control_values"]
 
     help_intro = '''
                  The iscsi target is the name that the group of gateways are
@@ -416,17 +418,60 @@ class Target(UINode):
         self.host_groups = HostGroups(self)
         self.target_disks = TargetDisks(self)
 
+        config = self.parent.parent._get_config()
+        if not config:
+            self.logger.error("Unable to refresh local config")
+
+        self.auth = config['targets'][target_iqn]['auth']
+        # decode the chap password if necessary
+        if 'username' in self.auth and 'password' in self.auth:
+            self.chap = CHAP(self.auth['username'],
+                             self.auth['password'],
+                             self.auth['password_encryption_enabled'])
+            self.auth['username'] = self.chap.user
+            self.auth['password'] = self.chap.password
+        else:
+            self.auth['username'] = ''
+            self.auth['password'] = ''
+
+        # decode the chap_mutual password if necessary
+        if 'mutual_username' in self.auth and 'mutual_password' in self.auth:
+            self.chap_mutual = CHAP(self.auth['mutual_username'],
+                                    self.auth['mutual_password'],
+                                    self.auth['mutual_password_encryption_enabled'])
+            self.auth['mutual_username'] = self.chap_mutual.user
+            self.auth['mutual_password'] = self.chap_mutual.password
+        else:
+            self.auth['mutual_username'] = ''
+            self.auth['mutual_password'] = ''
+
     def _get_controls(self):
         return self._controls.copy()
 
     def _set_controls(self, controls):
         self._controls = controls.copy()
-        self._refresh_control_values()
+        self.control_values = {}
+        refresh_control_values(self.control_values, self.controls,
+                               GWTarget.SETTINGS)
 
     controls = property(_get_controls, _set_controls)
 
     def summary(self):
-        return "Gateways: {}".format(len(self.gateway_group.children)), None
+        msg = []
+
+        auth_text = "Auth: None"
+        status = None
+        if self.auth.get('mutual_username'):
+            auth_text = "Auth: CHAP_MUTUAL"
+            status = True
+        elif self.auth.get('username'):
+            auth_text = "Auth: CHAP"
+            status = True
+        msg.append(auth_text)
+
+        msg.append("Gateways: {}".format(len(self.gateway_group.children)))
+
+        return ", ".join(msg), status
 
     def ui_command_reconfigure(self, attribute, value):
         """
@@ -452,10 +497,9 @@ class Target(UINode):
         reset cmdsn_depth
           - reconfigure attribute=cmdsn_depth value=
         """
-        settings_list = GWTarget.SETTINGS
-        if attribute not in settings_list:
+        if not GWTarget.SETTINGS.get(attribute):
             self.logger.error("supported attributes: {}".format(",".join(
-                sorted(settings_list))))
+                sorted(GWTarget.SETTINGS.keys()))))
             return
 
         # Issue the api request for the reconfigure
@@ -486,21 +530,73 @@ class Target(UINode):
 
         self.logger.info('ok')
 
-    def _refresh_control_values(self):
-        self.control_values = {}
-        settings_list = GWTarget.SETTINGS
-        for k in settings_list:
-            val = self._controls.get(k)
-            default_val = getattr(settings.config, k, None)
-            if k in settings.Settings.LIO_YES_NO_SETTINGS:
-                if val is not None:
-                    val = format_lio_yes_no(val)
-                default_val = format_lio_yes_no(default_val)
+    def ui_command_auth(self, username=None, password=None, mutual_username=None,
+                        mutual_password=None):
+        """
+        Target authentication can be set to use CHAP/CHAP_MUTUAL by supplying
+        username, password, mutual_username, mutual_password
 
-            if val is None or str(val) == str(default_val):
-                self.control_values[k] = default_val
-            else:
-                self.control_values[k] = "{} (override)".format(val)
+        e.g.
+        auth username=<user> password=<pass> mutual_username=<m_user> mutual_password=<m_pass>
+
+        username / mutual_username ... the username is 8-64 character string. Each character
+                                       may either be an alphanumeric or use one of the following
+                                       special characters .,:,-,@.
+                                       Consider using the hosts 'shortname' or the initiators IQN
+                                       value as the username
+
+        password / mutual_password ... the password must be between 12-16 chars in length
+                                       containing alphanumeric characters, plus the following
+                                       special characters @,_,-,/
+        """
+
+        self.logger.debug("CMD: /iscsi-targets/<target_iqn> auth *")
+
+        if not username:
+            self.logger.error("To set authentication, specify "
+                              "username=<user> password=<password> "
+                              "[mutual_username]=<user> [mutual_password]=<password> "
+                              "or nochap")
+            return
+
+        if username == 'nochap':
+            username = ''
+            password = ''
+            mutual_username = ''
+            mutual_password = ''
+
+        self.logger.debug("auth to be set to username='{}', password='{}', mutual_username='{}', "
+                          "mutual_password='{}'".format(username, password,
+                                                        mutual_username, mutual_password))
+        target_iqn = self.name
+
+        api_vars = {
+            "username": username,
+            "password": password,
+            "mutual_username": mutual_username,
+            "mutual_password": mutual_password
+        }
+
+        targetauth_api = ('{}://localhost:{}/api/'
+                          'targetauth/{}'.format(self.http_mode,
+                                                 settings.config.api_port,
+                                                 target_iqn))
+        api = APIRequest(targetauth_api, data=api_vars)
+        api.put()
+
+        if api.response.status_code == 200:
+            self.logger.debug("- target credentials updated")
+            self.auth['username'] = username
+            self.auth['password'] = password
+            self.auth['mutual_username'] = mutual_username
+            self.auth['mutual_password'] = mutual_password
+            self.logger.info('ok')
+
+        else:
+            self.logger.error("Failed to update target auth: "
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
+            return
 
 
 class GatewayGroup(UIGroup):
@@ -609,6 +705,8 @@ class GatewayGroup(UIGroup):
 
         self.logger.info("Deleting gateway, {}".format(gateway_name))
 
+        confirm = self.ui_eval_param(confirm, 'bool', False)
+
         config = self.parent.parent.parent._get_config()
         if not config:
             self.logger.error("Unable to refresh local config over API - sync "
@@ -624,7 +722,6 @@ class GatewayGroup(UIGroup):
             return
 
         if gw_cnt == 1:
-            confirm = self.ui_eval_param(confirm, 'bool', False)
             if not confirm:
                 self.logger.error("Deleting the last gateway will remove all "
                                   "objects on this target. Use confirm=true")
@@ -634,24 +731,38 @@ class GatewayGroup(UIGroup):
                                          settings.config.api_host,
                                          settings.config.api_port)
         gw_rqst = gw_api + '/gateway/{}/{}'.format(target_iqn, gateway_name)
+        if confirm:
+            gw_vars = {"force": 'true'}
+        else:
+            gw_vars = {"force": 'false'}
 
-        api = APIRequest(gw_rqst)
+        api = APIRequest(gw_rqst, data=gw_vars)
         api.delete()
 
         msg = response_message(api.response, self.logger)
         if api.response.status_code != 200:
-            self.logger.error("Failed : {}".format(msg))
+            if "unavailable:" + gateway_name in msg:
+                self.logger.error("Could not contact {}. If the gateway is "
+                                  "permanently down. Use confirm=true to "
+                                  "force removal. WARNING: Forcing removal of "
+                                  "a gateway that can still be reached by an "
+                                  "initiator may result in data corruption.".
+                                  format(gateway_name))
+            else:
+                self.logger.error("Failed : {}".format(msg))
             return
 
         self.logger.debug("{}".format(msg))
         self.logger.debug("Removing gw from UI")
 
+        self.thread_lock.acquire()
         gw_object = self.get_child(gateway_name)
         self.remove_child(gw_object)
+        self.thread_lock.release()
 
         config = self.parent.parent.parent._get_config()
         if not config:
-            self.logger.error("Could not refresh disaply. Restart gwcli.")
+            self.logger.error("Could not refresh display. Restart gwcli.")
         elif not config['targets'][target_iqn]['portals']:
             # no more gws so everything but the target is dropped.
             disks_object = self.parent.get_child("disks")
@@ -663,15 +774,15 @@ class GatewayGroup(UIGroup):
             hosts_object = self.parent.get_child("hosts")
             hosts_object.reset()
 
-    def ui_command_create(self, gateway_name, ip_address, nosync=False,
+    def ui_command_create(self, gateway_name, ip_addresses, nosync=False,
                           skipchecks='false'):
         """
         Define a gateway to the gateway group for this iscsi target. The
         first host added should be the gateway running the command
 
         gateway_name ... should resolve to the hostname of the gateway
-        ip_address ..... is the IPv4/IPv6 address of the interface the iscsi
-                         portal should use
+        ip_addresses ... are the IPv4/IPv6 addresses of the interfaces the
+                         iSCSI portals should use
         nosync ......... by default new gateways are sync'd with the
                          existing configuration by cli. By specifying nosync
                          the sync step is bypassed - so the new gateway
@@ -684,10 +795,10 @@ class GatewayGroup(UIGroup):
                          to result in an unstable configuration.
         """
 
-        ip_address = normalize_ip_address(ip_address)
+        ip_addresses = [normalize_ip_address(ip_address) for ip_address in ip_addresses.split(',')]
         self.logger.debug("CMD: ../gateways/ create {} {} "
                           "nosync={} skipchecks={}".format(gateway_name,
-                                                           ip_address,
+                                                           ip_addresses,
                                                            nosync,
                                                            skipchecks))
 
@@ -736,7 +847,7 @@ class GatewayGroup(UIGroup):
         gw_rqst = gw_api + '/gateway/{}/{}'.format(target_iqn, gateway_name)
         gw_vars = {"nosync": nosync,
                    "skipchecks": skipchecks,
-                   "ip_address": ip_address}
+                   "ip_address": ','.join(ip_addresses)}
 
         api = APIRequest(gw_rqst, data=gw_vars)
         api.put()
@@ -758,10 +869,13 @@ class GatewayGroup(UIGroup):
                                         gateway_name,
                                         settings.config.api_port))
 
+        api = APIRequest('{}/sysinfo/hostname'.format(new_gw_endpoint))
+        api.get()
+        gateway_hostname = api.response.json()['data']
         config = self.parent.parent.parent._get_config(endpoint=new_gw_endpoint)
         target_config = config['targets'][target_iqn]
-        portal_config = target_config['portals'][gateway_name]
-        Gateway(self, gateway_name, portal_config)
+        portal_config = target_config['portals'][gateway_hostname]
+        Gateway(self, gateway_hostname, portal_config)
 
         self.logger.info('ok')
 
@@ -785,7 +899,7 @@ class Gateway(UINode):
 
     display_attributes = ["name",
                           "gateway_ip_list",
-                          "portal_ip_address",
+                          "portal_ip_addresses",
                           "inactive_portal_ips",
                           "tpgs",
                           "service_state"]
@@ -867,5 +981,5 @@ class Gateway(UINode):
     def summary(self):
 
         state = self.state
-        return "{} ({})".format(self.portal_ip_address,
+        return "{} ({})".format(','.join(self.portal_ip_addresses),
                                 state), (state == "UP")

@@ -13,9 +13,10 @@ from gwcli.node import UIGroup, UINode
 from gwcli.client import Clients
 
 from gwcli.utils import (console_message, response_message, GatewayAPIError,
-                         this_host, APIRequest, valid_snapshot_name, get_config)
+                         APIRequest, valid_snapshot_name, get_config,
+                         refresh_control_values)
 
-from ceph_iscsi_config.utils import valid_size, convert_2_bytes, human_size
+from ceph_iscsi_config.utils import valid_size, convert_2_bytes, human_size, this_host
 from ceph_iscsi_config.lun import LUN
 
 import ceph_iscsi_config.settings as settings
@@ -152,10 +153,9 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_attach(self, pool=None, image=None, backstore=None):
+    def ui_command_attach(self, pool=None, image=None, backstore=None, wwn=None):
         """
-        Create a LUN and assign to the gateway(s)
-        (RBD image must exist).
+        Assign a previously created RBD image to the gateway(s)
 
         The attach command supports two request formats;
 
@@ -187,11 +187,12 @@ class Disks(UIGroup):
 
         self.logger.debug("CMD: /disks/ attach pool={} "
                           "image={}".format(pool, image))
-        self.create_disk(pool=pool, image=image, create_image=False, backstore=backstore)
+        self.create_disk(pool=pool, image=image, create_image=False, backstore=backstore, wwn=wwn)
 
-    def ui_command_create(self, pool=None, image=None, size=None, backstore=None, count=1):
+    def ui_command_create(self, pool=None, image=None, size=None, backstore=None, wwn=None,
+                          count=1):
         """
-        Create a LUN and assign to the gateway(s).
+        Create a RBD image and assign to the gateway(s).
 
         The create command supports two request formats;
 
@@ -199,7 +200,7 @@ class Disks(UIGroup):
         Short format : create pool/image <size>
 
         e.g.
-        create pool=rbd image=testimage size=100g max_data_area_mb=16
+        create pool=rbd image=testimage size=100g
         create rbd.testimage 100g
 
         The syntax of each parameter is as follows;
@@ -208,18 +209,19 @@ class Disks(UIGroup):
         size  : integer, suffixed by the allocation unit - either m/M, g/G or
                 t/T representing the MB/GB/TB [1]
         backstore  : lio backstore
+        wwn   : unit serial number
         count : integer (default is 1)[2]. If the request provides a count=<n>
                 parameter the image name will be used as a prefix, and the count
-                used as a suffix to create multiple LUNs from the same request.
+                used as a suffix to create multiple images from the same request.
                 e.g.
                 create rbd.test 1g count=5
-                -> create 5 LUNs called test1..test5 each of 1GB in size
+                -> create 5 images called test1..test5 each of 1GB in size
                    from the rbd pool
 
         Notes.
         1) size does not support decimal representations
-        2) Using a count to create multiple LUNs will lock the CLI until all
-           LUNs have been created
+        2) Using a count to create multiple images will lock the CLI until all
+           images have been created
         """
         # NB the text above is shown on a help create request in the CLI
 
@@ -258,7 +260,8 @@ class Disks(UIGroup):
         self.logger.debug("CMD: /disks/ create pool={} "
                           "image={} size={} "
                           "count={} ".format(pool, image, size, count))
-        self.create_disk(pool=pool, image=image, size=size, count=count, backstore=backstore)
+        self.create_disk(pool=pool, image=image, size=size, count=count, backstore=backstore,
+                         wwn=wwn)
 
     def _valid_pool(self, pool=None):
         """
@@ -283,7 +286,7 @@ class Disks(UIGroup):
         return False
 
     def create_disk(self, pool=None, image=None, size=None, count=1,
-                    parent=None, create_image=True, backstore=None):
+                    parent=None, create_image=True, backstore=None, wwn=None):
 
         rc = 0
 
@@ -308,7 +311,7 @@ class Disks(UIGroup):
         api_vars = {'pool': pool, 'owner': local_gw,
                     'count': count, 'mode': 'create',
                     'create_image': 'true' if create_image else 'false',
-                    'backstore': backstore}
+                    'backstore': backstore, 'wwn': wwn}
         if size:
             api_vars['size'] = size.upper()
 
@@ -461,10 +464,10 @@ class Disks(UIGroup):
 
         > detach <disk_name>
         e.g.
-        > detach rbd.disk_1
+        > detach rbd/disk_1
 
         "disk_name" refers to the name of the disk as shown in the UI, for
-        example rbd.disk_1.
+        example rbd/disk_1.
 
         """
         self.delete_disk(image_id, True)
@@ -477,10 +480,10 @@ class Disks(UIGroup):
 
         > delete <disk_name>
         e.g.
-        > delete rbd.disk_1
+        > delete rbd/disk_1
 
         "disk_name" refers to the name of the disk as shown in the UI, for
-        example rbd.disk_1.
+        example rbd/disk_1.
 
         Also note that the delete process is a synchronous task, so the larger
         the rbd image is, the longer the delete will take to run.
@@ -691,13 +694,9 @@ class Disk(UINode):
         for k, v in image_config.items():
             disk_map[self.image_id][k] = v
             self.__setattr__(k, v)
-        for k in LUN.SETTINGS[image_config['backstore']]:
-            val = self.controls.get(k)
-            default_val = getattr(settings.config, k, None)
-            if val is None or str(val) == str(default_val):
-                self.control_values[k] = default_val
-            else:
-                self.control_values[k] = "{} (override)".format(val)
+
+        refresh_control_values(self.control_values, self.controls,
+                               LUN.SETTINGS[image_config['backstore']])
 
     def summary(self):
         if not self.exists:
@@ -1012,15 +1011,16 @@ class TargetDisks(UIGroup):
         self.target_iqn = self.parent.name
 
     def load(self, disks):
-        for disk in disks:
-            TargetDisk(self, disk)
+        for image_id, image in disks.items():
+            TargetDisk(self, image_id, image['lun_id'])
 
-    def ui_command_add(self, disk):
-        self.add_disk(disk)
+    def ui_command_add(self, disk, lun_id=None):
+        self.add_disk(disk, lun_id)
 
-    def add_disk(self, disk, success_msg='ok'):
+    def add_disk(self, disk, lun_id, success_msg='ok'):
         rc = 0
-        api_vars = {"disk": disk}
+
+        api_vars = {"disk": disk, "lun_id": lun_id}
         targetdisk_api = ('{}://{}:{}/api/'
                           'targetlun/{}'.format(self.http_mode,
                                                 settings.config.api_host,
@@ -1036,7 +1036,9 @@ class TargetDisks(UIGroup):
             disk.owner = owner
             self.logger.debug("- Disk '{}' owner updated to {}"
                               .format(disk.image_id, owner))
-            TargetDisk(self, disk.image_id)
+            target_config = config['targets'][self.target_iqn]
+            lun_id = target_config['disks'][disk.image_id]['lun_id']
+            TargetDisk(self, disk.image_id, lun_id)
             self.logger.debug("- TargetDisk '{}' added".format(disk.image_id))
             if success_msg:
                 self.logger.info(success_msg)
@@ -1086,11 +1088,12 @@ class TargetDisk(UINode):
 
     display_attributes = ['name', 'owner']
 
-    def __init__(self, parent, name):
+    def __init__(self, parent, name, lun_id):
         UINode.__init__(self, name, parent)
         ui_root = self.get_ui_root()
         disk = ui_root.disks.disk_lookup[name]
         self.owner = disk.owner
+        self.lun_id = lun_id
 
     def summary(self):
-        return "Owner: {}".format(self.owner), True
+        return "Owner: {}, Lun: {}".format(self.owner, self.lun_id), True

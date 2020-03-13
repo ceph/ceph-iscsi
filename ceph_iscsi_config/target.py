@@ -7,13 +7,14 @@ from rtslib_fb.alua import ALUATargetPortGroup
 
 import ceph_iscsi_config.settings as settings
 
+from ceph_iscsi_config.gateway_setting import TGT_SETTINGS
 from ceph_iscsi_config.utils import (normalize_ip_address, normalize_ip_literal,
                                      ip_addresses, this_host, format_lio_yes_no,
                                      CephiSCSIError, CephiSCSIInval)
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.alua import alua_create_group, alua_format_group_name
-from ceph_iscsi_config.client import GWClient
+from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.gateway_object import GWObject
 from ceph_iscsi_config.backstore import lookup_storage_object_by_disk
 
@@ -24,20 +25,10 @@ class GWTarget(GWObject):
     """
     Class representing the state of the local LIO environment
     """
-    # iscsi tpg specific settings.
-    TPG_SETTINGS = [
-        "dataout_timeout",
-        "immediate_data",
-        "initial_r2t",
-        "max_outstanding_r2t",
-        "first_burst_length",
-        "max_burst_length",
-        "max_recv_data_segment_length",
-        "max_xmit_data_segment_length"]
 
     # Settings for all transport/fabric objects. Using this allows apps like
     # gwcli to get/set all tpgs/clients under the target instead of per obj.
-    SETTINGS = TPG_SETTINGS + GWClient.SETTINGS
+    SETTINGS = TGT_SETTINGS
 
     def __init__(self, logger, iqn, gateway_ip_list, enable_portal=True):
         """
@@ -77,9 +68,9 @@ class GWTarget(GWObject):
                                   " any ip on this host")
                 return
 
-            self.active_portal_ip = list(matching_ip)[0]
+            self.active_portal_ips = list(matching_ip)
             self.logger.debug("active portal will use "
-                              "{}".format(self.active_portal_ip))
+                              "{}".format(self.active_portal_ips))
 
             self.gateway_ip_list = gateway_ip_list
             self.logger.debug("tpg's will be defined in this order"
@@ -88,7 +79,7 @@ class GWTarget(GWObject):
             # without gateway_ip_list passed in this is a 'init' or
             # 'clearconfig' request
             self.gateway_ip_list = []
-            self.active_portal_ip = []
+            self.active_portal_ips = []
 
         self.changes_made = False
         self.config_updated = False
@@ -97,6 +88,7 @@ class GWTarget(GWObject):
         self.target = None
         self.tpg = None
         self.tpg_list = []
+        self.tpg_tag_by_gateway_name = {}
 
         try:
             super(GWTarget, self).__init__('targets', iqn, logger,
@@ -181,25 +173,25 @@ class GWTarget(GWObject):
         :return: None
         """
 
+        index = 0
         for tpg in self.tpg_list:
             if tpg._get_enable():
                 for lun in tpg.luns:
                     try:
                         self.bind_alua_group_to_lun(config,
                                                     lun,
-                                                    tpg_ip_address=self.active_portal_ip)
+                                                    tpg_ip_address=self.active_portal_ips[index])
                     except CephiSCSIInval as err:
                         self.error = True
                         self.error_msg = err
                         return
 
                 try:
-                    NetworkPortal(tpg, normalize_ip_literal(self.active_portal_ip))
+                    NetworkPortal(tpg, normalize_ip_literal(self.active_portal_ips[index]))
                 except RTSLibError as e:
                     self.error = True
                     self.error_msg = e
-                else:
-                    break
+                index += 1
 
     def clear_config(self, config):
         """
@@ -242,17 +234,68 @@ class GWTarget(GWObject):
                 tpg.set_attribute('generate_node_acls', 1)
                 tpg.set_attribute('demo_mode_write_protect', 0)
 
+    def _get_gateway_name(self, ip):
+        if ip in self.active_portal_ips:
+            return this_host()
+        target_config = self.config.config['targets'][self.iqn]
+        for portal_name, portal_config in target_config['portals'].items():
+            if ip in portal_config['portal_ip_addresses']:
+                return portal_name
+        return None
+
+    def get_tpg_by_gateway_name(self, gateway_name):
+        tpg_tag = self.tpg_tag_by_gateway_name.get(gateway_name)
+        if tpg_tag:
+            for tpg_item in self.tpg_list:
+                if tpg_item.tag == tpg_tag:
+                    return tpg_item
+        return None
+
+    def update_auth(self, tpg, username=None, password=None,
+                    mutual_username=None, mutual_password=None):
+        tpg.chap_userid = username
+        tpg.chap_password = password
+        tpg.chap_mutual_userid = mutual_username
+        tpg.chap_mutual_password = mutual_password
+
+        auth_enabled = (username and password)
+        if auth_enabled:
+            tpg.set_attribute('authentication', '1')
+        else:
+            GWClient.try_disable_auth(tpg)
+
     def create_tpg(self, ip):
 
         try:
-            tpg = TPG(self.target)
+            gateway_name = self._get_gateway_name(ip)
+            tpg = self.get_tpg_by_gateway_name(gateway_name)
+            if not tpg:
+                tpg = TPG(self.target)
 
             # Use initiator name based ACL by default.
             tpg.set_attribute('authentication', '0')
 
             self.logger.debug("(Gateway.create_tpg) Added tpg for portal "
                               "ip {}".format(ip))
-            if ip == self.active_portal_ip:
+            if ip in self.active_portal_ips:
+                target_config = self.config.config['targets'][self.iqn]
+                auth_config = target_config['auth']
+                config_chap = CHAP(auth_config['username'],
+                                   auth_config['password'],
+                                   auth_config['password_encryption_enabled'])
+                if config_chap.error:
+                    self.error = True
+                    self.error_msg = config_chap.error_msg
+                    return
+                config_chap_mutual = CHAP(auth_config['mutual_username'],
+                                          auth_config['mutual_password'],
+                                          auth_config['mutual_password_encryption_enabled'])
+                if config_chap_mutual.error:
+                    self.error = True
+                    self.error_msg = config_chap_mutual.error_msg
+                    return
+                self.update_auth(tpg, config_chap.user, config_chap.password,
+                                 config_chap_mutual.user, config_chap_mutual.password)
                 if self.enable_portal:
                     NetworkPortal(tpg, normalize_ip_literal(ip))
                 tpg.enable = True
@@ -269,6 +312,7 @@ class GWTarget(GWObject):
                                   "portal ip {} as disabled".format(ip))
 
             self.tpg_list.append(tpg)
+            self.tpg_tag_by_gateway_name[gateway_name] = tpg.tag
 
         except RTSLibError as err:
             self.error_msg = err
@@ -335,10 +379,16 @@ class GWTarget(GWObject):
             # clear list so we can rebuild with the current values below
             if self.tpg_list:
                 del self.tpg_list[:]
+            if self.tpg_tag_by_gateway_name:
+                self.tpg_tag_by_gateway_name = {}
 
             # there could/should be multiple tpg's for the target
             for tpg in self.target.tpgs:
                 self.tpg_list.append(tpg)
+                ip_address = list(tpg.network_portals)[0].ip_address
+                gateway_name = self._get_gateway_name(ip_address)
+                if gateway_name:
+                    self.tpg_tag_by_gateway_name[gateway_name] = tpg.tag
 
             # self.portal = self.tpg.network_portals.next()
 
@@ -386,7 +436,7 @@ class GWTarget(GWObject):
         # they do not have a common gw the owning gw may not exist here.
         # The LUN will just have all ANO paths then.
         if gw_config:
-            if gw_config["portal_ip_address"] == tpg_ip_address:
+            if tpg_ip_address in gw_config["portal_ip_addresses"]:
                 is_owner = True
 
         try:
@@ -422,11 +472,11 @@ class GWTarget(GWObject):
                                                            tpg.tag,
                                                            alua_tpg.name))
 
-    def _map_lun(self, config, stg_object):
+    def _map_lun(self, config, stg_object, target_disk_config):
         for tpg in self.tpg_list:
             self.logger.debug("processing tpg{}".format(tpg.tag))
 
-            lun_id = int(stg_object.path.split('/')[-2].split('_')[1])
+            lun_id = target_disk_config['lun_id']
 
             try:
                 mapped_lun = LUN(tpg, lun=lun_id, storage_object=stg_object)
@@ -450,9 +500,9 @@ class GWTarget(GWObject):
                 self.error_msg = err
                 return
 
-    def map_lun(self, config, stg_object):
+    def map_lun(self, config, stg_object, target_disk_config):
         self.load_config()
-        self._map_lun(config, stg_object)
+        self._map_lun(config, stg_object, target_disk_config)
 
     def map_luns(self, config):
         """
@@ -462,16 +512,16 @@ class GWTarget(GWObject):
 
         target_config = config.config["targets"][self.iqn]
 
-        for disk in target_config['disks']:
-            stg_object = lookup_storage_object_by_disk(config, disk)
+        for disk_id, disk in target_config['disks'].items():
+            stg_object = lookup_storage_object_by_disk(config, disk_id)
             if stg_object is None:
-                err_msg = "Could not map {} to LUN. Disk not found".format(disk)
+                err_msg = "Could not map {} to LUN. Disk not found".format(disk_id)
                 self.logger.error(err_msg)
                 self.error = True
                 self.error_msg = err_msg
                 return
 
-            self._map_lun(config, stg_object)
+            self._map_lun(config, stg_object, disk)
             if self.error:
                 return
 
@@ -492,7 +542,7 @@ class GWTarget(GWObject):
                 saved_err = err
                 # drop down and try to delete disks
 
-        for disk in config.config['targets'][self.iqn]['disks']:
+        for disk in config.config['targets'][self.iqn]['disks'].keys():
             so = lookup_storage_object_by_disk(config, disk)
             if so is None:
                 self.logger.debug("lio disk lookup failed {}")
@@ -578,7 +628,8 @@ class GWTarget(GWObject):
                         continue
 
                     inactive_portal_ip = list(self.gateway_ip_list)
-                    inactive_portal_ip.remove(remote_gw_config["portal_ip_address"])
+                    for portal_ip_address in remote_gw_config["portal_ip_addresses"]:
+                        inactive_portal_ip.remove(portal_ip_address)
                     remote_gw_config['gateway_ip_list'] = self.gateway_ip_list
                     remote_gw_config['tpgs'] = len(self.tpg_list)
                     remote_gw_config['inactive_portal_ips'] = inactive_portal_ip
@@ -586,11 +637,12 @@ class GWTarget(GWObject):
 
                 # Add the new gw
                 inactive_portal_ip = list(self.gateway_ip_list)
-                inactive_portal_ip.remove(self.active_portal_ip)
+                for active_portal_ip in self.active_portal_ips:
+                    inactive_portal_ip.remove(active_portal_ip)
 
                 portal_metadata = {"tpgs": len(self.tpg_list),
                                    "gateway_ip_list": self.gateway_ip_list,
-                                   "portal_ip_address": self.active_portal_ip,
+                                   "portal_ip_addresses": self.active_portal_ips,
                                    "inactive_portal_ips": inactive_portal_ip}
                 target_config['portals'][local_gw] = portal_metadata
                 target_config['ip_list'] = self.gateway_ip_list
@@ -630,9 +682,16 @@ class GWTarget(GWObject):
                 # create the target
                 self.create_target()
                 seed_target = {
-                    'disks': [],
+                    'disks': {},
                     'clients': {},
                     'acl_enabled': True,
+                    'auth': {
+                        'username': '',
+                        'password': '',
+                        'password_encryption_enabled': False,
+                        'mutual_username': '',
+                        'mutual_password': '',
+                        'mutual_password_encryption_enabled': False},
                     'portals': {},
                     'groups': {},
                     'controls': {}
@@ -654,41 +713,37 @@ class GWTarget(GWObject):
             # Called by API from CLI clearconfig command
             if self.exists():
                 self.load_config()
-            else:
-                self.error = True
-                self.error_msg = "Target {} does not exist on {}".format(self.iqn, local_gw)
-                return
-
+                self.clear_config(config)
+                if self.error:
+                    return
             target_config = config.config["targets"][self.iqn]
-            self.clear_config(config)
+            if len(target_config['portals']) == 0:
+                config.del_item('targets', self.iqn)
+            else:
+                gw_ips = target_config['portals'][local_gw]['portal_ip_addresses']
 
-            if not self.error:
-                if len(target_config['portals']) == 0:
-                    config.del_item('targets', self.iqn)
-                else:
-                    gw_ip = target_config['portals'][local_gw]['portal_ip_address']
+                target_config['portals'].pop(local_gw)
 
-                    target_config['portals'].pop(local_gw)
-
-                    ip_list = target_config['ip_list']
+                ip_list = target_config['ip_list']
+                for gw_ip in gw_ips:
                     ip_list.remove(gw_ip)
-                    if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
-                        config.update_item('targets', self.iqn, target_config)
-                    else:
-                        # no more portals in the list, so delete the target
-                        config.del_item('targets', self.iqn)
+                if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
+                    config.update_item('targets', self.iqn, target_config)
+                else:
+                    # no more portals in the list, so delete the target
+                    config.del_item('targets', self.iqn)
 
-                    remove_gateway = True
-                    for _, target in config.config["targets"].items():
-                        if local_gw in target['portals']:
-                            remove_gateway = False
-                            break
+                remove_gateway = True
+                for _, target in config.config["targets"].items():
+                    if local_gw in target['portals']:
+                        remove_gateway = False
+                        break
 
-                    if remove_gateway:
-                        # gateway is no longer used, so delete it
-                        config.del_item('gateways', local_gw)
+                if remove_gateway:
+                    # gateway is no longer used, so delete it
+                    config.del_item('gateways', local_gw)
 
-                config.commit()
+            config.commit()
 
     @staticmethod
     def get_num_sessions(target_iqn):

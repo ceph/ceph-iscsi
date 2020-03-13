@@ -18,10 +18,13 @@ __author__ = 'pcuzner@redhat.com'
 
 class CephiSCSIGateway(object):
 
-    def __init__(self, logger, config):
+    def __init__(self, logger, config, name=None):
         self.logger = logger
         self.config = config
-        self.hostname = this_host()
+        if name:
+            self.hostname = name
+        else:
+            self.hostname = this_host()
 
     def ceph_rm_blacklist(self, blacklisted_ip):
         """
@@ -34,23 +37,25 @@ class CephiSCSIGateway(object):
                          "{}".format(blacklisted_ip))
 
         conf = settings.config
-        result = subprocess.check_output("ceph -n {client_name} --conf {cephconf} "
-                                         "osd blacklist rm {blacklisted_ip}".
-                                         format(blacklisted_ip=blacklisted_ip,
-                                                client_name=conf.cluster_client_name,
-                                                cephconf=conf.cephconf),
-                                         stderr=subprocess.STDOUT, shell=True)
-        if "un-blacklisting" in result:
-            self.logger.info("Successfully removed blacklist entry")
-            return True
-        else:
-            self.logger.critical("blacklist removal failed. Run"
+        try:
+            subprocess.check_output("ceph -n {client_name} --conf {cephconf} "
+                                    "osd blacklist rm {blacklisted_ip}".
+                                    format(blacklisted_ip=blacklisted_ip,
+                                           client_name=conf.cluster_client_name,
+                                           cephconf=conf.cephconf),
+                                    stderr=subprocess.STDOUT, shell=True)
+        except subprocess.CalledProcessError as err:
+            self.logger.critical("blacklist removal failed: {}. Run"
                                  " 'ceph -n {client_name} --conf {cephconf} "
                                  "osd blacklist rm {blacklisted_ip}'".
-                                 format(blacklisted_ip=blacklisted_ip,
+                                 format(err.output.decode('utf-8').strip(),
+                                        blacklisted_ip=blacklisted_ip,
                                         client_name=conf.cluster_client_name,
                                         cephconf=conf.cephconf))
             return False
+
+        self.logger.info("Successfully removed blacklist entry")
+        return True
 
     def osd_blacklist_cleanup(self):
         """
@@ -93,9 +98,14 @@ class CephiSCSIGateway(object):
                     dev_info = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
                     ipv4_list += [dev['addr'] for dev in dev_info]
 
-                # process the entries (first entry just says "Listed X entries,
-                # last entry is just null)
-                for blacklist_entry in blacklist_output[1:]:
+                # process the entries. last entry is just null)
+                for blacklist_entry in blacklist_output:
+
+                    # blacklist_output is not gauranteed to be in order returned
+                    # from the ceph command. 'listed N entries' line could be
+                    # at any index.
+                    if "listed" in blacklist_entry:
+                        continue
 
                     # valid entries to process look like -
                     # 192.168.122.101:0/3258528596 2016-09-28 18:23:15.307227
@@ -338,23 +348,25 @@ class CephiSCSIGateway(object):
         if target_config:
             local_gw = target_config['portals'].get(self.hostname)
             if local_gw:
-                local_gw_ip = local_gw['portal_ip_address']
+                local_gw_ips = local_gw['portal_ip_addresses']
 
                 target_config['portals'].pop(self.hostname)
 
                 ip_list = target_config['ip_list']
-                ip_list.remove(local_gw_ip)
+                for local_gw_ip in local_gw_ips:
+                    ip_list.remove(local_gw_ip)
 
                 for _, remote_gw_config in target_config['portals'].items():
-                    remote_gw_config["gateway_ip_list"].remove(local_gw_ip)
-                    remote_gw_config["inactive_portal_ips"].remove(local_gw_ip)
+                    for local_gw_ip in local_gw_ips:
+                        remote_gw_config["gateway_ip_list"].remove(local_gw_ip)
+                        remote_gw_config["inactive_portal_ips"].remove(local_gw_ip)
                     tpg_count = remote_gw_config["tpgs"]
                     remote_gw_config["tpgs"] = tpg_count - 1
 
                 if not target_config['portals']:
                     # Last gw for the target so delete everything that lives
                     # under the tpg in LIO since we can't create it
-                    target_config['disks'] = []
+                    target_config['disks'] = {}
                     target_config['clients'] = {}
                     target_config['controls'] = {}
                     target_config['groups'] = {}

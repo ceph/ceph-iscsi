@@ -3,13 +3,13 @@ import rbd
 import re
 
 from time import sleep
-from socket import gethostname
 
 from rtslib_fb import UserBackedStorageObject, root
 from rtslib_fb.utils import RTSLibError
 
 import ceph_iscsi_config.settings as settings
 
+from ceph_iscsi_config.gateway_setting import TCMU_SETTINGS
 from ceph_iscsi_config.backstore import USER_RBD
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      valid_size, get_pool_id, ip_addresses,
@@ -26,7 +26,11 @@ __author__ = 'pcuzner@redhat.com'
 
 class RBDDev(object):
 
-    rbd_feature_list = {
+    unsupported_features_list = {
+        USER_RBD: []
+    }
+
+    default_features_list = {
         USER_RBD: [
             'RBD_FEATURE_LAYERING',
             'RBD_FEATURE_EXCLUSIVE_LOCK',
@@ -69,7 +73,7 @@ class RBDDev(object):
                     rbd_inst.create(ioctx,
                                     self.image,
                                     self.size_bytes,
-                                    features=RBDDev.supported_features(self.backstore),
+                                    features=RBDDev.default_features(self.backstore),
                                     old_format=False)
 
                 except (rbd.ImageExists, rbd.InvalidArgument) as err:
@@ -228,14 +232,27 @@ class RBDDev(object):
         return valid_state
 
     @classmethod
-    def supported_features(cls, backstore):
+    def unsupported_features(cls, backstore):
         """
-        Return an int representing the supported features for LIO export
+        Return an int representing the unsupported features for LIO export
         :return: int
         """
         # build the required feature settings into an int
         feature_int = 0
-        for feature in RBDDev.rbd_feature_list[backstore]:
+        for feature in RBDDev.unsupported_features_list[backstore]:
+            feature_int += getattr(rbd, feature)
+
+        return feature_int
+
+    @classmethod
+    def default_features(cls, backstore):
+        """
+        Return an int representing the default features for image creation
+        :return: int
+        """
+        # build the required feature settings into an int
+        feature_int = 0
+        for feature in RBDDev.default_features_list[backstore]:
             feature_int += getattr(rbd, feature)
 
         return feature_int
@@ -269,12 +286,7 @@ class LUN(GWObject):
     DEFAULT_BACKSTORE = USER_RBD
 
     SETTINGS = {
-        USER_RBD: [
-            "max_data_area_mb",
-            "qfull_timeout",
-            "osd_op_timeout",
-            "hw_max_sectors"
-        ]
+        USER_RBD: TCMU_SETTINGS
     }
 
     def __init__(self, logger, pool, image, size, allocating_host,
@@ -286,9 +298,7 @@ class LUN(GWObject):
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}/{}'.format(self.pool, self.image)
 
-        # the allocating host could be fqdn or shortname - but the config
-        # only uses shortname so it needs to be converted to shortname format
-        self.allocating_host = allocating_host.split('.')[0]
+        self.allocating_host = allocating_host
         self.backstore = backstore
         self.backstore_object_name = backstore_object_name
 
@@ -316,7 +326,7 @@ class LUN(GWObject):
                               "continue".format(self.pool))
 
     def remove_lun(self, preserve_image):
-        this_host = gethostname().split('.')[0]
+        local_gw = this_host()
         self.logger.info("LUN deletion request received, rbd removal to be "
                          "performed by {}".format(self.allocating_host))
 
@@ -343,7 +353,7 @@ class LUN(GWObject):
 
         rbd_image = RBDDev(self.image, '0G', self.backstore, self.pool)
 
-        if this_host == self.allocating_host:
+        if local_gw == self.allocating_host:
             # by using the allocating host we ensure the delete is not
             # issue by several hosts when initiated through ansible
             if not preserve_image:
@@ -359,7 +369,7 @@ class LUN(GWObject):
             self.config.commit()
 
     def unmap_lun(self, target_iqn):
-        this_host = gethostname().split('.')[0]
+        local_gw = this_host()
         self.logger.info("LUN unmap request received, config commit to be "
                          "performed by {}".format(self.allocating_host))
 
@@ -388,11 +398,11 @@ class LUN(GWObject):
         if self.error:
             return
 
-        if this_host == self.allocating_host:
+        if local_gw == self.allocating_host:
             # by using the allocating host we ensure the delete is not
             # issue by several hosts when initiated through ansible
 
-            target_config['disks'].remove(self.config_key)
+            target_config['disks'].pop(self.config_key)
             self.config.update_item("targets", target_iqn, target_config)
 
             # determine which host was the path owner
@@ -416,13 +426,26 @@ class LUN(GWObject):
 
             self.config.commit()
 
-    def map_lun(self, gateway, owner, disk):
+    def _get_next_lun_id(self, target_disks):
+        lun_ids_in_use = [t['lun_id'] for t in target_disks.values()]
+        lun_id_candidate = 0
+        while lun_id_candidate in lun_ids_in_use:
+            lun_id_candidate += 1
+        return lun_id_candidate
+
+    def map_lun(self, gateway, owner, disk, lun_id=None):
         target_config = self.config.config['targets'][gateway.iqn]
         disk_metadata = self.config.config['disks'][disk]
         disk_metadata['owner'] = owner
         self.config.update_item("disks", disk, disk_metadata)
 
-        target_config['disks'].append(disk)
+        target_disk_config = target_config['disks'].get(disk)
+        if not target_disk_config:
+            if lun_id is None:
+                lun_id = self._get_next_lun_id(target_config['disks'])
+            target_config['disks'][disk] = {
+                'lun_id': lun_id
+            }
         self.config.update_item("targets", gateway.iqn, target_config)
 
         gateway_dict = self.config.config['gateways'][owner]
@@ -433,7 +456,7 @@ class LUN(GWObject):
         if self.error:
             raise CephiSCSIError(self.error_msg)
 
-        gateway.map_lun(self.config, so)
+        gateway.map_lun(self.config, so, target_config['disks'][disk])
         if gateway.error:
             raise CephiSCSIError(gateway.error_msg)
 
@@ -495,7 +518,7 @@ class LUN(GWObject):
             # Add the mapping for the lun to ensure the block device is
             # present on all TPG's
             gateway = GWTarget(self.logger, target_iqn, ip_list)
-            gateway.map_lun(self.config, so)
+            gateway.map_lun(self.config, so, target['disks'][self.config_key])
             if gateway.error:
                 raise CephiSCSIError("LUN mapping failed - {}".format(gateway.error_msg))
 
@@ -551,7 +574,7 @@ class LUN(GWObject):
             if client_err:
                 raise CephiSCSIError(client_err)
 
-    def allocate(self, keep_dev_in_lio=True):
+    def allocate(self, keep_dev_in_lio=True, in_wwn=None):
         """
         Create image and add to LIO and config.
 
@@ -565,9 +588,9 @@ class LUN(GWObject):
         self.logger.debug("rados pool '{}' contains the following - "
                           "{}".format(self.pool, disk_list))
 
-        this_host = gethostname().split('.')[0]
+        local_gw = this_host()
         self.logger.debug("Hostname Check - this host is {}, target host for "
-                          "allocations is {}".format(this_host,
+                          "allocations is {}".format(local_gw,
                                                      self.allocating_host))
 
         rbd_image = RBDDev(self.image, self.size_bytes, self.backstore, self.pool)
@@ -576,7 +599,7 @@ class LUN(GWObject):
         # if the image required isn't defined, create it!
         if self.image not in disk_list:
             # create the requested disk if this is the 'owning' host
-            if this_host == self.allocating_host:
+            if local_gw == self.allocating_host:
 
                 rbd_image.create()
 
@@ -616,9 +639,9 @@ class LUN(GWObject):
             else:
                 # rbd image is not valid for export, so abort
                 self.error = True
-                features = ','.join(RBDDev.rbd_feature_list[self.backstore])
+                features = ','.join(RBDDev.unsupported_features_list[self.backstore])
                 self.error_msg = ("(LUN.allocate) rbd '{}' is not compatible "
-                                  "with LIO\nOnly image features {} are"
+                                  "with LIO\nImage features {} are not"
                                   " supported".format(self.image, features))
                 self.logger.error(self.error_msg)
                 return None
@@ -627,7 +650,7 @@ class LUN(GWObject):
 
         # if updates_made is not set, the disk pre-exists so on the owning
         # host see if it needs to be resized
-        if self.num_changes == 0 and this_host == self.allocating_host:
+        if self.num_changes == 0 and local_gw == self.allocating_host:
 
             # check the size, and update if needed
             rbd_image.rbd_size()
@@ -655,17 +678,17 @@ class LUN(GWObject):
             # this image has not been defined to this hosts LIO, so check the
             # config for the details and if it's  missing define the
             # wwn/alua_state and update the config
-            if this_host == self.allocating_host:
+            if local_gw == self.allocating_host:
                 # first check to see if the device needs adding
                 try:
                     wwn = self.config.config['disks'][self.config_key]['wwn']
                 except KeyError:
                     wwn = ''
 
-                if wwn == '':
+                if wwn == '' or in_wwn is not None:
                     # disk hasn't been defined to LIO yet, it' not been defined
                     # to the config yet and this is the allocating host
-                    so = self.add_dev_to_lio()
+                    so = self.add_dev_to_lio(in_wwn)
                     if self.error:
                         return None
 
@@ -762,7 +785,7 @@ class LUN(GWObject):
 
         # the owning host for an image is the only host that commits to the
         # config
-        if this_host == self.allocating_host and self.config.changed:
+        if local_gw == self.allocating_host and self.config.changed:
 
             self.logger.debug("(LUN.allocate) Committing change(s) to the "
                               "config object in pool {}".format(self.pool))
@@ -990,9 +1013,16 @@ class LUN(GWObject):
             if not disk_regex.search(kwargs['image']):
                 return "Invalid image name (use alphanumeric, '_', '.', or '-' characters)"
 
+            if kwargs['wwn'] is not None:
+                for disk_id, disk_config in config['disks'].items():
+                    if disk_config['wwn'] == kwargs['wwn']:
+                        return "WWN {} is already in use by {}".format(kwargs['wwn'], disk_id)
+
             if kwargs['count'].isdigit():
                 if not 1 <= int(kwargs['count']) <= 10:
                     return "invalid count specified, must be an integer (1-10)"
+                if int(kwargs['count']) > 1 and kwargs['wwn'] is not None:
+                    return "WWN cannot be specified when count > 1"
             else:
                 return "invalid count specified, must be an integer (1-10)"
 
@@ -1177,7 +1207,7 @@ class LUN(GWObject):
             return
 
         disks = {}
-        for disk in target_disks:
+        for disk in target_disks.keys():
             disks[disk] = config.config['disks'][disk]
 
         # sort the disks dict keys, so the disks are registered in a specific
@@ -1228,7 +1258,7 @@ class LUN(GWObject):
                                 RBDDev.rbd_lock_cleanup(logger, ips,
                                                         rbd_image)
 
-                            target._map_lun(config, so)
+                            target._map_lun(config, so, target_disks[disk_key])
                             if target.error:
                                 raise CephiSCSIError("Mapping for {} failed: {}"
                                                      .format(disk_key,

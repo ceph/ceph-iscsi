@@ -13,11 +13,9 @@ import OpenSSL
 import threading
 import time
 import inspect
-import platform
 import copy
 
 from functools import (reduce, wraps)
-from rpm import labelCompare
 import rados
 import rbd
 
@@ -26,6 +24,7 @@ from flask import Flask, jsonify, request
 from rtslib_fb.utils import RTSLibError, normalize_wwn
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.gateway_setting import IntSetting, EnumSetting
 from ceph_iscsi_config.gateway import CephiSCSIGateway
 from ceph_iscsi_config.discovery import Discovery
 from ceph_iscsi_config.target import GWTarget
@@ -34,10 +33,10 @@ from ceph_iscsi_config.lun import RBDDev, LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
-                                     ip_addresses, gen_file_hash, valid_rpm,
-                                     format_lio_yes_no, CephiSCSIError)
+                                     ip_addresses, read_os_release, encryption_available,
+                                     CephiSCSIError, this_host)
 
-from gwcli.utils import (this_host, APIRequest, valid_gateway, valid_client,
+from gwcli.utils import (APIRequest, valid_gateway, valid_client,
                          valid_credentials, get_remote_gateways, valid_snapshot_name,
                          GatewayAPIError)
 
@@ -182,7 +181,7 @@ def get_sys_info(query_type=None):
 
     elif query_type == 'checkconf':
 
-        local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
+        local_hash = settings.config.hash()
         return jsonify(data=local_hash), 200
 
     elif query_type == 'checkversions':
@@ -212,7 +211,7 @@ def parse_target_controls(request):
 
     controls = _parse_controls(request.form['controls'], GWTarget.SETTINGS)
     for k, v in controls.items():
-        if k in GWClient.SETTINGS:
+        if GWClient.SETTINGS.get(k):
             client_controls[k] = v
         else:
             tpg_controls[k] = v
@@ -231,7 +230,7 @@ def get_targets():
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/targets
     """
 
-    return jsonify({'targets': config.config['targets'].keys()}), 200
+    return jsonify({'targets': list(config.config['targets'].keys())}), 200
 
 
 @app.route('/api/target/<target_iqn>', methods=['PUT', 'DELETE'])
@@ -397,7 +396,7 @@ def local_target_reconfigure(target_iqn, tpg_controls, client_controls):
     target_config = config.config['targets'][target_iqn]
     for client_iqn in target_config['clients']:
         client_metadata = target_config['clients'][client_iqn]
-        image_list = client_metadata['luns'].keys()
+        image_list = list(client_metadata['luns'].keys())
         client_auth_config = client_metadata['auth']
         client_chap = CHAP(client_auth_config['username'],
                            client_auth_config['password'],
@@ -521,6 +520,15 @@ def get_config():
                         discovery_auth_config['mutual_password_encryption_enabled'])
             discovery_auth_config['mutual_password'] = chap.password
             for _, target in result_config['targets'].items():
+                target_auth_config = target['auth']
+                chap = CHAP(target_auth_config['username'],
+                            target_auth_config['password'],
+                            target_auth_config['password_encryption_enabled'])
+                target_auth_config['password'] = chap.password
+                chap = CHAP(target_auth_config['mutual_username'],
+                            target_auth_config['mutual_password'],
+                            target_auth_config['mutual_password_encryption_enabled'])
+                target_auth_config['mutual_password'] = chap.password
                 for _, client in target['clients'].items():
                     auth_config = client['auth']
                     chap = CHAP(auth_config['username'],
@@ -567,11 +575,12 @@ def gateway(target_iqn=None, gateway_name=None):
     required for PUT only.
     :param target_iqn: (str) target iqn
     :param gateway_name: (str) gateway name
-    :param ip_address: (str) IPv4/IPv6 address iSCSI should use
+    :param ip_address: (str) IPv4/IPv6 addresses iSCSI should use
     :param nosync: (bool) whether to sync the LIO objects to the new gateway
            default: FALSE
     :param skipchecks: (bool) whether to skip OS/software versions checks
            default: FALSE
+    :param force: (bool) if True will force removal of gateway.
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d ip_address=192.168.122.69
@@ -596,7 +605,11 @@ def gateway(target_iqn=None, gateway_name=None):
     target_config = config.config['targets'][target_iqn]
 
     if request.method == 'PUT':
-        ip_address = request.form.get('ip_address')
+        if gateway_name in target_config['portals']:
+            err_str = "Gateway already exists in configuration"
+            logger.error(err_str)
+            return jsonify(message=err_str), 400
+        ip_address = request.form.get('ip_address').split(',')
         nosync = request.form.get('nosync', 'false')
         skipchecks = request.form.get('skipchecks', 'false')
 
@@ -624,7 +637,7 @@ def gateway(target_iqn=None, gateway_name=None):
             nosync = 'true'
 
         gateway_ip_list = target_config.get('ip_list', [])
-        gateway_ip_list.append(ip_address)
+        gateway_ip_list += ip_address
 
         op = 'creation'
         api_vars = {"gateway_ip_list": ",".join(gateway_ip_list),
@@ -645,10 +658,21 @@ def gateway(target_iqn=None, gateway_name=None):
     if first_gateway:
         gateways = ['localhost']
     elif request.method == 'DELETE':
-        # Update the deleted gw first, so the other gws see the updated
-        # portal list
         gateways.remove(gateway_name)
-        gateways.insert(0, gateway_name)
+
+        if gateway_name != this_host() and request.form.get('force', 'false').lower() == 'true':
+            # The gw we want to delete is down and the user has decided to
+            # force the deletion, so we do the config modification locally
+            # then only tell the other gws to update their state.
+            try:
+                ceph_gw = CephiSCSIGateway(logger, config, gateway_name)
+                ceph_gw.remove_from_config(target_iqn)
+            except CephiSCSIError as err:
+                return jsonify(message="Could not update config: {}.".format(err)), 400
+        else:
+            # Update the deleted gw first, so the other gws see the updated
+            # portal list
+            gateways.insert(0, gateway_name)
     else:
         # Update the new gw first, so other gws see the updated gateways list.
         gateways.insert(0, gateway_name)
@@ -777,8 +801,18 @@ def target_disk(target_iqn=None):
         owner = LUN.get_owner(config.config['gateways'], target_config['portals'])
         logger.debug("{} owner will be {}".format(disk, owner))
 
+        lun_id = request.form.get('lun_id')
+        if lun_id is not None:
+            try:
+                lun_id_int = int(lun_id)
+            except ValueError:
+                return jsonify(message="Lun id must be a number"), 400
+            for target_disk in target_config['disks'].values():
+                if lun_id_int == target_disk['lun_id']:
+                    return jsonify(message="Lun id {} already in use".format(lun_id)), 400
         api_vars = {
             'disk': disk,
+            'lun_id': lun_id,
             'owner': owner,
             'allocating_host': local_gw
         }
@@ -834,6 +868,8 @@ def _target_disk(target_iqn=None):
     **RESTRICTED**
     """
 
+    config.refresh()
+
     disk = request.form.get('disk')
     pool, image = disk.split('/', 1)
     disk_config = config.config['disks'][disk]
@@ -869,9 +905,11 @@ def _target_disk(target_iqn=None):
             logger.error("Error initializing the LUN : "
                          "{}".format(lun.error_msg))
             return jsonify(message="Error establishing LUN instance"), 500
-
+        lun_id = request.form.get('lun_id')
+        if lun_id is not None:
+            lun_id = int(lun_id)
         try:
-            lun.map_lun(gateway, owner, disk)
+            lun.map_lun(gateway, owner, disk, lun_id)
         except CephiSCSIError as err:
             status_code = 400 if str(err) else 500
             logger.error("LUN add failed : {}".format(err))
@@ -924,7 +962,7 @@ def get_disks():
         disk_names = config.config['disks']
         response = {"disks": disk_names}
     else:
-        disk_names = config.config['disks'].keys()
+        disk_names = list(config.config['disks'].keys())
         response = {"disks": disk_names}
 
     return jsonify(response), 200
@@ -952,6 +990,7 @@ def disk(pool, image):
     :param preserve_image: (bool) do NOT delete RBD image
     :param create_image: (bool) create RBD image if not exists
     :param backstore: (str) lio backstore
+    :param wwn: (str) unit serial number
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
@@ -966,6 +1005,8 @@ def disk(pool, image):
     logger.debug("this host is {}".format(local_gw))
 
     image_id = '{}/{}'.format(pool, image)
+
+    config.refresh()
 
     if request.method == 'GET':
 
@@ -1010,9 +1051,11 @@ def disk(pool, image):
                                        "{}".format(err)), 500
             logger.debug("{} controls {}".format(mode, controls))
 
+        wwn = request.form.get('wwn')
         disk_usable = LUN.valid_disk(config, logger, pool=pool,
                                      image=image, size=size, mode=mode,
-                                     count=count, controls=controls, backstore=backstore)
+                                     count=count, controls=controls,
+                                     backstore=backstore, wwn=wwn)
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
@@ -1049,7 +1092,8 @@ def disk(pool, image):
                         'size': size,
                         'owner': local_gw,
                         'mode': mode,
-                        'backstore': backstore}
+                        'backstore': backstore,
+                        'wwn': wwn}
             if 'controls' in request.form:
                 api_vars['controls'] = request.form['controls']
 
@@ -1106,6 +1150,8 @@ def _disk(pool, image):
 
     image_id = '{}/{}'.format(pool, image)
 
+    config.refresh()
+
     if request.method == 'GET':
         if image_id in config.config['disks']:
             return jsonify(config.config["disks"][image_id]), 200
@@ -1159,7 +1205,7 @@ def _disk(pool, image):
                              " : {}".format(lun.error_msg))
                 return jsonify(message="Unable to establish LUN instance"), 500
 
-            lun.allocate(False)
+            lun.allocate(False, request.form.get('wwn'))
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
                 return jsonify(message="LUN allocation failure"), 500
@@ -1173,7 +1219,6 @@ def _disk(pool, image):
                 return jsonify(message="LUN resized"), 200
 
         elif mode in ['activate', 'deactivate']:
-            config.refresh()
             disk = config.config['disks'].get(image_id, None)
             if not disk:
                 return jsonify(message="rbd image {} not "
@@ -1553,9 +1598,19 @@ def _discoveryauth():
 @requires_restricted_auth
 def targetauth(target_iqn=None):
     """
-    Coordinate the gen-acls across each gateway node
+    Coordinate the gen-acls or CHAP/MUTUAL_CHAP across each gateway node
     :param target_iqn: (str) IQN of the target
     :param action: (str) action to be performed
+    :param username: (str) username string is 8-64 chars long containing any alphanumeric in
+                           [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+    :param password: (str) password string is 12-16 chars long containing any alphanumeric in
+                           [0-9a-zA-Z] and '@' '-' '_' '/'
+    :param mutual_username: (str) mutual_username string is 8-64 chars long containing any
+                            alphanumeric in
+                            [0-9a-zA-Z] and '.' ':' '@' '_' '-'
+    :param mutual_password: (str) mutual_password string is 12-16 chars long containing any
+                            alphanumeric in
+                            [0-9a-zA-Z] and '@' '-' '_' '/'
     **RESTRICTED**
     Examples:
     curl --insecure --user admin:admin -d auth='disable_acl'
@@ -1563,7 +1618,7 @@ def targetauth(target_iqn=None):
     """
 
     action = request.form.get('action')
-    if action not in ['disable_acl', 'enable_acl']:
+    if action and action not in ['disable_acl', 'enable_acl']:
         return jsonify(message='Invalid auth {}'.format(action)), 400
 
     target_config = config.config['targets'][target_iqn]
@@ -1571,6 +1626,30 @@ def targetauth(target_iqn=None):
     if action == 'disable_acl' and target_config['clients'].keys():
         return jsonify(message='Cannot disable ACL authentication '
                                'because target has clients'), 400
+
+    # Mixing TPG/target auth with ACL is not supported
+    if action == 'enable_acl':
+        target_username = target_config['auth']['username']
+        target_password = target_config['auth']['password']
+        target_auth_enabled = (target_username and target_password)
+        if target_auth_enabled:
+            return jsonify(message="Cannot enable ACL authentication "
+                                   "because target CHAP authentication is enabled"), 400
+
+    username = request.form.get('username', '')
+    password = request.form.get('password', '')
+    mutual_username = request.form.get('mutual_username', '')
+    mutual_password = request.form.get('mutual_password', '')
+
+    # Mixing TPG/target auth with ACL is not supported
+    auth_enabled = (username and password)
+    if auth_enabled and target_config['acl_enabled']:
+        return jsonify(message="Cannot enable target CHAP authentication "
+                               "because ACL authentication is enabled"), 400
+
+    error_msg = valid_credentials(username, password, mutual_username, mutual_password)
+    if error_msg:
+        return jsonify(message=error_msg), 400
 
     try:
         gateways = get_remote_gateways(target_config['portals'], logger)
@@ -1582,7 +1661,11 @@ def targetauth(target_iqn=None):
     # Apply to all gateways
     api_vars = {
         "committing_host": local_gw,
-        "action": action
+        "action": action,
+        "username": username,
+        "password": password,
+        "mutual_username": mutual_username,
+        "mutual_password": mutual_password,
     }
     resp_text, resp_code = call_api(gateways, '_targetauth',
                                     target_iqn,
@@ -1596,7 +1679,7 @@ def targetauth(target_iqn=None):
 @requires_restricted_auth
 def _targetauth(target_iqn=None):
     """
-    Apply gen-acls on the local gateway
+    Apply gen-acls or CHAP/MUTUAL_CHAP on the local gateway
     Internal Use ONLY
     **RESTRICTED**
     """
@@ -1605,19 +1688,49 @@ def _targetauth(target_iqn=None):
 
     local_gw = this_host()
     committing_host = request.form['committing_host']
-    action = request.form['action']
+    action = request.form.get('action')
+    username = request.form['username']
+    password = request.form['password']
+    mutual_username = request.form['mutual_username']
+    mutual_password = request.form['mutual_password']
 
     target = GWTarget(logger, target_iqn, [])
 
-    acl_enabled = (action == 'enable_acl')
+    target_config = config.config['targets'][target_iqn]
 
     if target.exists():
         target.load_config()
-        target.update_acl(acl_enabled)
+        if action in ['disable_acl', 'enable_acl']:
+            acl_enabled = (action == 'enable_acl')
+            target.update_acl(acl_enabled)
+        else:
+            tpg = target.get_tpg_by_gateway_name(local_gw)
+            target.update_auth(tpg, username, password,
+                               mutual_username, mutual_password)
 
     if committing_host == local_gw:
-        target_config = config.config['targets'][target_iqn]
-        target_config['acl_enabled'] = acl_enabled
+        if action in ['disable_acl', 'enable_acl']:
+            acl_enabled = (action == 'enable_acl')
+            target_config['acl_enabled'] = acl_enabled
+        else:
+            encryption_enabled = encryption_available()
+            auth_config = {
+                'username': '',
+                'password': '',
+                'password_encryption_enabled': encryption_enabled,
+                'mutual_username': '',
+                'mutual_password': '',
+                'mutual_password_encryption_enabled': encryption_enabled
+            }
+            if username != '':
+                chap = CHAP(username, password, encryption_enabled)
+                chap_mutual = CHAP(mutual_username, mutual_password, encryption_enabled)
+                auth_config['username'] = chap.user
+                auth_config['password'] = chap.encrypted_password(encryption_enabled)
+                auth_config['mutual_username'] = chap_mutual.user
+                auth_config['mutual_password'] = chap_mutual.encrypted_password(encryption_enabled)
+            target_config['auth'] = auth_config
+
         config.update_item('targets', target_iqn, target_config)
         config.commit("retain")
 
@@ -1635,11 +1748,15 @@ def targetinfo(target_iqn):
         http://192.168.122.69:5000/api/targetinfo/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
     if target_iqn not in config.config['targets']:
-        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 404
     target_config = config.config['targets'][target_iqn]
     gateways = target_config['portals']
     num_sessions = 0
     for gateway in gateways.keys():
+        target_state = target_ready([gateway])
+        if target_state.get('status_api') == 'UP' and target_state.get('status_iscsi') == 'DOWN':
+            # If API is 'up' and iSCSI is 'down', there are no active sessions to count
+            continue
         resp_text, resp_code = call_api([gateway], '_targetinfo', target_iqn, http_method='get')
         if resp_code != 200:
             return jsonify(message="{}".format(resp_text)), resp_code
@@ -1661,11 +1778,7 @@ def _targetinfo(target_iqn):
         http://192.168.122.69:5000/api/_targetinfo/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
     if target_iqn not in config.config['targets']:
-        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
-    target_config = config.config['targets'][target_iqn]
-    local_gw = this_host()
-    if local_gw not in target_config['portals']:
-        return jsonify(message="{} is not a portal of target {}".format(local_gw, target_iqn)), 400
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 404
     num_sessions = GWTarget.get_num_sessions(target_iqn)
     return jsonify({
         "num_sessions": num_sessions
@@ -1684,7 +1797,7 @@ def gatewayinfo():
     """
     local_gw = this_host()
     if local_gw not in config.config['gateways']:
-        return jsonify(message="Gateway {} does not exist in configuration".format(local_gw)), 400
+        return jsonify(message="Gateway {} does not exist in configuration".format(local_gw)), 404
     num_sessions = 0
     for target_iqn, target in config.config['targets'].items():
         if local_gw in target['portals']:
@@ -1714,7 +1827,7 @@ def get_clients(target_iqn=None):
         return jsonify(message=err_str), 500
 
     target_config = config.config['targets'][target_iqn]
-    client_list = target_config['clients'].keys()
+    client_list = list(target_config['clients'].keys())
     response = {"clients": client_list}
 
     return jsonify(response), 200
@@ -2147,10 +2260,10 @@ def clientinfo(target_iqn, client_iqn):
         iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw-client
     """
     if target_iqn not in config.config['targets']:
-        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 404
     target_config = config.config['targets'][target_iqn]
     if client_iqn not in target_config['clients']:
-        return jsonify(message="Client {} does not exist".format(client_iqn)), 400
+        return jsonify(message="Client {} does not exist".format(client_iqn)), 404
     gateways = target_config['portals']
     response = {
         "alias": '',
@@ -2190,13 +2303,10 @@ def _clientinfo(target_iqn, client_iqn):
         iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw-client
     """
     if target_iqn not in config.config['targets']:
-        return jsonify(message="Target {} does not exist".format(target_iqn)), 400
+        return jsonify(message="Target {} does not exist".format(target_iqn)), 404
     target_config = config.config['targets'][target_iqn]
     if client_iqn not in target_config['clients']:
-        return jsonify(message="Client {} does not exist".format(client_iqn)), 400
-    local_gw = this_host()
-    if local_gw not in target_config['portals']:
-        return jsonify(message="{} is not a portal of target {}".format(local_gw, target_iqn)), 400
+        return jsonify(message="Client {} does not exist".format(client_iqn)), 404
 
     logged_in = GWClient.get_client_info(target_iqn, client_iqn)
     return jsonify(logged_in), 200
@@ -2221,7 +2331,7 @@ def hostgroups(target_iqn=None):
 
     target_config = config.config['targets'][target_iqn]
     if request.method == 'GET':
-        return jsonify({"groups": target_config['groups'].keys()}), 200
+        return jsonify({"groups": list(target_config['groups'].keys())}), 200
 
 
 @app.route('/api/hostgroup/<target_iqn>/<group_name>', methods=['GET', 'PUT', 'DELETE'])
@@ -2348,6 +2458,25 @@ def hostgroup(target_iqn, group_name):
                                                          api.response.json()['message'])), 400
 
 
+def fill_settings_dict(def_settings):
+    defaults = {}
+    limits = {}
+
+    for k, setting in def_settings.items():
+        # Return normalized value to match get_config()'s format
+        defaults[k] = getattr(settings.config, k)
+
+        if isinstance(setting, IntSetting):
+            limits[k] = {'min': setting.min_val, 'max': setting.max_val,
+                         'type': setting.type_str}
+        elif isinstance(setting, EnumSetting):
+            limits[k] = {'values': setting.valid_vals, 'type': setting.type_str}
+        else:
+            limits[k] = {'type': setting.type_str}
+
+    return defaults, limits
+
+
 @app.route('/api/settings', methods=['GET'])
 @requires_restricted_auth
 def get_settings():
@@ -2358,35 +2487,31 @@ def get_settings():
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/settings
     """
 
-    target_default_controls = {}
-    settings_list = GWTarget.SETTINGS
-    for k in settings_list:
-        default_val = getattr(settings.config, k, None)
-        if k in settings.Settings.LIO_YES_NO_SETTINGS:
-            default_val = format_lio_yes_no(default_val)
-        target_default_controls[k] = default_val
+    target_default_controls, target_controls_limits = fill_settings_dict(GWTarget.SETTINGS)
 
     disk_default_controls = {}
+    disk_controls_limits = {}
     required_rbd_features = {}
-    supported_rbd_features = {}
-    for backstore, ks in LUN.SETTINGS.items():
-        disk_default_controls[backstore] = {}
-        for k in ks:
-            default_val = getattr(settings.config, k, None)
-            disk_default_controls[backstore][k] = default_val
-        required_rbd_features[backstore] = RBDDev.required_features(backstore)
-        supported_rbd_features[backstore] = RBDDev.supported_features(backstore)
+    unsupported_rbd_features = {}
+    for bs, bs_settings in LUN.SETTINGS.items():
+        disk_default_controls[bs], disk_controls_limits[bs] = fill_settings_dict(bs_settings)
+
+        required_rbd_features[bs] = RBDDev.required_features(bs)
+        unsupported_rbd_features[bs] = RBDDev.unsupported_features(bs)
 
     return jsonify({
         'target_default_controls': target_default_controls,
+        'target_controls_limits': target_controls_limits,
         'disk_default_controls': disk_default_controls,
-        'supported_rbd_features': supported_rbd_features,
+        'disk_controls_limits': disk_controls_limits,
+        'unsupported_rbd_features': unsupported_rbd_features,
         'required_rbd_features': required_rbd_features,
         'backstores': LUN.BACKSTORES,
         'default_backstore': LUN.DEFAULT_BACKSTORE,
         'config': {
             'minimum_gateways': settings.config.minimum_gateways
-        }
+        },
+        'api_version': 1
     }), 200
 
 
@@ -2491,6 +2616,8 @@ def target_ready(gateway_list):
     """
     http_mode = 'https' if settings.config.api_secure else 'http'
     target_state = {"status": 'OK',
+                    "status_iscsi": 'UP',
+                    "status_api": 'UP',
                     "summary": ''}
 
     for gw in gateway_list:
@@ -2502,15 +2629,21 @@ def target_ready(gateway_list):
             api.get()
         except GatewayAPIError:
             target_state['status'] = 'NOTOK'
+            target_state['status_iscsi'] = 'UNKNOWN'
+            target_state['status_api'] = 'DOWN'
             target_state['summary'] += ',{}(iscsi Unknown, API down)'.format(gw)
         else:
             if api.response.status_code == 200:
                 continue
             elif api.response.status_code == 503:
                 target_state['status'] = 'NOTOK'
+                target_state['status_iscsi'] = 'DOWN'
+                target_state['status_api'] = 'UP'
                 target_state['summary'] += ',{}(iscsi down, API up)'.format(gw)
             else:
                 target_state['status'] = 'NOTOK'
+                target_state['status_iscsi'] = 'UNKNOWN'
+                target_state['status_api'] = 'UNKNOWN'
                 target_state['summary'] += ',{}(UNKNOWN state)'.format(gw)
 
     target_state['summary'] = target_state['summary'][1:]   # ignore 1st char
@@ -2592,63 +2725,40 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
 
 def pre_reqs_errors():
     """
-    function to check pre-req rpms are installed and at the relevant versions
+    function to check pre-reqs are installed and at the relevant versions
 
     :return: list of configuration errors detected
     """
 
     dist_translations = {
-        "centos": "redhat"}
+        "centos": "rhel",
+        "opensuse-leap": "suse"}
     valid_dists = {
-        "redhat": 7.4}
-
-    required_rpms = [
-        {"name": "python-rtslib",
-         "version": "2.1.fb64",
-         "release": "0.1"},
-        {"name": "tcmu-runner",
-         "version": "1.3.0",
-         "release": "0.2.3"}
-    ]
-
-    k_vers = '3.10.0'
-    k_rel = '823.el7'
+        "rhel": 7.4,
+        "suse": 15.1,
+        "debian": 10,
+        "ubuntu": 18.04}
 
     errors_found = []
 
-    dist, rel, dist_id = platform.linux_distribution(full_distribution_name=0)
+    os_release = read_os_release()
+    dist = os_release.get('ID', '')
+    rel = os_release.get('VERSION_ID')
 
     dist = dist.lower()
     dist = dist_translations.get(dist, dist)
+
     if dist in valid_dists:
+        if dist == 'rhel':
+            import platform
+            _, rel, _ = platform.linux_distribution(full_distribution_name=0)
         # CentOS formats a release similar 7.4.1708
         rel = float(".".join(rel.split('.')[:2]))
         if rel < valid_dists[dist]:
             errors_found.append("OS version is unsupported")
 
-        # check rpm versions are OK
-        for rpm in required_rpms:
-            if not valid_rpm(rpm):
-                logger.error("RPM check for {} failed".format(rpm['name']))
-                errors_found.append("{} rpm must be installed at >= "
-                                    "{}-{}".format(rpm['name'],
-                                                   rpm['version'],
-                                                   rpm['release']))
     else:
         errors_found.append("OS is unsupported")
-
-    # check the running kernel is OK (required kernel has patches to rbd.ko)
-    os_info = os.uname()
-    this_arch = os_info[-1]
-    this_kernel = os_info[2].replace(".{}".format(this_arch), '')
-    this_ver, this_rel = this_kernel.split('-', 1)
-
-    # use labelCompare from the rpm module to handle the comparison
-    if labelCompare(('1', this_ver, this_rel), ('1', k_vers, k_rel)) < 0:
-        logger.error("Kernel version check failed")
-        errors_found.append("Kernel version too old - {}-{} "
-                            "or above needed".format(k_vers,
-                                                     k_rel))
 
     return errors_found
 
@@ -2802,6 +2912,9 @@ def signal_reload(*args):
 
 if __name__ == '__main__':
 
+    settings.init()
+    logger_level = logging.getLevelName(settings.config.logger_level)
+
     # Setup signal handlers for interaction with systemd
     signal.signal(signal.SIGTERM, signal_stop)
     signal.signal(signal.SIGHUP, signal_reload)
@@ -2820,7 +2933,7 @@ if __name__ == '__main__':
     file_handler = RotatingFileHandler('/var/log/rbd-target-api/rbd-target-api.log',
                                        maxBytes=5242880,
                                        backupCount=7)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logger_level)
     file_format = logging.Formatter(
         "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "
         "- %(message)s")
@@ -2828,8 +2941,6 @@ if __name__ == '__main__':
 
     logger.addHandler(syslog_handler)
     logger.addHandler(file_handler)
-
-    settings.init()
 
     # config is set in the outer scope, so it's easily accessible to all
     # api functions

@@ -1,4 +1,5 @@
 import rados
+import socket
 import time
 import json
 import traceback
@@ -29,8 +30,18 @@ class CephCluster(object):
 
         self.error = False
         self.error_msg = ''
-        self.cluster = rados.Rados(conffile=settings.config.cephconf,
-                                   name=settings.config.cluster_client_name)
+        self.cluster = None
+
+        conf = settings.config.cephconf
+
+        try:
+            self.cluster = rados.Rados(conffile=conf,
+                                       name=settings.config.cluster_client_name)
+        except rados.Error as err:
+            self.error = True
+            self.error_msg = "Invaid cluster_client_name or setting in {} - {}".format(conf, err)
+            return
+
         try:
             self.cluster.connect()
         except rados.Error as err:
@@ -38,7 +49,8 @@ class CephCluster(object):
             self.error_msg = "Unable to connect to the cluster (keyring missing?) - {}".format(err)
 
     def __del__(self):
-        self.cluster.shutdown()
+        if self.cluster:
+            self.cluster.shutdown()
 
     def shutdown(self):
         self.cluster.shutdown()
@@ -55,7 +67,7 @@ class Config(object):
                                       'mutual_username': '',
                                       'mutual_password': '',
                                       'mutual_password_encryption_enabled': False},
-                   "version": 8,
+                   "version": 11,
                    "epoch": 0,
                    "created": '',
                    "updated": ''
@@ -159,8 +171,25 @@ class Config(object):
 
         return cfg_dict
 
+    def needs_hostname_update(self):
+        if self.config['version'] == 9:
+            # No gateway has been updated yet.
+            return True
+
+        updated = self.config.get('gateways_upgraded')
+        if updated is None:
+            # Everything has been updated or we are < 9
+            return False
+
+        if socket.getfqdn() in updated:
+            return False
+
+        return True
+
     def _upgrade_config(self):
-        if self.config['version'] >= Config.seed_config['version']:
+        update_hostname = self.needs_hostname_update()
+
+        if self.config['version'] >= Config.seed_config['version'] and not update_hostname:
             return
 
         if self.config['version'] <= 2:
@@ -168,52 +197,58 @@ class Config(object):
             self.update_item("version", element_name=None, element_value=3)
 
         if self.config['version'] == 3:
-            iqn = self.config['gateways']['iqn']
+            iqn = self.config['gateways'].get('iqn', None)
             gateways = {}
             portals = {}
-            for host, gateway_v3 in self.config['gateways'].items():
-                if isinstance(gateway_v3, dict):
-                    portal = gateway_v3
-                    portal.pop('iqn')
-                    active_luns = portal.pop('active_luns')
-                    updated = portal.pop('updated', None)
-                    created = portal.pop('created', None)
-                    gateway = {
-                        'active_luns': active_luns
-                    }
-                    if created:
-                        gateway['created'] = created
-                    if updated:
-                        gateway['updated'] = updated
-                    gateways[host] = gateway
-                    portals[host] = portal
-            for _, client in self.config['clients'].items():
-                client.pop('created', None)
-                client.pop('updated', None)
-                client['auth']['chap_mutual'] = ''
-            for _, group in self.config['groups'].items():
-                group.pop('created', None)
-                group.pop('updated', None)
-            target = {
-                'disks': list(self.config['disks'].keys()),
-                'clients': self.config['clients'],
-                'portals': portals,
-                'groups': self.config['groups'],
-                'controls': self.config.get('controls', {}),
-                'ip_list': self.config['gateways']['ip_list']
-            }
+
+            self.add_item("targets", None, {})
             self.add_item('discovery_auth', None, {
                 'chap': '',
                 'chap_mutual': ''
             })
-            self.add_item("targets", None, {})
-            self.add_item("targets", iqn, target)
-            self.update_item("targets", iqn, target)
+
+            if iqn:
+                for host, gateway_v3 in self.config['gateways'].items():
+                    if isinstance(gateway_v3, dict):
+                        portal = gateway_v3
+                        portal.pop('iqn')
+                        active_luns = portal.pop('active_luns')
+                        updated = portal.pop('updated', None)
+                        created = portal.pop('created', None)
+                        gateway = {
+                            'active_luns': active_luns
+                        }
+                        if created:
+                            gateway['created'] = created
+                        if updated:
+                            gateway['updated'] = updated
+                        gateways[host] = gateway
+                        portals[host] = portal
+                for _, client in self.config['clients'].items():
+                    client.pop('created', None)
+                    client.pop('updated', None)
+                    client['auth']['chap_mutual'] = ''
+                for _, group in self.config['groups'].items():
+                    group.pop('created', None)
+                    group.pop('updated', None)
+                target = {
+                    'disks': list(self.config['disks'].keys()),
+                    'clients': self.config['clients'],
+                    'portals': portals,
+                    'groups': self.config['groups'],
+                    'controls': self.config.get('controls', {}),
+                    'ip_list': self.config['gateways']['ip_list']
+                }
+                self.add_item("targets", iqn, target)
+                self.update_item("targets", iqn, target)
+
+            self.update_item("gateways", None, gateways)
+
             if 'controls' in self.config:
                 self.del_item('controls', None)
             self.del_item('clients', None)
             self.del_item('groups', None)
-            self.update_item("gateways", None, gateways)
+
             self.update_item("version", None, 4)
 
         if self.config['version'] == 4:
@@ -306,6 +341,82 @@ class Config(object):
 
                 self.update_item("targets", target_iqn, target)
             self.update_item("version", None, 8)
+
+        if self.config['version'] == 8:
+            for target_iqn, target in self.config['targets'].items():
+                for _, portal in target['portals'].items():
+                    portal['portal_ip_addresses'] = [portal['portal_ip_address']]
+                    portal.pop('portal_ip_address')
+                self.update_item("targets", target_iqn, target)
+            self.update_item("version", None, 9)
+
+        if self.config['version'] == 9 or update_hostname:
+            # temporary field to store the gateways already upgraded from v9 to v10
+            gateways_upgraded = self.config.get('gateways_upgraded')
+            if not gateways_upgraded:
+                gateways_upgraded = []
+                self.add_item('gateways_upgraded', None, gateways_upgraded)
+            this_shortname = socket.gethostname().split('.')[0]
+            this_fqdn = socket.getfqdn()
+            if this_fqdn not in gateways_upgraded:
+                gateways_config = self.config['gateways']
+                gateway_config = gateways_config.get(this_shortname)
+                if gateway_config:
+                    gateways_config.pop(this_shortname)
+                    gateways_config[this_fqdn] = gateway_config
+                    self.update_item("gateways", None, gateways_config)
+                for target_iqn, target in self.config['targets'].items():
+                    portals_config = target['portals']
+                    portal_config = portals_config.get(this_shortname)
+                    if portal_config:
+                        portals_config.pop(this_shortname)
+                        portals_config[this_fqdn] = portal_config
+                        self.update_item("targets", target_iqn, target)
+                for disk_id, disk in self.config['disks'].items():
+                    if disk.get('allocating_host') == this_shortname:
+                        disk['allocating_host'] = this_fqdn
+                    if disk.get('owner') == this_shortname:
+                        disk['owner'] = this_fqdn
+                    self.update_item("disks", disk_id, disk)
+                gateways_upgraded.append(this_fqdn)
+                self.update_item("gateways_upgraded", None, gateways_upgraded)
+
+            if any(gateway_name not in gateways_upgraded
+                   for gateway_name in self.config['gateways'].keys()):
+                self.logger.debug("gateways upgraded to 10: {}".
+                                  format(gateways_upgraded))
+            else:
+                self.del_item("gateways_upgraded", None)
+
+            if self.config['version'] == 9:
+                # Upgrade from v9 to v10 is still in progress. Update the
+                # version now, so we can update the other config fields and
+                # setup the target to execute IO while the other gws upgrade.
+                self.update_item("version", None, 10)
+
+        # Currently, the versions below do not rely on fields being updated
+        # in the 9->10 upgrade which needs to execute on every node before
+        # completing. If this changes, we will need to fix how we handle
+        # rolling upgrades, so new versions have access to the updated fields
+        # on all gws before completing the upgrade.
+        if self.config['version'] == 10:
+            for target_iqn, target in self.config['targets'].items():
+                target['auth'] = {
+                    'username': '',
+                    'password': '',
+                    'password_encryption_enabled': False,
+                    'mutual_username': '',
+                    'mutual_password': '',
+                    'mutual_password_encryption_enabled': False
+                }
+                disks = {}
+                for disk_index, disk in enumerate(sorted(target['disks'])):
+                    disks[disk] = {
+                        'lun_id': disk_index
+                    }
+                target['disks'] = disks
+                self.update_item("targets", target_iqn, target)
+            self.update_item("version", None, 11)
 
         self.commit("retain")
 

@@ -6,7 +6,7 @@ import rtslib_fb.tcm as tcm
 from rtslib_fb.root import RTSRoot
 from rtslib_fb.utils import fread
 
-from .utils import this_host
+from ceph_iscsi_config.utils import this_host, CephiSCSIInval
 
 
 class Metric(object):
@@ -28,7 +28,7 @@ class TPGMapper(threading.Thread):
     def __init__(self, tpg):
         self.tpg = tpg
         self.tpg_id = tpg.tag
-        self.portal_ip = tpg.network_portals.next().ip_address
+        self.portal_ip = next(tpg.network_portals).ip_address
         self.owned_luns = dict()
         threading.Thread.__init__(self)
 
@@ -98,7 +98,11 @@ class GatewayStats(object):
     def _get_tpg(self):
         stat = Metric("target portal groups defined within gateway group",
                       "gauge")
-        labels = {"gw_iqn": self._root.targets.next().wwn}
+        tgt = next(self._root.targets, None)
+        if tgt is None:
+            raise CephiSCSIInval("No targets setup.")
+
+        labels = {"gw_iqn": tgt.wwn}
         v = len([tpg for tpg in self._root.tpgs])
         stat.add(labels, v)
 
@@ -118,6 +122,9 @@ class GatewayStats(object):
 
         for mapper in tpg_mappers:
             mapper.join()
+
+        if not tpg_mappers:
+            raise CephiSCSIInval("Target not mapped to gateway.")
 
         # merge the tpg lun maps
         all_devs = tpg_mappers[0].owned_luns.copy()

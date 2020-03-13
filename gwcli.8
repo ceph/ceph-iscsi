@@ -39,7 +39,7 @@ Typically, the following options are regarded as site specific;
 .PP
 \fBNB.\fR An example iscsi-gateway.cfg file is provided under /usr/share/doc/ceph-iscsi-config*
 .PP
-Access to the API is normally restricted to the IP's of the gateway nodes, but you may also define other IP addresses that should be granted access to the API by adding the follwing entry to the configuration file;
+Access to the API is normally restricted to the IP's of the gateway nodes, but you may also define other IP addresses that should be granted access to the API by adding the following entry to the configuration file;
 .PP
 .RS 3
 \fBtrusted_ip_list = <ip_address,ip_address...>\fR
@@ -212,7 +212,7 @@ Create an iscsi client called 'iqn.1994-05.com.redhat:rh7-client'. The initial c
 \fB>/iscsi-target..eph-igw/hosts> cd iqn.1994-05.com.redhat:rh7-client\fR
 .PP
 .TP
-\fB>disk add rbd.disk_1
+\fB>disk add rbd/disk_1
 The first command navigates to the client's entry in the UI at which point the \fBdisk\fR or \fBauth\fR sub-commands may be used. In this example the disk subcommand is used to mask \fIdisk_1\fR in the \fIrbd\fR pool to the iSCSI client. The LUN id associated with this device is automatically assigned and maintained by the system.
 .PD 1
 .SH OTHER COMMANDS

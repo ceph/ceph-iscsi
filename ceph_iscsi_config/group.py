@@ -119,14 +119,17 @@ class Group(object):
 
         return True
 
-    def _next_lun(self):
+    def _next_lun(self, preferred_lun_id):
         """
         Look at the disk list for the group and return the 1st available free
         LUN id used for adding disks to the group
         :return: (int) lun Id
         """
 
-        lun_range = list(range(0, 256, 1))      # 0->255
+        lun_range = list(range(0, 256, 1))  # 0->255
+        lun_range.remove(preferred_lun_id)
+        lun_range.insert(0, preferred_lun_id)
+
         target_config = self.config.config['targets'][self.target_iqn]
         group = target_config['groups'][self.group_name]
         group_disks = group.get('disks')
@@ -169,7 +172,7 @@ class Group(object):
 
         members = ListComparison(this_group.get('members'),
                                  self.group_members)
-        disks = ListComparison(this_group.get('disks').keys(),
+        disks = ListComparison(list(this_group.get('disks').keys()),
                                self.disks)
 
         if set(self.disks) != set(this_group.get('disks')) or \
@@ -233,7 +236,7 @@ class Group(object):
         if disks.added:
             # update the groups disk list
             for disk in disks.added:
-                lun_seq = self._next_lun()
+                lun_seq = self._next_lun(target_config['disks'][disk]['lun_id'])
                 group_disks[disk] = {"lun_id": lun_seq}
                 self.logger.debug("- adding '{}' to group '{}' @ "
                                   "lun id {}".format(disk,

@@ -5,9 +5,7 @@ import rados
 import rbd
 import re
 import datetime
-import hashlib
 import os
-import rpm
 
 import ceph_iscsi_config.settings as settings
 
@@ -84,13 +82,13 @@ def resolve_ip_addresses(addr):
             pass
 
     addrs = set()
-    for family in families:
-        try:
-            infos = socket.getaddrinfo(addr, 0, family)
-            for info in infos:
+    try:
+        infos = socket.getaddrinfo(addr, 0)
+        for info in infos:
+            if info[0] in families:
                 addrs.add(info[4][0])
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     return list(addrs)
 
@@ -280,58 +278,9 @@ def get_time():
 
 def this_host():
     """
-    return the local machine's shortname
+    return the local machine's fqdn
     """
-    return socket.gethostname().split('.')[0]
-
-
-def gen_file_hash(filename, hash_type='sha256'):
-    """
-    generate a hash(default sha256) of a file and return the result
-    :param filename: filename to generate the checksum for
-    :param hash_type: type of checksum to generate
-    :return: checkum (str)
-    """
-
-    if (hash_type not in ['sha1', 'sha256', 'sha512', 'md5'] or not
-            os.path.exists(filename)):
-        return ''
-
-    hash_function = getattr(hashlib, hash_type)
-    h = hash_function()
-
-    with open(filename, 'rb') as file_in:
-        chunk = 0
-        while chunk != b'':
-            chunk = file_in.read(1024)
-            h.update(chunk)
-
-    return h.hexdigest()
-
-
-def valid_rpm(in_rpm):
-    """
-    check a given rpm matches the current installed rpm
-    :param in_rpm: a dict of name, version and release to check against
-    :return: bool representing whether the rpm is valid or not
-    """
-    ts = rpm.TransactionSet()
-    mi = ts.dbMatch('name', in_rpm['name'])
-    if mi:
-        # check the version is OK
-        rpm_hdr = mi.next()
-        rc = rpm.labelCompare(('1', rpm_hdr['version'], rpm_hdr['release']),
-                              ('1', in_rpm['version'], in_rpm['release']))
-
-        if rc < 0:
-            # -1 version old
-            return False
-        else:
-            # 0 = version match, 1 = version exceeds min requirement
-            return True
-    else:
-        # rpm not installed
-        return False
+    return socket.getfqdn()
 
 
 def encryption_available():
@@ -348,6 +297,20 @@ def encryption_available():
             for key_name in encryption_keys]
 
     return all([os.path.exists(key) for key in keys])
+
+
+def read_os_release():
+    os_release_file = '/etc/os-release'
+    d = {}
+    if not os.path.exists(os_release_file):
+        return d
+    with open(os_release_file) as f:
+        for line in f:
+            rs = line.rstrip()
+            if rs:
+                k, v = rs.split("=")
+                d[k] = v.strip('"')
+    return d
 
 
 def gen_control_string(controls):

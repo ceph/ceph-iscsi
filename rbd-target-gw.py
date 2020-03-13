@@ -4,11 +4,12 @@ import logging
 import logging.handlers
 from logging.handlers import RotatingFileHandler
 
-from flask import Flask, Response
+from flask import Flask, Response, jsonify
 
 from ceph_iscsi_config.metrics import GatewayStats
 
 import ceph_iscsi_config.settings as settings
+from ceph_iscsi_config.utils import CephiSCSIInval
 
 # Create a flask instance
 app = Flask(__name__)
@@ -32,7 +33,10 @@ def prom_metrics():
     """ Collect the stats and send back to the caller"""
 
     stats = GatewayStats()
-    stats.collect()
+    try:
+        stats.collect()
+    except CephiSCSIInval as err:
+        return jsonify(message="Could not get metrics: {}".format(err)), 404
 
     return Response(stats.formatted(),
                     content_type="text/plain")
@@ -62,6 +66,9 @@ def main():
 
 if __name__ == '__main__':
 
+    settings.init()
+    logger_level = logging.getLevelName(settings.config.logger_level)
+
     # setup syslog handler to help diagnostics
     logger = logging.getLogger('rbd-target-gw')
     logger.setLevel(logging.DEBUG)
@@ -76,12 +83,11 @@ if __name__ == '__main__':
     file_handler = RotatingFileHandler('/var/log/rbd-target-gw/rbd-target-gw.log',
                                        maxBytes=5242880,
                                        backupCount=7)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logger_level)
     file_format = logging.Formatter("%(asctime)s [%(levelname)8s] - %(message)s")
     file_handler.setFormatter(file_format)
 
     logger.addHandler(syslog_handler)
     logger.addHandler(file_handler)
 
-    settings.init()
     main()

@@ -1,4 +1,3 @@
-import socket
 import requests
 from requests import Response
 import sys
@@ -11,8 +10,8 @@ from rtslib_fb.utils import normalize_wwn, RTSLibError
 
 from ceph_iscsi_config.client import GWClient
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import (resolve_ip_addresses, gen_file_hash,
-                                     CephiSCSIError)
+from ceph_iscsi_config.utils import (resolve_ip_addresses, CephiSCSIError,
+                                     this_host)
 
 __author__ = 'Paul Cuzner'
 
@@ -29,13 +28,6 @@ def readcontents(filename):
     with open(filename, 'r') as input_file:
         content = input_file.read().rstrip()
     return content
-
-
-def this_host():
-    """
-    return the local machine's shortname
-    """
-    return socket.gethostname().split('.')[0]
 
 
 def get_config():
@@ -60,11 +52,11 @@ def get_config():
     return {}
 
 
-def valid_gateway(target_iqn, gw_name, gw_ip, config):
+def valid_gateway(target_iqn, gw_name, gw_ips, config):
     """
     validate the request for a new gateway
     :param gw_name: (str) host (shortname) of the gateway
-    :param gw_ip: (str) ip address on the gw that will be used for iSCSI
+    :param gw_ips: (str) ip addresses on the gw that will be used for iSCSI
     :param config: (dict) current config
     :return: (str) "ok" or error description
     """
@@ -76,17 +68,19 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
     if gw_name in target_config['portals']:
         return "Gateway name {} already defined".format(gw_name)
 
-    if gw_ip in target_config.get('ip_list', []):
-        return "IP address already defined to the configuration"
+    for gw_ip in gw_ips:
+        if gw_ip in target_config.get('ip_list', []):
+            return "IP address already defined to the configuration"
 
     # validate the gateway name is resolvable
     if not resolve_ip_addresses(gw_name):
         return ("Gateway '{}' is not resolvable to an IP address".format(gw_name))
 
     # validate the ip_address is valid ip
-    if not resolve_ip_addresses(gw_ip):
-        return ("IP address provided is not usable (name doesn't"
-                " resolve, or not a valid IPv4/IPv6 address)")
+    for gw_ip in gw_ips:
+        if not resolve_ip_addresses(gw_ip):
+            return ("IP address provided is not usable (name doesn't"
+                    " resolve, or not a valid IPv4/IPv6 address)")
 
     # At this point the request seems reasonable, so lets check a bit deeper
 
@@ -108,11 +102,12 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
     except Exception:
         return "Malformed REST API response"
 
-    if gw_ip not in target_ips:
-        return ("IP address of {} is not available on {}. Valid "
-                "IPs are :{}".format(gw_ip,
-                                     gw_name,
-                                     ','.join(target_ips)))
+    for gw_ip in gw_ips:
+        if gw_ip not in target_ips:
+            return ("IP address of {} is not available on {}. Valid "
+                    "IPs are :{}".format(gw_ip,
+                                         gw_name,
+                                         ','.join(target_ips)))
 
     # check that config file on the new gateway matches the local machine
     api = APIRequest(gw_api + '/sysinfo/checkconf')
@@ -123,7 +118,7 @@ def valid_gateway(target_iqn, gw_name, gw_ip, config):
                               api.response.status_code))
 
     # compare the hash of the new gateways conf file with the local one
-    local_hash = gen_file_hash('/etc/ceph/iscsi-gateway.cfg')
+    local_hash = settings.config.hash()
     try:
         remote_hash = str(api.response.json()['data'])
     except Exception:
@@ -202,14 +197,38 @@ def valid_credentials(username, password, mutual_username, mutual_password):
     if not mutual_username and mutual_password:
         return 'Mutual username is required'
 
+    if username and len(username) < 8:
+        return 'Minimum length of username is 8 characters'
+
+    if username and len(username) > 64:
+        return 'Maximum length of username is 64 characters'
+
     if username and not usr_regex.search(username):
         return 'Invalid username'
+
+    if mutual_username and len(mutual_username) < 8:
+        return 'Minimum length of mutual username is 8 characters'
+
+    if mutual_username and len(mutual_username) > 64:
+        return 'Maximum length of mutual username is 64 characters'
 
     if mutual_username and not usr_regex.search(mutual_username):
         return 'Invalid mutual username'
 
+    if password and len(password) < 12:
+        return 'Minimum length of password is 12 characters'
+
+    if password and len(password) > 16:
+        return 'Maximum length of password is 16 characters'
+
     if password and not pw_regex.search(password):
         return 'Invalid password'
+
+    if mutual_password and len(mutual_password) < 12:
+        return 'Minimum length of mutual password is 12 characters'
+
+    if mutual_password and len(mutual_password) > 16:
+        return 'Maximum length of mutual password is 16 characters'
 
     if mutual_password and not pw_regex.search(mutual_password):
         return 'Invalid mutual password'
@@ -256,6 +275,13 @@ def valid_client(**kwargs):
         if client_iqn in target_config['clients']:
             return ("A client with the name '{}' is "
                     "already defined".format(client_iqn))
+
+        # Mixing TPG/target auth with ACL is not supported
+        target_username = target_config['auth']['username']
+        target_password = target_config['auth']['password']
+        target_auth_enabled = (target_username and target_password)
+        if target_auth_enabled:
+            return "Cannot create client because target CHAP authentication is enabled"
 
         # Creates can only be done with a minimum number of gw's in place
         num_gws = len([gw_name for gw_name in config['gateways']
@@ -358,6 +384,21 @@ def valid_snapshot_name(name):
     if not regex.search(name):
         return False
     return True
+
+
+def refresh_control_values(control_values, controls, def_settings):
+    for key, setting in def_settings.items():
+        val = controls.get(setting.name)
+        if val is not None:
+            # config values may be normalized or raw
+            val = setting.to_str(setting.normalize(val))
+
+        def_val = setting.to_str(getattr(settings.config, key))
+
+        if val is None or val == def_val:
+            control_values[setting.name] = def_val
+        else:
+            control_values[setting.name] = "{} (override)".format(val)
 
 
 class GatewayError(Exception):

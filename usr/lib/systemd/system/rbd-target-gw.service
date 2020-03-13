@@ -2,8 +2,8 @@
 Description=Setup system to export rbd images through LIO
 
 Requires=sys-kernel-config.mount
-After=sys-kernel-config.mount network-online.target tcmu-runner.service
-Wants=network-online.target tcmu-runner.service
+After=sys-kernel-config.mount network-online.target rbd-target-api.service
+Wants=network-online.target
 
 [Service]
 LimitNOFILE=1048576
@@ -22,7 +22,6 @@ PrivateTmp=true
 Restart=on-failure
 StartLimitInterval=30min
 StartLimitBurst=3
-TimeoutStopSec=600
 
 [Install]
 WantedBy=multi-user.target
