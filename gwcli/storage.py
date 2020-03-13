@@ -304,9 +304,10 @@ class Disks(UIGroup):
                                                                image))
 
         # make call to local api server's disk endpoint
-        disk_api = '{}://localhost:{}/api/disk/{}'.format(self.http_mode,
-                                                          settings.config.api_port,
-                                                          disk_key)
+        disk_api = '{}://{}:{}/api/disk/{}'.format(self.http_mode,
+                                                   settings.config.api_host,
+                                                   settings.config.api_port,
+                                                   disk_key)
         api_vars = {'pool': pool, 'owner': local_gw,
                     'count': count, 'mode': 'create',
                     'create_image': 'true' if create_image else 'false',
@@ -333,8 +334,9 @@ class Disks(UIGroup):
                 else:
                     disk_key = "{}/{}".format(pool, image)
 
-                disk_api = ('{}://localhost:{}/api/disk/'
+                disk_api = ('{}://{}:{}/api/disk/'
                             '{}'.format(self.http_mode,
+                                        settings.config.api_host,
                                         settings.config.api_port,
                                         disk_key))
 
@@ -808,8 +810,9 @@ class Disk(UINode):
         local_gw = this_host()
 
         # Issue the api request for reconfigure
-        disk_api = ('{}://localhost:{}/api/'
+        disk_api = ('{}://{}:{}/api/'
                     'disk/{}'.format(self.http_mode,
+                                     settings.config.api_host,
                                      settings.config.api_port,
                                      self.image_id))
 
@@ -851,8 +854,9 @@ class Disk(UINode):
         local_gw = this_host()
 
         # Issue the api request for the resize
-        disk_api = ('{}://localhost:{}/api/'
+        disk_api = ('{}://{}:{}/api/'
                     'disk/{}'.format(self.http_mode,
+                                     settings.config.api_host,
                                      settings.config.api_port,
                                      self.image_id))
 
@@ -903,8 +907,9 @@ class Disk(UINode):
             self.logger.warning("Please be patient, rollback might take time")
 
         self.logger.debug("Issuing snapshot {} request".format(action))
-        disk_api = ('{}://localhost:{}/api/'
+        disk_api = ('{}://{}:{}/api/'
                     'disksnap/{}/{}/{}'.format(self.http_mode,
+                                               settings.config.api_host,
                                                settings.config.api_port,
                                                self.pool,
                                                self.rbd_image,
@@ -1015,8 +1020,9 @@ class TargetDisks(UIGroup):
     def add_disk(self, disk, lun_id, success_msg='ok'):
         rc = 0
         api_vars = {"disk": disk, "lun_id": lun_id}
-        targetdisk_api = ('{}://localhost:{}/api/'
+        targetdisk_api = ('{}://{}:{}/api/'
                           'targetlun/{}'.format(self.http_mode,
+                                                settings.config.api_host,
                                                 settings.config.api_port,
                                                 self.target_iqn))
         api = APIRequest(targetdisk_api, data=api_vars)
@@ -1047,8 +1053,9 @@ class TargetDisks(UIGroup):
     def delete_disk(self, disk):
         rc = 0
         api_vars = {"disk": disk}
-        targetdisk_api = ('{}://localhost:{}/api/'
+        targetdisk_api = ('{}://{}:{}/api/'
                           'targetlun/{}'.format(self.http_mode,
+                                                settings.config.api_host,
                                                 settings.config.api_port,
                                                 self.target_iqn))
         api = APIRequest(targetdisk_api, data=api_vars)
