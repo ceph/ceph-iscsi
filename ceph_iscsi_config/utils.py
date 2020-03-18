@@ -86,7 +86,11 @@ def resolve_ip_addresses(addr):
         infos = socket.getaddrinfo(addr, 0)
         for info in infos:
             if info[0] in families:
-                addrs.add(info[4][0])
+                # remove interface scope suffix and IPv4-over-IPv6 prefix
+                addr = info[4][0]
+                addr = addr.rsplit('%', 1)[0]
+                addr = addr.split('::ffff:', 1)[-1]
+                addrs.add(addr)
     except Exception:
         pass
 
