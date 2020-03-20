@@ -652,6 +652,9 @@ class GWTarget(GWObject):
 
             if self.config_updated:
                 config.commit()
+                if config.error:
+                    self.error = True
+                    self.error_msg = config.error_msg
 
         elif mode == 'map':
 
@@ -698,6 +701,9 @@ class GWTarget(GWObject):
                 }
                 config.add_item("targets", self.iqn, seed_target)
                 config.commit()
+                if config.error:
+                    self.error = True
+                    self.error_msg = config.error_msg
 
                 discovery_auth_config = config.config['discovery_auth']
                 Discovery.set_discovery_auth_lio(discovery_auth_config['username'],
@@ -744,6 +750,9 @@ class GWTarget(GWObject):
                     config.del_item('gateways', local_gw)
 
             config.commit()
+            if config.error:
+                self.error = True
+                self.error_msg = config.error_msg
 
     @staticmethod
     def get_num_sessions(target_iqn):
