@@ -44,8 +44,9 @@ class ISCSIRoot(UIRoot):
 
         if endpoint is None:
 
-            self.local_api = ('{}://localhost:{}/'
+            self.local_api = ('{}://{}:{}/'
                               'api'.format(self.http_mode,
+                                           settings.config.api_host,
                                            settings.config.api_port))
 
         else:
@@ -184,8 +185,9 @@ class ISCSITargets(UIGroup):
         # 'safe' to continue with the definition
         self.logger.debug("Create an iscsi target definition in the UI")
 
-        local_api = ('{}://localhost:{}/api/'
+        local_api = ('{}://{}:{}/api/'
                      'target/{}'.format(self.http_mode,
+                                        settings.config.api_host,
                                         settings.config.api_port,
                                         target_iqn))
 
@@ -220,8 +222,9 @@ class ISCSITargets(UIGroup):
                               "iSCSI".format(target_iqn))
             return
 
-        gw_api = ('{}://localhost:{}/api/'
+        gw_api = ('{}://{}:{}/api/'
                   'target/{}'.format(self.http_mode,
+                                     settings.config.api_host,
                                      settings.config.api_port,
                                      target_iqn))
 
@@ -352,8 +355,9 @@ class ISCSITargets(UIGroup):
             "mutual_username": mutual_username,
             "mutual_password": mutual_password
         }
-        discoveryauth_api = ('{}://localhost:{}/api/'
+        discoveryauth_api = ('{}://{}:{}/api/'
                              'discoveryauth'.format(self.http_mode,
+                                                    settings.config.api_host,
                                                     settings.config.api_port))
         api = APIRequest(discoveryauth_api, data=api_vars)
         api.put()
@@ -499,8 +503,9 @@ class Target(UINode):
             return
 
         # Issue the api request for the reconfigure
-        gateways_api = ('{}://localhost:{}/api/'
+        gateways_api = ('{}://{}:{}/api/'
                         'target/{}'.format(self.http_mode,
+                                           settings.config.api_host,
                                            settings.config.api_port,
                                            self.target_iqn))
 
@@ -572,8 +577,9 @@ class Target(UINode):
             "mutual_password": mutual_password
         }
 
-        targetauth_api = ('{}://localhost:{}/api/'
+        targetauth_api = ('{}://{}:{}/api/'
                           'targetauth/{}'.format(self.http_mode,
+                                                 settings.config.api_host,
                                                  settings.config.api_port,
                                                  target_iqn))
         api = APIRequest(targetauth_api, data=api_vars)
@@ -722,7 +728,8 @@ class GatewayGroup(UIGroup):
                                   "objects on this target. Use confirm=true")
                 return
 
-        gw_api = '{}://{}:{}/api'.format(self.http_mode, "localhost",
+        gw_api = '{}://{}:{}/api'.format(self.http_mode,
+                                         settings.config.api_host,
                                          settings.config.api_port)
         gw_rqst = gw_api + '/gateway/{}/{}'.format(target_iqn, gateway_name)
         if confirm:
@@ -836,7 +843,7 @@ class GatewayGroup(UIGroup):
         self.logger.info("Adding gateway, {}".format(sync_text))
 
         gw_api = '{}://{}:{}/api'.format(self.http_mode,
-                                         "localhost",
+                                         settings.config.api_host,
                                          settings.config.api_port)
         gw_rqst = gw_api + '/gateway/{}/{}'.format(target_iqn, gateway_name)
         gw_vars = {"nosync": nosync,

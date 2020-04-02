@@ -25,6 +25,7 @@ api_secure = false
 # api_user = admin
 # api_password = admin
 # api_port = 5000
+# api_host = localhost
 # trusted_ip_list = IP,IP
 
 # Refer to the ceph-iscsi-config/settings module for more options

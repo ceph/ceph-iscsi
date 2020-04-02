@@ -74,8 +74,9 @@ class Clients(UIGroup):
         target_iqn = self.parent.name
 
         # Issue the API call to create the client
-        client_api = ('{}://localhost:{}/api/'
+        client_api = ('{}://{}:{}/api/'
                       'client/{}/{}'.format(self.http_mode,
+                                            settings.config.api_host,
                                             settings.config.api_port,
                                             target_iqn,
                                             client_iqn))
@@ -126,7 +127,7 @@ class Clients(UIGroup):
 
         client_api = ('{}://{}:{}/api/'
                       'client/{}/{}'.format(self.http_mode,
-                                            "localhost",
+                                            settings.config.api_host,
                                             settings.config.api_port,
                                             target_iqn,
                                             client_iqn))
@@ -217,8 +218,9 @@ class Clients(UIGroup):
         else:
             target_iqn = self.parent.name
             api_vars = {'action': action}
-            targetauth_api = ('{}://localhost:{}/api/'
+            targetauth_api = ('{}://{}:{}/api/'
                               'targetauth/{}'.format(self.http_mode,
+                                                     settings.config.api_host,
                                                      settings.config.api_port,
                                                      target_iqn))
             api = APIRequest(targetauth_api, data=api_vars)
@@ -399,8 +401,9 @@ class Client(UINode):
             "mutual_password": mutual_password
         }
 
-        clientauth_api = ('{}://localhost:{}/api/'
+        clientauth_api = ('{}://{}:{}/api/'
                           'clientauth/{}/{}'.format(self.http_mode,
+                                                    settings.config.api_host,
                                                     settings.config.api_port,
                                                     target_iqn,
                                                     self.client_iqn))
@@ -582,8 +585,9 @@ class Client(UINode):
 
         api_vars = {"disk": disk}
 
-        clientlun_api = ('{}://localhost:{}/api/'
+        clientlun_api = ('{}://{}:{}/api/'
                          'clientlun/{}/{}'.format(self.http_mode,
+                                                  settings.config.api_host.
                                                   settings.config.api_port,
                                                   target_iqn,
                                                   self.client_iqn))

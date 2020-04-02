@@ -2439,7 +2439,7 @@ def hostgroup(target_iqn, group_name):
         # At this point the group name is valid, so go ahead and remove it
         api_endpoint = ("{}://{}:{}/api/"
                         "_hostgroup/{}/{}".format(http_mode,
-                                                  'localhost',
+                                                  settings.config.api_host,
                                                   settings.config.api_port,
                                                   target_iqn,
                                                   group_name
@@ -2621,6 +2621,8 @@ def target_ready(gateway_list):
                     "summary": ''}
 
     for gw in gateway_list:
+        if gw == "localhost":
+            gw = settings.config.api_host
         api_endpoint = ("{}://{}:{}/api/_ping".format(http_mode,
                                                       normalize_ip_literal(gw),
                                                       settings.config.api_port))
@@ -2673,6 +2675,9 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
     logger.debug("gateway update order is {}".format(','.join(gateway_list)))
 
     for gw in gateway_list:
+        if gw == "localhost":
+            gw = settings.config.api_host
+
         logger.debug("processing GW '{}'".format(gw))
         api_endpoint = ("{}://{}:{}/api/"
                         "{}/{}".format(http_mode,
@@ -2886,7 +2891,7 @@ def main():
 
     # Start the API server. threaded is enabled to prevent deadlocks when one
     # request makes further api requests
-    app.run(host=settings.config.api_host,
+    app.run(host=settings.config.api_host.strip('[').strip(']'),
             port=settings.config.api_port,
             debug=settings.config.debug,
             use_evalex=False,
