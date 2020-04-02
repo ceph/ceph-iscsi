@@ -277,10 +277,6 @@ def target(target_iqn=None):
                 return jsonify(message="Target: {} is not defined."
                                        "".format(target_iqn)), 400
 
-            if client_controls and not target_config['clients']:
-                return jsonify(message="No clients found. Create clients then "
-                                       "rerun reconfigure command."), 400
-
         gateway_ip_list = []
         target = GWTarget(logger,
                           str(target_iqn),
@@ -2511,7 +2507,7 @@ def get_settings():
         'config': {
             'minimum_gateways': settings.config.minimum_gateways
         },
-        'api_version': 1
+        'api_version': 2
     }), 200
 
 
