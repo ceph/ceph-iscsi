@@ -752,7 +752,7 @@ class Disk(UINode):
                          name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 try:
-                    with rbd.Image(ioctx, self.image) as rbd_image:
+                    with rbd.Image(ioctx, self.image, read_only=True) as rbd_image:
                         self.exists = True
                         self.size = rbd_image.size()
                         self.size_h = human_size(self.size)
