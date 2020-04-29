@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 import ssl
 import operator
 import OpenSSL
+import tempfile
 import threading
 import time
 import inspect
@@ -2812,13 +2813,48 @@ class ConfigWatcher(threading.Thread):
                     config.refresh()
 
 
+def get_ssl_files_from_mon():
+    client_name = settings.config.cluster_client_name
+    temp_files = []
+    with rados.Rados(conffile=settings.config.cephconf,
+                     name=client_name) as cluster:
+        cmd = {"prefix": "config-key get",
+               "key": "iscsi/{}/iscsi-gateway.crt".format(client_name)}
+        ret, crt_data, outs = cluster.mon_command(json.dumps(cmd), b'')
+        if ret:
+            return temp_files
+
+        cmd["key"] = "iscsi/{}/iscsi-gateway.key".format(client_name)
+        ret, key_data, outs = cluster.mon_command(json.dumps(cmd), b'')
+        if ret:
+            return temp_files
+    for data in crt_data, key_data:
+        # NOTE: Annoyingly SSLContext.load_cert_chain can only take
+        # paths to files and not file like objects.. yet. So we need to
+        # create tempfiles for the SSL context to read. Once
+        # https://bugs.python.org/issue16487 is resolved, we should be able
+        # to simply use file-like objects and makes this much nicer.
+
+        tmp_f = tempfile.NamedTemporaryFile()
+        tmp_f.write(data)
+        tmp_f.flush()
+        temp_files.append(tmp_f)
+    return temp_files
+
+
 def get_ssl_context():
     # Use these self-signed crt and key files
     cert_files = ['/etc/ceph/iscsi-gateway.crt',
                   '/etc/ceph/iscsi-gateway.key']
+    temp_files = []
 
     if not all([os.path.exists(crt_file) for crt_file in cert_files]):
-        return None
+        # attempt to pull out the crt and key data from global mon config-key
+        # storage, we need to return the tempfiles so they're not gc'ed.
+        temp_files = get_ssl_files_from_mon()
+        cert_files = [f.name for f in temp_files]
+        if not cert_files or not all([os.path.exists(crt_file) for crt_file in cert_files]):
+            return None
 
     ver, rel, mod = werkzeug.__version__.split('.')
     if int(rel) > 9:
@@ -2839,6 +2875,10 @@ def get_ssl_context():
             logger.critical("SSL Error : {}".format(err))
             return None
 
+    # If we have loaded the certs into tempfiles we can clean them up now.
+    # This should happen when we return, but let's be explicit.
+    for f in temp_files:
+        f.close()
     return context
 
 
