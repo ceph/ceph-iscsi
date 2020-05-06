@@ -2890,7 +2890,8 @@ def main():
     log.setLevel(logging.DEBUG)
 
     # Attach the werkzeug log to the handlers defined in the outer scope
-    log.addHandler(file_handler)
+    if settings.config.log_to_file:
+        log.addHandler(file_handler)
     log.addHandler(syslog_handler)
 
     ceph_gw = CephiSCSIGateway(logger, config)
@@ -2960,23 +2961,30 @@ if __name__ == '__main__':
     logger.setLevel(logging.DEBUG)
 
     # syslog (systemctl/journalctl messages)
-    syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
-    syslog_handler.setLevel(logging.INFO)
     syslog_format = logging.Formatter("%(message)s")
+    if settings.config.log_to_stderr:
+        syslog_handler = logging.StreamHandler(sys.stderr)
+        if settings.config.log_to_stderr_prefix:
+            syslog_format = \
+                logging.Formatter("{} %(message)s".format(
+                    settings.config.log_to_stderr_prefix))
+    else:
+        syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
+    syslog_handler.setLevel(logging.INFO)
     syslog_handler.setFormatter(syslog_format)
-
-    # file target - more verbose logging for diagnostics
-    file_handler = RotatingFileHandler('/var/log/rbd-target-api/rbd-target-api.log',
-                                       maxBytes=5242880,
-                                       backupCount=7)
-    file_handler.setLevel(logger_level)
-    file_format = logging.Formatter(
-        "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "
-        "- %(message)s")
-    file_handler.setFormatter(file_format)
-
     logger.addHandler(syslog_handler)
-    logger.addHandler(file_handler)
+
+    if settings.config.log_to_file:
+        # file target - more verbose logging for diagnostics
+        file_handler = RotatingFileHandler('/var/log/rbd-target-api/rbd-target-api.log',
+                                           maxBytes=5242880,
+                                           backupCount=7)
+        file_handler.setLevel(logger_level)
+        file_format = logging.Formatter(
+            "%(asctime)s %(levelname)8s [%(filename)s:%(lineno)s:%(funcName)s()] "
+            "- %(message)s")
+        file_handler.setFormatter(file_format)
+        logger.addHandler(file_handler)
 
     # config is set in the outer scope, so it's easily accessible to all
     # api functions
