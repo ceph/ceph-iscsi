@@ -681,6 +681,9 @@ class GWTarget(GWObject):
             else:
                 # create the target
                 self.create_target()
+                # if error happens, we should never store this target to config
+                if self.error:
+                    return
                 seed_target = {
                     'disks': {},
                     'clients': {},
