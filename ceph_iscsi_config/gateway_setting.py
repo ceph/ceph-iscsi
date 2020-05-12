@@ -190,6 +190,9 @@ SYS_SETTINGS = {
     "prometheus_host": StrSetting("prometheus_host", "::"),
     "logger_level": IntSetting("logger_level", logging.DEBUG, logging.CRITICAL,
                                logging.DEBUG),
+    "log_to_stderr": BoolSetting("log_to_stderr", False),
+    "log_to_stderr_prefix": StrSetting("log_to_stderr_prefix", ""),
+    "log_to_file": BoolSetting("log_to_file", True),
     # TODO: This is under sys for compat. It is not settable per device/backend
     # type yet.
     "alua_failover_type": EnumSetting("alua_failover_type",
