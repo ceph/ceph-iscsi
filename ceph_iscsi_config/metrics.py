@@ -111,8 +111,8 @@ class GatewayStats(object):
     def _get_mapping(self):
         mapping = Metric("LUN mapping state 0=unmapped, 1=mapped",
                          "gauge")
-        mapped_devices = [l.tpg_lun.storage_object.name
-                          for l in self._root.mapped_luns]
+        mapped_devices = [lun.tpg_lun.storage_object.name
+                          for lun in self._root.mapped_luns]
 
         tpg_mappers = []
         for tpg in self._root.tpgs:

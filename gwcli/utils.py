@@ -113,8 +113,7 @@ def valid_gateway(target_iqn, gw_name, gw_ips, config):
     api.get()
     if api.response.status_code != 200:
         return ("checkconf API call to {} failed with "
-                "code".format(gw_name,
-                              api.response.status_code))
+                "code {}".format(gw_name, api.response.status_code))
 
     # compare the hash of the new gateways conf file with the local one
     local_hash = settings.config.hash()
