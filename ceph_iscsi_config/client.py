@@ -404,8 +404,7 @@ class GWClient(GWObject):
         except RTSLibError as err:
             self.error = True
             self.error_msg = ("Unable to configure authentication "
-                              "for {} - ".format(self.iqn,
-                                                 err))
+                              "for {} - {}".format(self.iqn, err))
             self.logger.error("(Client.configure_auth) failed to set "
                               "credentials for {}".format(self.iqn))
         else:

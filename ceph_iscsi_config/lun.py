@@ -986,8 +986,8 @@ class LUN(GWObject):
         if mode in mode_vars:
             if not all(x in kwargs for x in mode_vars[mode]):
                 return ("{} request must contain the following "
-                        "variables: ".format(mode,
-                                             ','.join(mode_vars[mode])))
+                        "variables: {}".format(mode,
+                                               ','.join(mode_vars[mode])))
         else:
             return "disk operation mode '{}' is invalid".format(mode)
 

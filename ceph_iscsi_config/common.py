@@ -617,7 +617,7 @@ class Config(object):
                     del current_config[txn.type]
             else:
                 self.error = True
-                self.error_msg = "Unknown transaction type ({}} encountered in " \
+                self.error_msg = "Unknown transaction type ({}) encountered in " \
                                  "_commit_rbd".format(txn.action)
 
         if not self.error:
