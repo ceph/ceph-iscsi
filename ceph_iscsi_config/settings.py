@@ -11,7 +11,8 @@ import json
 import re
 
 from ceph_iscsi_config.gateway_setting import (TGT_SETTINGS, SYS_SETTINGS,
-                                               TCMU_SETTINGS)
+                                               TCMU_SETTINGS,
+                                               TCMU_DEV_STATUS_SETTINGS)
 
 
 # this module when imported preserves the global values
@@ -63,12 +64,17 @@ class Settings(object):
         self._add_attrs_from_defs(SYS_SETTINGS)
         self._add_attrs_from_defs(TGT_SETTINGS)
         self._add_attrs_from_defs(TCMU_SETTINGS)
+        self._add_attrs_from_defs(TCMU_DEV_STATUS_SETTINGS)
 
         if len(dataset) != 0:
             # If we have a file use it to override the defaults
             if config.has_section("config"):
                 self._override_attrs_from_conf(config.items("config"),
                                                SYS_SETTINGS)
+
+            if config.has_section("device_status"):
+                self._override_attrs_from_conf(config.items("device_status"),
+                                               TCMU_DEV_STATUS_SETTINGS)
 
             if config.has_section("target"):
                 all_settings = TGT_SETTINGS.copy()
@@ -129,6 +135,7 @@ class Settings(object):
         self._hash_settings(SYS_SETTINGS.keys(), sync_settings)
         self._hash_settings(TGT_SETTINGS.keys(), sync_settings)
         self._hash_settings(TCMU_SETTINGS.keys(), sync_settings)
+        self._hash_settings(TCMU_DEV_STATUS_SETTINGS.keys(), sync_settings)
 
         h = hashlib.sha256()
         h.update(json.dumps(sync_settings).encode('utf-8'))

@@ -36,6 +36,7 @@ from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (normalize_ip_literal, resolve_ip_addresses,
                                      ip_addresses, read_os_release, encryption_available,
                                      CephiSCSIError, this_host)
+from ceph_iscsi_config.device_status import DeviceStatusWatcher
 
 from gwcli.utils import (APIRequest, valid_gateway, valid_client,
                          valid_credentials, get_remote_gateways, valid_snapshot_name,
@@ -1008,7 +1009,15 @@ def disk(pool, image):
     if request.method == 'GET':
 
         if image_id in config.config['disks']:
-            return jsonify(config.config["disks"][image_id]), 200
+            disk_dict = config.config["disks"][image_id]
+            global dev_status_watcher
+            disk_status = dev_status_watcher.get_dev_status(image_id)
+            if disk_status:
+                disk_dict['status'] = disk_status.get_status_dict()
+            else:
+                disk_dict['status'] = {'state': 'Unknown'}
+
+            return jsonify(disk_dict), 200
 
         else:
             return jsonify(message="rbd image {} not "
@@ -2893,6 +2902,10 @@ def main():
     if settings.config.log_to_file:
         log.addHandler(file_handler)
     log.addHandler(syslog_handler)
+
+    global dev_status_watcher
+    dev_status_watcher = DeviceStatusWatcher(logger)
+    dev_status_watcher.start()
 
     ceph_gw = CephiSCSIGateway(logger, config)
 

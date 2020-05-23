@@ -204,3 +204,8 @@ TCMU_SETTINGS = {
     "qfull_timeout": IntSetting("qfull_timeout", 0, 600, 5),
     "osd_op_timeout": IntSetting("osd_op_timeout", 0, 600, 30),
     "hw_max_sectors": IntSetting("hw_max_sectors", 1, 8192, 1024)}
+
+TCMU_DEV_STATUS_SETTINGS = {
+    "lock_lost_cnt_threshhold": IntSetting("lock_lost_cnt_threshhold", 1, 1000000, 12),
+    "status_check_interval": IntSetting("status_check_interval", 1, 600, 10),
+    "stable_state_reset_count": IntSetting("stable_state_reset_count", 1, 600, 3)}
