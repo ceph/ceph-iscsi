@@ -833,6 +833,24 @@ class GatewayGroup(UIGroup):
         if skipchecks == 'true':
             self.logger.warning("OS version/package checks have been bypassed")
 
+        # Check if we can get hostname from
+        # the new gw endpoint
+        new_gw_endpoint = ('{}://{}:{}/'
+                           'api'.format(self.http_mode,
+                                        gateway_name,
+                                        settings.config.api_port))
+        api = APIRequest('{}/sysinfo/hostname'.format(new_gw_endpoint))
+        api.get()
+        if api.response.status_code != 200:
+            msg = response_message(api.response, self.logger)
+            self.logger.error("Get gateway hostname failed : {}\n"
+                              "Please check api_host setting and make sure "
+                              "host {} IP is listening on port {}"
+                              "".format(msg, gateway_name,
+                                        settings.config.api_port))
+            return
+        gateway_hostname = api.response.json()['data']
+
         self.logger.info("Adding gateway, {}".format(sync_text))
 
         gw_api = '{}://{}:{}/api'.format(self.http_mode,
@@ -858,14 +876,6 @@ class GatewayGroup(UIGroup):
         # add to the UI. We have to use the new gateway to ensure what
         # we get back is current (the other gateways will lag until they see
         # epoch xattr change on the config object)
-        new_gw_endpoint = ('{}://{}:{}/'
-                           'api'.format(self.http_mode,
-                                        gateway_name,
-                                        settings.config.api_port))
-
-        api = APIRequest('{}/sysinfo/hostname'.format(new_gw_endpoint))
-        api.get()
-        gateway_hostname = api.response.json()['data']
         config = self.parent.parent.parent._get_config(endpoint=new_gw_endpoint)
         target_config = config['targets'][target_iqn]
         portal_config = target_config['portals'][gateway_hostname]

@@ -440,7 +440,7 @@ class APIRequest(object):
                        "{}".format(self.args[0]))
                 self.data = Response()
                 self.data.status_code = 500
-                self.data._content = '{{"message": "{}" }}'.format(msg)
+                self.data._content = '{{"message": "{}" }}'.format(msg).encode('utf-8')
                 return self._get_response
             except Exception:
                 raise GatewayAPIError("Unknown error connecting to "
