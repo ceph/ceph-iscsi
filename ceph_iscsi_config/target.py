@@ -386,7 +386,7 @@ class GWTarget(GWObject):
             for tpg in self.target.tpgs:
                 self.tpg_list.append(tpg)
                 network_portals = list(tpg.network_portals)
-                if len(network_portals) > 0:
+                if network_portals:
                     ip_address = network_portals[0].ip_address
                     gateway_name = self._get_gateway_name(ip_address)
                     if gateway_name:
