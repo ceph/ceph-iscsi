@@ -183,6 +183,7 @@ SYS_SETTINGS = {
     "debug": BoolSetting("debug", False),
     "minimum_gateways": IntSetting("minimum_gateways", 1, 9999, 2),
     "ceph_config_dir": StrSetting("ceph_config_dir", '/etc/ceph'),
+    "gateway_conf": StrSetting("gateway_conf", 'iscsi-gateway.conf'),
     "priv_key": StrSetting("priv_key", 'iscsi-gateway.key'),
     "pub_key": StrSetting("pub_key", 'iscsi-gateway-pub.key'),
     "prometheus_exporter": BoolSetting("prometheus_exporter", True),
