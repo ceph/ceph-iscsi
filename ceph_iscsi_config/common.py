@@ -35,11 +35,13 @@ class CephCluster(object):
         conf = settings.config.cephconf
 
         try:
-            self.cluster = rados.Rados(conffile=conf,
+            self.cluster = rados.Rados(clustername=settings.config.cluster_name,
+                                       conffile=conf,
                                        name=settings.config.cluster_client_name)
         except rados.Error as err:
             self.error = True
-            self.error_msg = "Invaid cluster_client_name or setting in {} - {}".format(conf, err)
+            self.error_msg = ("Invalid cluster_client_name, cluster_name "
+                              "or setting in {} - {}".format(conf, err))
             return
 
         try:
