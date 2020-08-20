@@ -385,10 +385,15 @@ class GWTarget(GWObject):
             # there could/should be multiple tpg's for the target
             for tpg in self.target.tpgs:
                 self.tpg_list.append(tpg)
-                ip_address = list(tpg.network_portals)[0].ip_address
-                gateway_name = self._get_gateway_name(ip_address)
-                if gateway_name:
-                    self.tpg_tag_by_gateway_name[gateway_name] = tpg.tag
+                network_portals = list(tpg.network_portals)
+                if network_portals:
+                    ip_address = network_portals[0].ip_address
+                    gateway_name = self._get_gateway_name(ip_address)
+                    if gateway_name:
+                        self.tpg_tag_by_gateway_name[gateway_name] = tpg.tag
+                else:
+                    self.logger.info("No available network portal for target "
+                                     "with iqn of '{}'".format(self.iqn))
 
             # self.portal = self.tpg.network_portals.next()
 
