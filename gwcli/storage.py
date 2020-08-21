@@ -627,8 +627,9 @@ class DiskPool(UIGroup):
 class Disk(UINode):
 
     display_attributes = ["image", "ceph_cluster", "pool", "wwn", "size_h",
-                          "feature_list", "snapshots", "owner", "backstore",
-                          "backstore_object_name", "control_values"]
+                          "feature_list", "snapshots", "owner", "lock_owner",
+                          "state", "backstore", "backstore_object_name",
+                          "control_values"]
 
     def __init__(self, parent, image_id, image_config, size=None,
                  features=None, snapshots=None):
@@ -664,6 +665,7 @@ class Disk(UINode):
             self.parent.parent.disk_lookup[image_id] = self
 
         self._apply_config(image_config)
+        self._apply_status()
 
         if not size:
             # Size/features are not stored in the config, since it can be changed
@@ -684,6 +686,34 @@ class Disk(UINode):
         disk_map[self.image_id]['size'] = self.size
         disk_map[self.image_id]['size_h'] = self.size_h
 
+    def _apply_status(self):
+        disk_api = ('{}://localhost:{}/api/'
+                    'disk/{}'.format(self.http_mode,
+                                     settings.config.api_port, self.image_id))
+        self.logger.debug("disk GET status for {}".format(self.image_id))
+        api = APIRequest(disk_api)
+        api.get()
+
+        # set both the 'lock_owner' and 'state' to Unknown as default in
+        # case if the api response fails the gwcli command will fail too
+        self.__setattr__('lock_owner', 'Unknown')
+        self.__setattr__('state', 'Unknown')
+
+        if api.response.status_code == 200:
+            info = api.response.json()
+            status = info.get("status")
+
+            if status is None:
+                return
+
+            state = status.get('state')
+            if (state):
+                self.__setattr__('state', state)
+
+            owner = status.get('lock_owner')
+            if (owner):
+                self.__setattr__('lock_owner', owner)
+
     def _apply_config(self, image_config):
         # set the remaining attributes based on the fields in the dict
         disk_map = self.parent.parent.disk_info
@@ -700,9 +730,28 @@ class Disk(UINode):
         if not self.exists:
             return 'NOT FOUND', False
 
-        msg = [self.image_id, "({})".format(self.size_h)]
+        status = True
 
-        return " ".join(msg), True
+        disk_api = ('{}://localhost:{}/api/'
+                    'disk/{}'.format(self.http_mode, settings.config.api_port,
+                                     self.image_id))
+
+        self.logger.debug("disk GET status for {}".format(self.image_id))
+        api = APIRequest(disk_api)
+        api.get()
+
+        state = "State unknown"
+        if api.response.status_code == 200:
+            info = api.response.json()
+            disk_status = info.get("status")
+            if disk_status:
+                state = disk_status.get("state")
+                if state != "Online":
+                    status = False
+
+        msg = [self.image_id, "({}, {})".format(state, self.size_h)]
+
+        return " ".join(msg), status
 
     def _parse_snapshots(self, snapshots):
         self.snapshots = ["{name} ({size})".format(name=s['name'],
@@ -741,6 +790,7 @@ class Disk(UINode):
         if not config:
             return
         self._apply_config(config['disks'][self.image_id])
+        self._apply_status()
 
     def _get_meta_data_tcmu(self):
         """
