@@ -503,7 +503,7 @@ def get_config():
     """
 
     if request.method == 'GET':
-        config.refresh()
+        config.get_config()
         decrypt_passwords = request.args.get('decrypt_passwords', 'false')
         result_config = copy.deepcopy(config.config)
 
