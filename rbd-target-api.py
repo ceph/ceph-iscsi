@@ -2825,18 +2825,16 @@ class ConfigWatcher(threading.Thread):
 def get_ssl_files_from_mon():
     client_name = settings.config.cluster_client_name
     temp_files = []
-    with rados.Rados(conffile=settings.config.cephconf,
-                     name=client_name) as cluster:
-        cmd = {"prefix": "config-key get",
-               "key": "iscsi/{}/iscsi-gateway.crt".format(client_name)}
-        ret, crt_data, outs = cluster.mon_command(json.dumps(cmd), b'')
-        if ret:
-            return temp_files
+    crt_data = settings.config.pull_from_mon_config(
+        "iscsi/{}/iscsi-gateway.crt".format(client_name))
+    if not crt_data:
+        return temp_files
 
-        cmd["key"] = "iscsi/{}/iscsi-gateway.key".format(client_name)
-        ret, key_data, outs = cluster.mon_command(json.dumps(cmd), b'')
-        if ret:
-            return temp_files
+    key_data = settings.config.pull_from_mon_config(
+        "iscsi/{}/iscsi-gateway.key".format(client_name))
+    if not key_data:
+        return temp_files
+
     for data in crt_data, key_data:
         # NOTE: Annoyingly SSLContext.load_cert_chain can only take
         # paths to files and not file like objects.. yet. So we need to
