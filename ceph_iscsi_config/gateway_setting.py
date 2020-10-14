@@ -71,7 +71,7 @@ class ListSetting(Setting):
         return str(norm_val)
 
     def normalize(self, raw_val):
-        return raw_val.split(',') if raw_val else []
+        return [r.strip() for r in raw_val.split(',')] if raw_val else []
 
 
 class StrSetting(Setting):
