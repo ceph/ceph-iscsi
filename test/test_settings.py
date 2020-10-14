@@ -5,13 +5,16 @@ import unittest
 
 from ceph_iscsi_config.settings import Settings
 from ceph_iscsi_config.target import GWTarget
+from ceph_iscsi_config.gateway_setting import SYS_SETTINGS
 
 
 class SettingsTest(unittest.TestCase):
 
     @staticmethod
-    def _normalize(controls):
-        return Settings.normalize_controls(controls, GWTarget.SETTINGS)
+    def _normalize(controls, settings=None):
+        if not settings:
+            settings = GWTarget.SETTINGS
+        return Settings.normalize_controls(controls, settings)
 
     def test_normalize_controls_int(self):
         self.assertEqual(
@@ -69,3 +72,16 @@ class SettingsTest(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             SettingsTest._normalize({'immediate_data': 123})
         self.assertEqual('expected yes or no for immediate_data', str(cm.exception))
+
+    def test_normalise_list(self):
+        self.assertDictEqual(
+            SettingsTest._normalize(
+                {'trusted_ip_list': '10.1.1.1,10.1.1.2,10.1.1.3'},
+                SYS_SETTINGS),
+            {'trusted_ip_list': ['10.1.1.1', '10.1.1.2', '10.1.1.3']})
+
+        self.assertDictEqual(
+            SettingsTest._normalize(
+                {'trusted_ip_list': '10.1.1.1, 10.1.1.2 ,  10.1.1.3'},
+                SYS_SETTINGS),
+            {'trusted_ip_list': ['10.1.1.1', '10.1.1.2', '10.1.1.3']})
