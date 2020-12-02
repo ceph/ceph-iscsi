@@ -2842,7 +2842,7 @@ def get_ssl_files_from_mon():
         # https://bugs.python.org/issue16487 is resolved, we should be able
         # to simply use file-like objects and makes this much nicer.
 
-        tmp_f = tempfile.NamedTemporaryFile()
+        tmp_f = tempfile.NamedTemporaryFile(mode='w')
         tmp_f.write(data)
         tmp_f.flush()
         temp_files.append(tmp_f)
