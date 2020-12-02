@@ -8,7 +8,7 @@ cluster_name = <ceph cluster name>
 
 # CephX client name
 # cluster_client_name = client.<rados_id>  # E.g.: client.admin
-# gateway_conf = iscsi-gateway.conf 
+# gateway_conf = gateway.conf
 
 # API settings.
 # The api supports a number of options that allow you to tailor it to your
