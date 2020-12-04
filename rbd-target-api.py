@@ -2807,11 +2807,7 @@ class ConfigWatcher(threading.Thread):
             try:
                 obj_epoch = int(ioctx.get_xattr('gateway.conf', 'epoch'))
             except rados.ObjectNotFound:
-                # daemon is running prior to any config being created or it has
-                # skip the error, and
-                logger.warning("config object missing, recreating")
-                config.refresh()
-
+                raise
             else:
                 # if it's changed, refresh the local config to ensure a query
                 # to this node will return current state
