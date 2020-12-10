@@ -1129,7 +1129,7 @@ def disk(pool, image):
 
         api_vars = {
             'purge_host': local_gw,
-            'preserve_image': request.form['preserve_image'],
+            'preserve_image': request.form.get('preserve_image'),
             'backstore': backstore
         }
 
@@ -1272,7 +1272,7 @@ def _disk(pool, image):
 
         # if valid_request(request.remote_addr):
         purge_host = request.form['purge_host']
-        preserve_image = request.form['preserve_image'] == 'true'
+        preserve_image = request.form.get('preserve_image') == 'true'
         logger.debug("delete request for disk image '{}'".format(image_id))
         pool, image = image_id.split('/', 1)
         disk_config = config.config['disks'][image_id]
