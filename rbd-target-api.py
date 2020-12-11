@@ -989,15 +989,15 @@ def disk(pool, image):
     :param count: (str) the number of images will be created
     :param owner: (str) the owner of the rbd image
     :param controls: (JSON dict) valid control overrides
-    :param preserve_image: (bool) do NOT delete RBD image
-    :param create_image: (bool) create RBD image if not exists
+    :param preserve_image: (bool, 'true/false') do NOT delete RBD image
+    :param create_image: (bool, 'true/false') create RBD image if not exists, true as default
     :param backstore: (str) lio backstore
     :param wwn: (str) unit serial number
     **RESTRICTED**
     Examples:
     curl --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
         -X PUT http://192.168.122.69:5000/api/disk/rbd/new0_
-    curl --user admin:admin -d mode=create -d size=10g -d pool=rbd -d create_image=true
+    curl --user admin:admin -d mode=create -d size=10g -d pool=rbd -d create_image=false
         -X PUT http://192.168.122.69:5000/api/disk/rbd/new1
     curl --user admin:admin -X GET http://192.168.122.69:5000/api/disk/rbd/new2
     curl --user admin:admin -X DELETE http://192.168.122.69:5000/api/disk/rbd/new3
@@ -1069,17 +1069,26 @@ def disk(pool, image):
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
-        create_image = request.form.get('create_image') == 'true'
-        if mode == 'create' and (not create_image or not size):
+        create_image = request.form.get('create_image', 'true')
+        if create_image not in ['true', 'false']:
+            logger.error("Invalid 'create_image' value {}".format(create_image))
+            return jsonify(message="Invalid 'create_image' value {}".format(create_image)), 400
+
+        if mode == 'create' and (create_image == 'false' or not size):
             try:
+                # no size implies not intention to create an image, try to
+                # check whether it exists
                 rbd_image = RBDDev(image, 0, backstore, pool)
                 size = rbd_image.current_size
             except rbd.ImageNotFound:
-                if not create_image:
-                    return jsonify(message="Image {} does not exist".format(image_id)), 400
-                else:
+                # the create_image=true will be implied if size is specified
+                # by default
+                if create_image == 'true':
+                    # the size must be specified when creating an image
                     return jsonify(message="Size parameter is required when creating a new "
                                            "image"), 400
+                elif create_image == 'false':
+                    return jsonify(message="Image {} does not exist".format(image_id)), 400
 
         if mode == 'reconfigure':
             resp_text, resp_code = lun_reconfigure(image_id, controls, backstore)
