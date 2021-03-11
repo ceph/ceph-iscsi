@@ -33,7 +33,6 @@ class ISCSIRoot(UIRoot):
         UIRoot.__init__(self, shell)
 
         self.error = False
-        self.error_msg = ''
         self.interactive = True           # default interactive mode
         self.scan_threads = scan_threads
 
@@ -59,10 +58,9 @@ class ISCSIRoot(UIRoot):
         self.target = ISCSITargets(self)
 
     def refresh(self):
+
         self.config = self._get_config()
-
         if not self.error:
-
             if 'disks' in self.config:
                 self.disks.refresh(self.config['disks'])
             else:
@@ -74,14 +72,10 @@ class ISCSIRoot(UIRoot):
                 self.target.gateway_group = {}
 
             self.target.refresh(self.config['targets'], self.config['discovery_auth'])
-
             self.ceph.refresh()
-
         else:
             # Unable to get the config, tell the user and exit the cli
-            self.logger.critical("Unable to access the configuration "
-                                 "object : {}".format(self.error_msg))
-            raise GatewayError
+            self.logger.critical("Unable to access the configuration object")
 
     def _get_config(self, endpoint=None):
 
@@ -96,12 +90,14 @@ class ISCSIRoot(UIRoot):
                 return api.response.json()
             except Exception:
                 self.error = True
-                self.error_msg = "Malformed REST API response"
+                self.logger.error("Malformed REST API response")
                 return {}
         else:
+            # 403 maybe due to the ip address is not in the iscsi
+            # gateway trusted ip list
             self.error = True
-            self.error_msg = "REST API failure, code : " \
-                             "{}".format(api.response.status_code)
+            self.logger.error("REST API failure, code : "
+                              "{}".format(api.response.status_code))
             return {}
 
     def export_copy(self, config):
@@ -130,6 +126,9 @@ class ISCSIRoot(UIRoot):
             return
 
         current_config = self._get_config()
+        if not current_config:
+            self.logger.error("Unable to refresh local config.")
+            return
 
         if mode == 'copy':
             self.export_copy(current_config)
@@ -200,11 +199,9 @@ class ISCSITargets(UIGroup):
             if not target_exists:
                 Target(target_iqn, self)
         else:
-            self.logger.error("Failed to create the target on the local node")
-
-            raise GatewayAPIError("iSCSI target creation failed - "
-                                  "{}".format(response_message(api.response,
-                                                               self.logger)))
+            self.logger.error("Failed to create the target on the local node "
+                              "{}".format(response_message(api.response,
+                                                           self.logger)))
 
     def ui_command_delete(self, target_iqn):
         """
@@ -297,7 +294,7 @@ class ISCSITargets(UIGroup):
                 msg = response_message(api.response, self.logger)
                 self.logger.error("Delete of {} failed : {}".format(gw_name,
                                                                     msg))
-                raise GatewayAPIError
+                return
             else:
                 self.logger.debug("- deleted {}".format(gw_name))
 
@@ -363,7 +360,6 @@ class ISCSITargets(UIGroup):
             self.logger.info('ok')
         else:
             self.logger.error("Error: {}".format(response_message(api.response, self.logger)))
-            return
 
     def _set_auth(self, username, password, mutual_username, mutual_password):
         if mutual_username != '' and mutual_password != '':
@@ -417,6 +413,7 @@ class Target(UINode):
         config = self.parent.parent._get_config()
         if not config:
             self.logger.error("Unable to refresh local config")
+            raise GatewayError
 
         self.auth = config['targets'][target_iqn]['auth']
         # decode the chap password if necessary
@@ -516,14 +513,13 @@ class Target(UINode):
             self.logger.error("Failed to reconfigure : "
                               "{}".format(response_message(api.response,
                                                            self.logger)))
-            return
 
         config = self.parent.parent._get_config()
         if not config:
-            self.logger.error("Unable to refresh local config")
-        self.controls = config['targets'][self.target_iqn]['controls']
-
-        self.logger.info('ok')
+            self.logger.error("Unable to refresh local config.")
+        else:
+            self.controls = config['targets'][self.target_iqn]['controls']
+            self.logger.info('ok')
 
     def ui_command_auth(self, username=None, password=None, mutual_username=None,
                         mutual_password=None):
@@ -591,7 +587,6 @@ class Target(UINode):
             self.logger.error("Failed to update target auth: "
                               "{}".format(response_message(api.response,
                                                            self.logger)))
-            return
 
 
 class GatewayGroup(UIGroup):
@@ -705,7 +700,7 @@ class GatewayGroup(UIGroup):
         config = self.parent.parent.parent._get_config()
         if not config:
             self.logger.error("Unable to refresh local config over API - sync "
-                              "aborted, restart rbd-target-api on {} to "
+                              "aborted, restart rbd-target-api on {0} to "
                               "sync".format(gateway_name))
             return
 
@@ -757,6 +752,7 @@ class GatewayGroup(UIGroup):
         config = self.parent.parent.parent._get_config()
         if not config:
             self.logger.error("Could not refresh display. Restart gwcli.")
+            return
         elif not config['targets'][target_iqn]['portals']:
             # no more gws so everything but the target is dropped.
             disks_object = self.parent.get_child("disks")
@@ -820,7 +816,8 @@ class GatewayGroup(UIGroup):
         if not config:
             self.logger.error("Unable to refresh local config"
                               " over API - sync aborted, restart rbd-target-api"
-                              " on {} to sync".format(gateway_name))
+                              " on {0} to sync".format(gateway_name))
+            return
 
         target_iqn = self.parent.name
         target_config = config['targets'][target_iqn]
@@ -849,6 +846,7 @@ class GatewayGroup(UIGroup):
                               "".format(msg, gateway_name,
                                         settings.config.api_port))
             return
+
         gateway_hostname = api.response.json()['data']
 
         self.logger.info("Adding gateway, {}".format(sync_text))
@@ -877,6 +875,11 @@ class GatewayGroup(UIGroup):
         # we get back is current (the other gateways will lag until they see
         # epoch xattr change on the config object)
         config = self.parent.parent.parent._get_config(endpoint=new_gw_endpoint)
+        if not config:
+            self.logger.error("Unable to refresh local config"
+                              " over API - sync aborted, restart rbd-target-api"
+                              " on {0} to sync".format(gateway_name))
+            return
         target_config = config['targets'][target_iqn]
         portal_config = target_config['portals'][gateway_hostname]
         Gateway(self, gateway_hostname, portal_config)
