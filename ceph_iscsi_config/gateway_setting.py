@@ -171,7 +171,9 @@ SYS_SETTINGS = {
     "pool": StrSetting("pool", "rbd"),
     "cluster_client_name": StrSetting("cluster_client_name", "client.admin"),
     "time_out": IntSetting("time_out", 1, 600, 30),
-    "api_host": StrSetting("api_host", "::"),
+    # if the api_host has a colon, you must wrap it with square brackets.
+    # i.e: [::]
+    "api_host": StrSetting("api_host", "127.0.0.1"),
     "api_port": IntSetting("api_port", 1, 65535, 5000),
     "api_secure": BoolSetting("api_secure", True),
     "api_ssl_verify": BoolSetting("api_ssl_verify", False),

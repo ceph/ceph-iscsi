@@ -54,7 +54,8 @@ class Settings(object):
         return controls
 
     exclude_from_hash = ["cluster_client_name",
-                         "logger_level"
+                         "logger_level",
+                         "api_host"
                          ]
 
     def __init__(self, conffile='/etc/ceph/iscsi-gateway.cfg'):

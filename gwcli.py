@@ -105,7 +105,7 @@ def main():
     root_node.refresh()
     if root_node.error:
         print("Unable to contact the local API endpoint "
-              "({})".format(settings.config.api_endpoint))
+              "({})".format(settings.config.api_host))
         sys.exit(-1)
 
     # Account for invocation which includes a command to run i.e. batch mode
