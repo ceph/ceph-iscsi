@@ -12,9 +12,9 @@ configure multiple gateways concurrently.
 
 Here's an example of the shell interface the gwcli tool provides:
 
-/> ls
+[ceph-iscsi]$ gwcli ls
 o- / .................................................................................. [...]
-  o- clusters ................................................................. [Clusters: 1]
+  o- cluster .................................................................. [Clusters: 1]
   | o- ceph ..................................................................... [HEALTH_OK]
   |   o- pools ................................................................... [Pools: 3]
   |   | o- ec ........................................ [(2+1), Commit: 0b/40G (0%), Used: 0b]
@@ -29,17 +29,27 @@ o- / ...........................................................................
   |   o- disk_4 ............................................................... [disk_4 (1G)]
   |   o- disk_5 ............................................................... [disk_5 (2G)]
   o- iscsi-targets ............................................................. [Targets: 1]
-    o- iqn.2003-01.com.redhat.iscsi-gw:ceph-gw ................................ [Gateways: 2]
+    o- iqn.2003-01.com.redhat.iscsi-gw:ceph-gw1 ................... [Auth: CHAP, Gateways: 2]
+    | o- disks ................................................................... [Disks: 1]
+    | | o- rbd/disk_1 .............................................. [Owner: rh7-gw2, Lun: 0]
+    | o- gateways ..................................................... [Up: 2/2, Portals: 2]
+    | | o- rh7-gw1 .................................................... [192.168.122.69 (UP)]
+    | | o- rh7-gw2 .................................................... [192.168.122.14 (UP)]
+      o- host-groups ........................................................... [Groups : 0]
+      o- hosts ................................................ [Auth: ACL_ENABLED, Hosts: 1]
+    |   o- iqn.1994-05.com.redhat:rh7-client .......... [LOGGED-IN, Auth: CHAP, Disks: 1(2G)]
+    |     o- lun 0 ......................................... [rbd.disk_1(2G), Owner: rh7-gw2]
+    o- iqn.2003-01.com.redhat.iscsi-gw:ceph-gw2 ................... [Auth: None, Gateways: 2]
       o- disks ................................................................... [Disks: 1]
-      | o- rbd/disk_1 ...................................................... [Owner: rh7-gw1]
+      | o- rbd/disk_2 .............................................. [Owner: rh7-gw1, Lun: 0]
       o- gateways ..................................................... [Up: 2/2, Portals: 2]
-      | o- rh7-gw1 .................................................... [192.168.122.69 (UP)]
-      | o- rh7-gw2 ................................................... [192.168.122.104 (UP)]
-      o- hosts ................................................................... [Hosts: 2]
-        o- iqn.1994-05.com.redhat:myhost1 ........................ [Auth: None, Disks: 1(1G)]
-        | o- lun 0 ......................................... [rbd.disk_1(1G), Owner: rh7-gw2]
-        o- iqn.1994-05.com.redhat:rh7-client .......... [LOGGED-IN, Auth: CHAP, Disks: 1(2G)]
-          o- lun 0 ......................................... [rbd.disk_5(2G), Owner: rh7-gw2]
+      | o- rh7-gw1 ................................................... [2006:ac81::1103 (UP)]
+      | o- rh7-gw2 ................................................... [2006:ac81::1104 (UP)]
+      o- host-groups ........................................................... [Groups : 0]
+      o- hosts ................................................ [Auth: ACL_ENABLED, Hosts: 1]
+        o- iqn.1994-05.com.redhat:rh7-client .......... [LOGGED-IN, Auth: None, Disks: 1(2G)]
+          o- lun 0 ......................................... [rbd.disk_2(2G), Owner: rh7-gw1]
+
 
 
 The rbd-target-api daemon utilises the flask's internal development server to
@@ -53,19 +63,37 @@ add basic auth credentials to match the local api configuration in the RESTclien
 and use the client as follows;
 
 Add a Header content type for application/x-www-form-urlencoded
-METHOD: PUT        URL: https://192.168.122.69:5000/api/gateway/rh7-gw1
+METHOD: PUT  URL: https://192.168.122.69:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw1/rh7-gw1
 select the urlencoded content type and the basic auth credentials
 add the required variables to the body section in the client ui
   eg. ip_address=192.168.122.69
 Click 'SEND'
 
 
-Curl Examples
+Curl Examples:
 If the UI is not your thing, curl probably is! Here's an example of using
 curl to create a gateway node.
 
-curl --insecure --user admin:admin -d "ip_address=192.168.122.104" \
-     -X PUT https://192.168.122.69:5000/api/gateway/rh7-gw2
+curl --user admin:admin -d ip_address=192.168.122.14 \
+     -X PUT http://192.168.122.14:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw1/rh7-gw2
+
+IPv6 Support:
+Make sure the IPv6 addresses used are global unicast ones, and then the
+URL link could be:
+
+curl --user admin:admin -d ip_address=2006:ac81::1104 \
+     -X PUT http://[2006:ac81::1104]:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw2/rh7-gw2
+
+And mixing the IPv4 and IPv6 addresses is also allowed as below:
+
+curl --user admin:admin -d ip_address=192.168.122.14 \
+     -X PUT http://[2006:ac81::1104]:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw1/rh7-gw2
+
+curl --user admin:admin -d ip_address=2006:ac81::1104 \
+     -X PUT http://192.168.122.14:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw2/rh7-gw2
+
+NOTE: please make sure both the IPv4 and IPv6 addresses are in the trusted
+ip list in iscsi-gateway.cfg.
 
 
 ## Installation
