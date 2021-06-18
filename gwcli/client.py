@@ -472,14 +472,14 @@ class Client(UINode):
 
         return [rbd_name for rbd_name, lun_id in srtd_luns]
 
-    def ui_command_disk(self, action='add', disk=None, size=None):
+    def ui_command_disk(self, action='add', disk=None, size=None, datapool=None):
         """
         Disks can be added or removed from the client one at a time using
         the 'disk' sub-command. Note that if the disk does not currently exist
         in the configuration, the cli will attempt to create it for you.
 
         e.g.
-        disk add <pool_name/image_name> <size>
+        disk add <pool_name/image_name> <size> [datapool]
         disk remove <pool_name/image_name>
 
         Adding a disk will result in the disk occupying the client's next
@@ -545,7 +545,7 @@ class Client(UINode):
                     self.logger.error("Invalid format. Use pool_name/disk_name")
                     return
 
-                rc = ui_disks.create_disk(pool=pool, image=image, size=size)
+                rc = ui_disks.create_disk(pool=pool, image=image, size=size, datapool=datapool)
                 if rc == 0:
                     self.logger.debug("disk auto-define successful")
                 else:

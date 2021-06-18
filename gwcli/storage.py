@@ -164,7 +164,7 @@ class Disks(UIGroup):
 
         e.g.
         attach pool=rbd image=testimage
-        attach rbd.testimage
+        attach rbd/testimage
 
         The syntax of each parameter is as follows;
         pool  : Pool and image name may contain a-z, A-Z, 0-9, '_', or '-'
@@ -189,8 +189,8 @@ class Disks(UIGroup):
                           "image={}".format(pool, image))
         self.create_disk(pool=pool, image=image, create_image=False, backstore=backstore, wwn=wwn)
 
-    def ui_command_create(self, pool, image=None, size=None, backstore=None, wwn=None,
-                          count=1):
+    def ui_command_create(self, pool, datapool=None, image=None, size=None, backstore=None,
+                          wwn=None, count=1):
         """
         Create a RBD image and assign to the gateway(s).
 
@@ -204,8 +204,8 @@ class Disks(UIGroup):
         create rbd.testimage 100g
 
         The syntax of each parameter is as follows;
-        pool  : Pool and image name may contain a-z, A-Z, 0-9, '_', or '-'
-        image   characters.
+        pool, image  : Pool and image name may contain a-z, A-Z, 0-9, '_', or '-' characters.
+        datapool: Datapool name may contain a-z, A-Z, 0-9, '_', or '-' characters.
         size  : integer, suffixed by the allocation unit - either m/M, g/G or
                 t/T representing the MB/GB/TB [1]
         backstore  : lio backstore
@@ -260,8 +260,8 @@ class Disks(UIGroup):
         self.logger.debug("CMD: /disks/ create pool={} "
                           "image={} size={} "
                           "count={} ".format(pool, image, size, count))
-        self.create_disk(pool=pool, image=image, size=size, count=count, backstore=backstore,
-                         wwn=wwn)
+        self.create_disk(pool=pool, datapool=datapool, image=image, size=size, count=count,
+                         backstore=backstore, wwn=wwn)
 
     def _valid_pool(self, pool):
         """
@@ -277,15 +277,15 @@ class Disks(UIGroup):
         pools = root.ceph.cluster.pools
         pool_object = pools.pool_lookup.get(pool, None)
         if pool_object:
-            if pool_object.type == 'replicated':
-                self.logger.debug("pool '{}' is ok to use".format(pool))
+            if pool_object.type in ['replicated', 'erasure']:
+                self.logger.debug(f"pool '{pool}' is ok to use")
                 return True
 
-        self.logger.error("Invalid pool ({}). Must already exist and "
-                          "be replicated".format(pool))
+        self.logger.error(f"Invalid pool '{pool}', the type is '{pool_object.type}'."
+                          " Must already exist and be erasure or replicated")
         return False
 
-    def create_disk(self, pool, image, size=None, count=1,
+    def create_disk(self, pool, image, datapool=None, size=None, count=1,
                     parent=None, create_image=True, backstore=None, wwn=None):
 
         rc = 0
@@ -300,14 +300,18 @@ class Disks(UIGroup):
         if not self._valid_pool(pool):
             return
 
-        self.logger.debug("Creating/mapping disk {}/{}".format(pool,
-                                                               image))
+        if datapool and not self._valid_pool(datapool):
+            return
+
+        self.logger.debug("Creating/mapping disk {}, datapool {}".format(disk_key,
+                                                                         datapool))
 
         # make call to local api server's disk endpoint
-        disk_api = '{}://localhost:{}/api/disk/{}'.format(self.http_mode,
-                                                          settings.config.api_port,
-                                                          disk_key)
-        api_vars = {'pool': pool, 'owner': local_gw,
+        disk_api = ('{}://localhost:{}/api/disk/'
+                    '{}'.format(self.http_mode,
+                                settings.config.api_port,
+                                disk_key))
+        api_vars = {'pool': pool, 'datapool': datapool, 'owner': local_gw,
                     'count': count, 'mode': 'create',
                     'create_image': 'true' if create_image else 'false',
                     'backstore': backstore, 'wwn': wwn}
@@ -333,12 +337,13 @@ class Disks(UIGroup):
                 else:
                     disk_key = "{}/{}".format(pool, image)
 
+                api_vars = {'datapool': datapool}
                 disk_api = ('{}://localhost:{}/api/disk/'
                             '{}'.format(self.http_mode,
                                         settings.config.api_port,
                                         disk_key))
 
-                api = APIRequest(disk_api)
+                api = APIRequest(disk_api, data=api_vars)
                 api.get()
 
                 if api.response.status_code == 200:
@@ -645,6 +650,7 @@ class Disk(UINode):
 
         UINode.__init__(self, self.rbd_image, parent)
 
+        self.datapool = image_config.get('datapool', None)
         self.image_id = image_id
         self.size = 0
         self.size_h = ''
@@ -749,7 +755,11 @@ class Disk(UINode):
                 if state != "Online":
                     status = False
 
-        msg = [self.image_id, "({}, {})".format(state, self.size_h)]
+        if self.datapool:
+            _image_id = "{}+{}/{}".format(self.pool, self.datapool, self.rbd_image)
+        else:
+            _image_id = self.image_id
+        msg = [_image_id, "({}, {})".format(state, self.size_h)]
 
         return " ".join(msg), status
 
@@ -954,11 +964,10 @@ class Disk(UINode):
 
         self.logger.debug("Issuing snapshot {} request".format(action))
         disk_api = ('{}://localhost:{}/api/'
-                    'disksnap/{}/{}/{}'.format(self.http_mode,
-                                               settings.config.api_port,
-                                               self.pool,
-                                               self.rbd_image,
-                                               name))
+                    'disksnap/{}/{}'.format(self.http_mode,
+                                            settings.config.api_port,
+                                            self.image_id,
+                                            name))
 
         if action == 'delete':
             api = APIRequest(disk_api)

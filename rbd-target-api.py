@@ -875,6 +875,7 @@ def _target_disk(target_iqn=None):
     disk = request.form.get('disk')
     pool, image = disk.split('/', 1)
     disk_config = config.config['disks'][disk]
+    datapool = disk_config.get('datapool', None)
     backstore = disk_config['backstore']
     backstore_object_name = disk_config['backstore_object_name']
 
@@ -897,6 +898,7 @@ def _target_disk(target_iqn=None):
         size = rbd_image.current_size
         lun = LUN(logger,
                   pool,
+                  datapool,
                   image,
                   size,
                   allocating_host,
@@ -925,6 +927,7 @@ def _target_disk(target_iqn=None):
 
         lun = LUN(logger,
                   pool,
+                  datapool,
                   image,
                   0,
                   purge_host,
@@ -982,10 +985,10 @@ def disk(pool, image):
     rbd delete.
 
     :param pool: (str) pool name
+    :param datapool: (str) datapool name
     :param image: (str) rbd image name
     :param mode: (str) 'create' or 'resize' the rbd image
     :param size: (str) the size of the rbd image
-    :param pool: (str) the pool name the rbd image will be in
     :param count: (str) the number of images will be created
     :param owner: (str) the owner of the rbd image
     :param controls: (JSON dict) valid control overrides
@@ -997,8 +1000,8 @@ def disk(pool, image):
     Examples:
     curl --user admin:admin -d mode=create -d size=1g -d pool=rbd -d count=5
         -X PUT http://192.168.122.69:5000/api/disk/rbd/new0_
-    curl --user admin:admin -d mode=create -d size=10g -d pool=rbd -d create_image=false
-        -X PUT http://192.168.122.69:5000/api/disk/rbd/new1
+    curl --user admin:admin -d mode=create -d size=1g -d pool=rbd -d datapool=ec
+        -d create_image=false -X PUT http://192.168.122.69:5000/api/disk/rbd/new1
     curl --user admin:admin -X GET http://192.168.122.69:5000/api/disk/rbd/new2
     curl --user admin:admin -X DELETE http://192.168.122.69:5000/api/disk/rbd/new3
     """
@@ -1007,6 +1010,7 @@ def disk(pool, image):
     logger.debug("this host is {}".format(local_gw))
 
     image_id = '{}/{}'.format(pool, image)
+    datapool = request.form.get('datapool', None)
 
     config.refresh()
 
@@ -1062,7 +1066,7 @@ def disk(pool, image):
             logger.debug("{} controls {}".format(mode, controls))
 
         wwn = request.form.get('wwn')
-        disk_usable = LUN.valid_disk(config, logger, pool=pool,
+        disk_usable = LUN.valid_disk(config, logger, pool=pool, datapool=datapool,
                                      image=image, size=size, mode=mode,
                                      count=count, controls=controls,
                                      backstore=backstore, wwn=wwn)
@@ -1091,7 +1095,7 @@ def disk(pool, image):
                     return jsonify(message="Image {} does not exist".format(image_id)), 400
 
         if mode == 'reconfigure':
-            resp_text, resp_code = lun_reconfigure(image_id, controls, backstore)
+            resp_text, resp_code = lun_reconfigure(image_id, controls, backstore, datapool)
             if resp_code == 200:
                 return jsonify(message="lun reconfigured: {}".format(resp_text)), resp_code
             else:
@@ -1107,6 +1111,7 @@ def disk(pool, image):
                                                                   sfx)
 
             api_vars = {'pool': pool,
+                        'datapool': datapool,
                         'image': image,
                         'size': size,
                         'owner': local_gw,
@@ -1130,13 +1135,14 @@ def disk(pool, image):
 
     else:
         # this is a DELETE request
-        disk_usable = LUN.valid_disk(config, logger, mode='delete',
-                                     pool=pool, image=image, backstore=backstore)
+        disk_usable = LUN.valid_disk(config, logger, mode='delete', pool=pool,
+                                     datapool=datapool, image=image, backstore=backstore)
 
         if disk_usable != 'ok':
             return jsonify(message=disk_usable), 400
 
         api_vars = {
+            'datapool': datapool,
             'purge_host': local_gw,
             'preserve_image': request.form.get('preserve_image'),
             'backstore': backstore
@@ -1163,10 +1169,12 @@ def _disk(pool, image):
     Disks can be created and added to each gateway, or deleted through this
     call
     :param pool: (str) pool name
+    :param datapool: (str) datapool name
     :param image: (str) image name
     **RESTRICTED**
     """
 
+    datapool = request.form.get('datapool', None)
     image_id = '{}/{}'.format(pool, image)
 
     config.refresh()
@@ -1214,6 +1222,7 @@ def _disk(pool, image):
 
             lun = LUN(logger,
                       str(request.form['pool']),
+                      datapool,
                       image,
                       str(request.form['size']),
                       str(request.form['owner']),
@@ -1252,11 +1261,11 @@ def _disk(pool, image):
                 return jsonify(message="LUN {} failure".format(mode)), 500
 
             if 'owner' not in disk:
-                msg = "Disk {}/{} must be assigned to a target".format(disk['pool'], disk['image'])
+                msg = "Disk {} must be assigned to a target".format(image_id)
                 logger.error("LUN owner not defined - {}".format(msg))
                 return jsonify(message="LUN {} failure - {}".format(mode, msg)), 400
 
-            lun = LUN(logger, pool, image, size, disk['owner'],
+            lun = LUN(logger, pool, datapool, image, size, disk['owner'],
                       backstore, backstore_object_name)
             if mode == 'deactivate':
                 try:
@@ -1283,13 +1292,13 @@ def _disk(pool, image):
         purge_host = request.form['purge_host']
         preserve_image = request.form.get('preserve_image') == 'true'
         logger.debug("delete request for disk image '{}'".format(image_id))
-        pool, image = image_id.split('/', 1)
         disk_config = config.config['disks'][image_id]
         backstore = disk_config['backstore']
         backstore_object_name = disk_config['backstore_object_name']
 
         lun = LUN(logger,
                   pool,
+                  datapool,
                   image,
                   0,
                   purge_host,
@@ -1319,7 +1328,7 @@ def _disk(pool, image):
         return jsonify(message="LUN removed"), 200
 
 
-def lun_reconfigure(image_id, controls, backstore):
+def lun_reconfigure(image_id, controls, backstore, datapool):
     logger.debug("lun reconfigure request")
 
     config.refresh()
@@ -1345,11 +1354,10 @@ def lun_reconfigure(image_id, controls, backstore):
         return "failed to deactivate disk: {}".format(resp_text), resp_code
 
     pool_name, image_name = image_id.split('/', 1)
-
     rbd_image = RBDDev(image_name, 0, backstore, pool_name)
     size = rbd_image.current_size
 
-    lun = LUN(logger, pool_name, image_name, size, disk['owner'],
+    lun = LUN(logger, pool_name, datapool, image_name, size, disk['owner'],
               disk['backstore'], disk['backstore_object_name'])
 
     for k, v in controls.items():
@@ -1398,15 +1406,16 @@ def disksnap(pool, image, name):
     each gateway. Processing is done serially: rollback is done locally
     first, then other gateways. Other actions are only performed locally.
 
-    :param image_id: (str) rbd image name of the format pool/image
+    :param pool: (str) pool name
+    :param image: (str) rbd image name
     :param name: (str) rbd snapshot name
     :param mode: (str) 'create' or 'rollback' the rbd snapshot
     **RESTRICTED**
     Examples:
     curl --user admin:admin -d mode=create
-        -X PUT http://192.168.122.69:5000/api/disksnap/rbd.image/new1
+        -X PUT http://192.168.122.69:5000/api/disksnap/rbd/image/new1
     curl --user admin:admin
-        -X DELETE http://192.168.122.69:5000/api/disksnap/rbd.image/new1
+        -X DELETE http://192.168.122.69:5000/api/disksnap/rbd/image/new1
     """
 
     if not valid_snapshot_name(name):
@@ -1424,8 +1433,7 @@ def disksnap(pool, image, name):
         if mode == 'create':
             resp_text, resp_code = _disksnap_create(pool, image, name)
         elif mode == 'rollback':
-            resp_text, resp_code = _disksnap_rollback(image_id, pool,
-                                                      image, name)
+            resp_text, resp_code = _disksnap_rollback(pool, image, name)
         else:
             logger.debug("snapshot request rejected due to invalid mode")
             resp_text = "mode is invalid"
@@ -1481,8 +1489,10 @@ def _disksnap_delete(pool_name, image_name, name):
     return resp_text, resp_code
 
 
-def _disksnap_rollback(image_id, pool_name, image_name, name):
+def _disksnap_rollback(pool, image, name):
     logger.debug("snapshot rollback request")
+
+    image_id = '{}/{}'.format(pool, image)
 
     disk = config.config['disks'].get(image_id, None)
     if not disk:
@@ -1509,8 +1519,8 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
         try:
             with rados.Rados(conffile=settings.config.cephconf,
                              name=settings.config.cluster_client_name) as cluster, \
-                    cluster.open_ioctx(pool_name) as ioctx, \
-                    rbd.Image(ioctx, image_name) as image:
+                    cluster.open_ioctx(pool) as ioctx, \
+                    rbd.Image(ioctx, image) as image:
 
                 try:
                     logger.debug("rolling back to snapshot")
