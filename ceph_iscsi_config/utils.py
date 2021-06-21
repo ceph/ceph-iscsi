@@ -28,14 +28,14 @@ class CephiSCSIInval(CephiSCSIError):
     pass
 
 
-def shellcommand(command_string):
-
+def run_shell_cmd(cmd, stderr=None, shell=True):
+    if not stderr:
+        stderr = subprocess.STDOUT
     try:
-        response = subprocess.check_output(command_string, shell=True)
-    except subprocess.CalledProcessError:
-        return None
-    else:
-        return response
+        result = subprocess.check_output(cmd, stderr=stderr, shell=shell)
+    except subprocess.CalledProcessError as err:
+        return None, err
+    return result, None
 
 
 def normalize_ip_address(ip_address):
