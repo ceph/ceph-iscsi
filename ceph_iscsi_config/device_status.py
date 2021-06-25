@@ -124,7 +124,7 @@ class DeviceStatusWatcher(threading.Thread):
 
             svc = json.loads(outb).get('tcmu-runner')
             if svc is None:
-                self.logger.warning("there is no tcmu-runner data avaliable")
+                self.logger.warning("there is no tcmu-runner data available")
                 self.state = "Unknown"
                 continue
 
