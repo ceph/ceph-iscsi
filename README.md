@@ -23,11 +23,27 @@ gateway. The Python ```ceph_iscsi_config``` modules are used by:
 
 ## Installation
 ### Repository
-A YUM repository is available with the lastest releases.  The repository is available at `https://download.ceph.com/ceph-iscsi/{version}/rpm/{distribution}/noarch/`.  For example, https://download.ceph.com/ceph-iscsi/latest/rpm/el7/noarch/
+A YUM repository is available with the lastest releases.
+The repository is available at `https://download.ceph.com/ceph-iscsi/{version}/rpm/{distribution}/noarch/`.
+For example:
+ el7: https://download.ceph.com/ceph-iscsi/latest/rpm/el7/noarch/
+ el8: https://download.ceph.com/ceph-iscsi/latest/rpm/el8/noarch/
 
-Alternatively, you may download the YUM repo description at https://download.ceph.com/ceph-iscsi/latest/rpm/el7/ceph-iscsi.repo
+Alternatively, you may download the YUM repo description at https://download.ceph.com/ceph-iscsi/latest/rpm/el7/ceph-iscsi.repo (el7)
+or https://download.ceph.com/ceph-iscsi/latest/rpm/el8/ceph-iscsi.repo (el8)
 
 Packages are signed with the following key: https://download.ceph.com/keys/release.asc
+
+On el8 you will also need a repo file like:
+```
+[tcmu-runner]
+gpgcheck=0
+baseurl=https://4.chacra.ceph.com/r/tcmu-runner/master/06d64ab78c2898c032fe5be93f9ae6f64b199d5b/centos/8/flavors/default/x86_64/
+enabled=1
+name=tcmu-runner packages
+```
+for providing the missing tcmu-runner dependency.
+
 
 ### Via RPM
 Simply install the provided rpm with:
@@ -35,8 +51,9 @@ Simply install the provided rpm with:
 
 ### Manually
 The following packages are required by ceph-iscsi-config and must be
-installed before starting the rbd-target-api and rbd-target-gw services:
-
+installed before starting the rbd-target-api and rbd-target-gw services.
+On el7:
+```
 python-rados
 python-rbd
 python-netifaces
@@ -44,6 +61,19 @@ python-rtslib
 python-configshell
 python-cryptography
 python-flask
+```
+
+on el8:
+
+```
+python3-rados
+python3-rbd
+python3-netifaces
+python3-rtslib
+python3-configshell
+python3-cryptography
+python3-flask
+```
 
 To install the python package that provides the CLI tool, daemons and
 application logic, run the provided setup.py script i.e.
