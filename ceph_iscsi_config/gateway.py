@@ -35,64 +35,64 @@ class CephiSCSIGateway(object):
             return None, err
         return result, None
 
-    def ceph_rm_blocklist(self, blocklisted_ip):
+    def ceph_rm_blacklist(self, blacklisted_ip):
         """
-        Issue a ceph osd blocklist rm command for a given IP on this host
-        :param blocklisted_ip: IP address (str - dotted quad)
+        Issue a ceph osd blacklist rm command for a given IP on this host
+        :param blacklisted_ip: IP address (str - dotted quad)
         :return: boolean for success of the rm operation
         """
 
-        self.logger.info("Removing blocklisted entry for this host : "
-                         "{}".format(blocklisted_ip))
+        self.logger.info("Removing blacklisted entry for this host : "
+                         "{}".format(blacklisted_ip))
 
         conf = settings.config
         result, err = self._run_ceph_cmd(
-            "ceph -n {client_name} --conf {cephconf} osd blocklist rm "
-            "{blocklisted_ip}".format(blocklisted_ip=blocklisted_ip,
+            "ceph -n {client_name} --conf {cephconf} osd blacklist rm "
+            "{blacklisted_ip}".format(blacklisted_ip=blacklisted_ip,
                                       client_name=conf.cluster_client_name,
                                       cephconf=conf.cephconf))
         if err:
             result, err = self._run_ceph_cmd(
                 "ceph -n {client_name} --conf {cephconf} osd blacklist rm "
-                "{blocklisted_ip}".format(blocklisted_ip=blocklisted_ip,
+                "{blacklisted_ip}".format(blacklisted_ip=blacklisted_ip,
                                           client_name=conf.cluster_client_name,
                                           cephconf=conf.cephconf))
 
         if err:
-            self.logger.critical("blocklist removal failed: {}. Run"
+            self.logger.critical("blacklist removal failed: {}. Run"
                                  " 'ceph -n {client_name} --conf {cephconf} "
-                                 "osd blocklist rm {blocklisted_ip}'".
+                                 "osd blacklist rm {blacklisted_ip}'".
                                  format(err.output.decode('utf-8').strip(),
-                                        blocklisted_ip=blocklisted_ip,
+                                        blacklisted_ip=blacklisted_ip,
                                         client_name=conf.cluster_client_name,
                                         cephconf=conf.cephconf))
             return False
 
-        self.logger.info("Successfully removed blocklist entry")
+        self.logger.info("Successfully removed blacklist entry")
         return True
 
-    def osd_blocklist_cleanup(self):
+    def osd_blacklist_cleanup(self):
         """
-        Process the osd's to see if there are any blocklist entries for this
+        Process the osd's to see if there are any blacklist entries for this
         node
-        :return: True, blocklist entries removed OK, False - problems removing
-        a blocklist
+        :return: True, blacklist entries removed OK, False - problems removing
+        a blacklist
         """
 
-        self.logger.info("Processing osd blocklist entries for this node")
+        self.logger.info("Processing osd blacklist entries for this node")
 
         cleanup_state = True
         conf = settings.config
 
         # NB. Need to use the stderr override to catch the output from
         # the command
-        blocklist, err = self._run_ceph_cmd(
-            "ceph -n {client_name} --conf {cephconf} osd blocklist ls".
+        blacklist, err = self._run_ceph_cmd(
+            "ceph -n {client_name} --conf {cephconf} osd blacklist ls".
             format(client_name=conf.cluster_client_name,
                    cephconf=conf.cephconf))
 
         if err:
-            blocklist, err = self._run_ceph_cmd(
+            blacklist, err = self._run_ceph_cmd(
                 "ceph -n {client_name} --conf {cephconf} osd blacklist ls".
                 format(client_name=conf.cluster_client_name,
                        cephconf=conf.cephconf))
@@ -100,14 +100,14 @@ class CephiSCSIGateway(object):
         if err:
             self.logger.critical(
                 "Failed to run 'ceph -n {client_name} --conf {cephconf} "
-                "osd blocklist ls'. Please resolve manually..."
+                "osd blacklist ls'. Please resolve manually..."
                 .format(client_name=conf.cluster_client_name,
                         cephconf=conf.cephconf))
             cleanup_state = False
         else:
 
-            blocklist_output = blocklist.decode('utf-8').split('\n')[:-1]
-            if len(blocklist_output) > 1:
+            blacklist_output = blacklist.decode('utf-8').split('\n')[:-1]
+            if len(blacklist_output) > 1:
 
                 # We have entries to look for, so first build a list of ipv4
                 # addresses on this node
@@ -117,27 +117,27 @@ class CephiSCSIGateway(object):
                     ipv4_list += [dev['addr'] for dev in dev_info]
 
                 # process the entries. last entry is just null)
-                for blocklist_entry in blocklist_output:
+                for blacklist_entry in blacklist_output:
 
-                    # blocklist_output is not gauranteed to be in order returned
+                    # blacklist_output is not gauranteed to be in order returned
                     # from the ceph command. 'listed N entries' line could be
                     # at any index.
-                    if "listed" in blocklist_entry:
+                    if "listed" in blacklist_entry:
                         continue
 
                     # valid entries to process look like -
                     # 192.168.122.101:0/3258528596 2016-09-28 18:23:15.307227
-                    blocklisted_ip = blocklist_entry.split(':')[0]
-                    # Look for this hosts ipv4 address in the blocklist
+                    blacklisted_ip = blacklist_entry.split(':')[0]
+                    # Look for this hosts ipv4 address in the blacklist
 
-                    if blocklisted_ip in ipv4_list:
+                    if blacklisted_ip in ipv4_list:
                         # pass in the ip:port/nonce
-                        rm_ok = self.ceph_rm_blocklist(blocklist_entry.split(' ')[0])
+                        rm_ok = self.ceph_rm_blacklist(blacklist_entry.split(' ')[0])
                         if not rm_ok:
                             cleanup_state = False
                             break
             else:
-                self.logger.info("No OSD blocklist entries found")
+                self.logger.info("No OSD blacklist entries found")
 
         return cleanup_state
 
