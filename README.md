@@ -75,7 +75,7 @@ The functionality provided by each module in the python package is summarised be
 | **utils** | common code called by multiple modules |
 
 The rbd-target-api daemon performs the following tasks;
-  1. At start up remove any osd blocklist entry that may apply to the running host
+  1. At start up remove any osd blacklist entry that may apply to the running host
   2. Read the configuration object from Rados
   3. Process the configuration
   3.1 map rbd's to the host
