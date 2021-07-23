@@ -2922,7 +2922,7 @@ def main():
 
     ceph_gw = CephiSCSIGateway(logger, config)
 
-    osd_state_ok = ceph_gw.osd_blocklist_cleanup()
+    osd_state_ok = ceph_gw.osd_blacklist_cleanup()
     if not osd_state_ok:
         sys.exit(16)
 
