@@ -246,13 +246,15 @@ class CephPools(UIGroup):
             rc, buf_s, out = cluster.mon_command(json.dumps(cmd), b'')
 
         pools = {}
-        for pool in json.loads(buf_s)['pools']:
+        osd_dump = json.loads(buf_s)
+        for pool in osd_dump['pools']:
             name = pool['pool_name']
             pools[name] = pool
 
         for pool_name in pools:
             # if pool_name not in existing_pools:
-            new_pool = RadosPool(self, pool_name, pools[pool_name])
+            new_pool = RadosPool(self, pool_name, pools[pool_name],
+                                 osd_dump['erasure_code_profiles'])
             self.pool_lookup[pool_name] = new_pool
 
     def refresh(self):
@@ -285,15 +287,17 @@ class RadosPool(UINode):
     display_attributes = ["name", "commit", "overcommit_PCT", "max_bytes",
                           "used_bytes", "type", "desc"]
 
-    def __init__(self, parent, pool_name, pool_md):
+    def __init__(self, parent, pool_name, pool_md, ec_profiles):
         UINode.__init__(self, pool_name, parent)
-        self.pool_md = pool_md
-        pool_type = {1: ("x{}".format(self.pool_md['size']),
-                         'replicated'),
-                     3: ("{}+{}".format(self.pool_md['min_size'],
-                                        self.pool_md['size'] - self.pool_md['min_size']),
-                         "erasure")}
-        self.desc, self.type = pool_type[self.pool_md['type']]
+
+        type_id = pool_md['type']
+        if type_id == 1:
+            self.desc = "x{}".format(pool_md['size'])
+            self.type = "replicated"
+        elif type_id == 3:
+            ec_profile = ec_profiles[pool_md['erasure_code_profile']]
+            self.desc = "{}+{}".format(ec_profile['k'], ec_profile['m'])
+            self.type = "erasure"
 
     def _calc_overcommit(self):
         root = self.parent.parent.parent.parent
