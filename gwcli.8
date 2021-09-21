@@ -118,33 +118,33 @@ Use the resize command to increase the capacity of a specific rbd image.
 \fB/disks/ delete <disk_name>\fR
 The delete command allows you to remove the rbd from the LIO and ceph cluster. Prior to the delete being actioned the current configuration is checked to ensure that the requested rbd image is not masked to any iSCSI client. Once this check is successful, the rbd image will be purged from the LIO environment on each gateway and deleted from the ceph cluster.
 
-.SH ISCSI-TARGET
+.SH ISCSI-TARGETS
 The iscsi-target provides the end-point name that clients will know the iSCSI 'cluster' as. The target IQN will be created across all gateways within the configuration. Once the target is defined, the iscsi-target sub-tree is populated with entries for \fBgateways\fR and \fBhosts\fR.
 .PP
 .TP
-\fB/iscsi-target/ create <valid_IQN>\fR
+\fB/iscsi-targets/ create <valid_IQN>\fR
 The IQN provided will be validated and defined to the configuration object. Adding gateway nodes will then pick up the configuration's IQN and apply it to their local LIO instance.
 .TP
-\fB/iscsi-target/ clearconfig confirm=true\fR
+\fB/iscsi-targets/ clearconfig confirm=true\fR
 The clearconfig command provides the ability to return each of the gateways to their undefined state. However, since this is a disruptive command you must remove the clients and disks first, before issuing a clearconfig.
 .SH GATEWAYS
 Gateways provide the access points for rbd images over iSCSI, so there should be a minimum of 2 defined to provide fault tolerance.
 .PP
 .TP
-\fB/iscsi-target/<iqn>/ create <node_name> <portal_ip_address>
+\fB/iscsi-targets/<iqn>/ create <node_name> <portal_ip_address>
 Gateways are defined by a node name (preferably a shortname, but it must resolve), and an IPv4/IPv6 address that the iSCSI 'service' will be bound to (i.e. the iSCSI portal IP address). When adding a gateway, the candidate machine will be checked to ensure the relevant files and daemons are in place.
 .SH HOST-GROUPS
 Host groups provide a more convenient way of managing multiple servers that must share the same disk masking configuration. For example in a RHV/oVirt or Vmware environment, each host needs access to the same LUNs. Host groups allow you to create a logical group which contains the hosts and the disks that each host in the group should have access to. Please note that sharing devices across hosts needs a cluster aware filesystem or equivalent locking to avoid data corruption.
 .PP
 .TP
-\fB/iscsi-target/<iqn>/host-groups/ create | delete <group-name>
+\fB/iscsi-targets/<iqn>/host-groups/ create | delete <group-name>
 Create or delete a given group name. Deleting a group definition does \fBnot\fR remove the hosts or LUN masking, it simply removes the logical grouping used for management purposes.
 .PP
 .TP
-\fB/iscsi-target/<iqn>/host-groups/<group_name>/ host add | remove <client-iqn>
+\fB/iscsi-targets/<iqn>/host-groups/<group_name>/ host add | remove <client-iqn>
 The host subcommand within a group definition allows you to add and remove hosts from the group. When adding a host, it must not have existing LUN masking in place - this restriction ensure lun id consistency across all hosts within the host group. Removing a host from a group does \fBnot\fR automatically remove it's LUN masking.
 .TP
-\fB/iscsi-target/<iqn>/host-groups/<group_name>/ disk add | remove <pool>.<image_name>
+\fB/iscsi-targets/<iqn>/host-groups/<group_name>/ disk add | remove <pool>.<image_name>
 The disk subcommand enables you to add and remove disks to/from all members of the host group.
 .PP
 .RS
@@ -154,24 +154,24 @@ The disk subcommand enables you to add and remove disks to/from all members of t
 The 'hosts' section defines the iSCSI client definitions (NodeACLs) that provide access to the rbd images. The CLI provides the ability to create and delete clients, define/update chap authentication and add and remove rbd images for the client.
 .PP
 .TP
-\fB/iscsi-target/<iqn>/hosts/ create <client_iqn>
+\fB/iscsi-targets/<iqn>/hosts/ create <client_iqn>
 The create command will define the client IQN to all gateways within the configuration. At creation time, the client IQN is added to a ACL that allows normal iSCSI session logins for all clients with the IQN. To enable CHAP authentication use the \fBauth\fR command described below.
 .TP
-\fB/iscsi-target/<iqn>/hosts/ delete <client_iqn>
+\fB/iscsi-targets/<iqn>/hosts/ delete <client_iqn>
 The delete command will attempt to remove client IQN from all gateways within the configuration. The client must be logged out, for the delete command to be successful.
 .TP
 .nf
-\fB/iscsi-target/<iqn>/hosts/ auth nochap\fR
+\fB/iscsi-targets/<iqn>/hosts/ auth nochap\fR
 .fi
 CHAP authentication can be reset to initiator based ACLs target wide for all setup ACLs using the \fBnochap\fR keyword. If there are multiple clients, CHAP must be enabled for all clients or disabled for all clients. gwcli does not support mixing CHAP clients with IQN ACL clients.
 .TP
 .nf
-\fB/iscsi-target/<iqn>/hosts/<client_iqn>/ auth chap=<user>/<pswd>\fR
+\fB/iscsi-targets/<iqn>/hosts/<client_iqn>/ auth chap=<user>/<pswd>\fR
 .fi
 CHAP authentication can be defined for the client with the \fBchap=\fR parameter. The username and password defined here must then be used within the clients login credentials for this iscsi target. If there are multiple clients, CHAP must be enabled for all clients or disabled for all clients. gwcli does not support mixing CHAP clients with IQN ACL clients.
 .TP
 .nf
-\fB/iscsi-target/<iqn>/hosts/<client_iqn>/ disk add | remove <disk_name>\fR
+\fB/iscsi-targets/<iqn>/hosts/<client_iqn>/ disk add | remove <disk_name>\fR
 .fi
 rbd images defined to the iscsi gateway, become LUNs within the LIO environment. These LUNs can be masked to, or masked from specific clients using the \fBdisk\fR command. When a disk is masked to a client, the disk is automatically assigned a LUN id. The disk->LUN id relationship is persisted in the rados configuration object to ensure that the disk always appears on the clients SCSI interface at the same point.
 
@@ -180,10 +180,10 @@ It is the Administrators responsibility to ensure that any disk shared between c
 .PP
 .SS CREATING ISCSI GATEWAYS
 .TP
-\fB>/iscsi-target create iqn.2003-01.com.redhat.iscsi-gw:ceph-igw\fR
+\fB>/iscsi-targets create iqn.2003-01.com.redhat.iscsi-gw:ceph-igw\fR
 Create a iscsi target name of 'iqn.2003-01.com.redhat.iscsi-gw:ceph-igw', that will be used by each gateway node added to the configuration
 .PP
-\fB>cd /iscsi-target/iqn.2003-01.com.redhat.iscsi-gw:ceph-igw/gateways
+\fB>cd /iscsi-targets/iqn.2003-01.com.redhat.iscsi-gw:ceph-igw/gateways
 .PD 0
 .PP
 \fB>create ceph-gw-1 10.172.19.21
@@ -198,7 +198,7 @@ Create 2 gateways, using servers ceph-gw-1 and ceph-gw-2. The iSCSI portals will
 Create/import a 50g rbd image and register it with each gateway node
 .SS CREATING A CLIENT
 .PD 0
-\fB>cd /iscsi-target/iqn.2003-01.com.redhat.iscsi-gw:ceph-igw/hosts/fR
+\fB>cd /iscsi-targets/iqn.2003-01.com.redhat.iscsi-gw:ceph-igw/hosts/fR
 .PP
 .TP
 \fB>create iqn.1994-05.com.redhat:rh7-client\fr
