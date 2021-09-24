@@ -150,13 +150,13 @@ class ISCSIRoot(UIRoot):
 
 class ISCSITargets(UIGroup):
     help_intro = '''
-                 The iscsi-target group defines the ISCSI Target that the
-                 group of gateways will be known as by iSCSI initiators (clients).
+                 The iscsi-targets section shows the iSCSI targets that
+                 the groups of gateways will be known as by iSCSI initiators
+                 (clients).
 
-                 Only one iSCSI target is allowed, but each target can consist
-                 of 2-4 gateway nodes. Multiple gateways are needed to deliver
-                 high availability storage to the iSCSI client.
-
+                 Each iSCSI target can consist of 2-4 gateway nodes. Multiple
+                 gateways are needed to deliver high availability storage to
+                 the iSCSI client.
                  '''
 
     def __init__(self, parent):

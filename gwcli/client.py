@@ -567,7 +567,7 @@ class Client(UINode):
                 self.logger.debug("disk auto-map successful")
             else:
                 self.logger.error("disk auto-map failed({}), try "
-                                  "using the /iscsi-target/<iqn>/disks add "
+                                  "using the /iscsi-targets/<iqn>/disks add "
                                   "command".format(rc))
                 return
 
