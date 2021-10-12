@@ -959,7 +959,7 @@ class Gateway(UINode):
                         "iscsi": "UP", "api": "UP"},
                   401: {"status": "UNAUTHORIZED",
                         "iscsi": "UNKNOWN", "api": "UP"},
-                  403: {"status": "UNAUTHORIZED",
+                  403: {"status": "FORBIDDEN",
                         "iscsi": "UNKNOWN", "api": "UP"},
                   500: {"status": "UNKNOWN",
                         "iscsi": "UNKNOWN", "api": "UNKNOWN"},
