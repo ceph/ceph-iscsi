@@ -143,10 +143,11 @@ class DeviceStatusWatcher(threading.Thread):
 
             # cleanup stale entries and try to move to online if a dev
             # didn't not see any errors on every gateway for a while
-            for image_name, dev_status in self.status_lookup.items():
+            for image_name in list(self.status_lookup):
                 if image_names_dict.get(image_name) is None:
                     del self.status_lookup[image_name]
                 else:
+                    dev_status = self.status_lookup[image_name]
                     if dev_status.changed_state is False:
                         dev_status.stable_cnt += 1
 
