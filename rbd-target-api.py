@@ -1497,12 +1497,15 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
     api_vars = {
         'mode': 'deactivate'}
 
+    need_active = True
     logger.debug("deactivating disk")
     resp_text, resp_code = call_api(gateways, '_disk',
                                     image_id,
                                     http_method='put',
                                     api_vars=api_vars)
-    if resp_code == 200:
+    if resp_code == 200 or resp_code == 400:
+        if resp_code == 400:
+            need_active = False
         try:
             with rados.Rados(conffile=settings.config.cephconf,
                              name=settings.config.cluster_client_name) as cluster, \
@@ -1526,15 +1529,18 @@ def _disksnap_rollback(image_id, pool_name, image_name, name):
     else:
         resp_text = "failed to deactivate disk: {}".format(resp_text)
 
-    logger.debug("activating disk")
-    api_vars['mode'] = 'activate'
-    activate_resp_text, activate_resp_code = call_api(gateways, '_disk',
-                                                      image_id,
-                                                      http_method='put',
-                                                      api_vars=api_vars)
-    if resp_code == 200 and activate_resp_code != 200:
-        resp_text = activate_resp_text
-        resp_code = activate_resp_code
+    if need_active:
+        logger.debug("activating disk")
+        api_vars['mode'] = 'activate'
+        activate_resp_text, activate_resp_code = call_api(gateways, '_disk',
+                                                          image_id,
+                                                          http_method='put',
+                                                          api_vars=api_vars)
+        if resp_code == 200 and activate_resp_code != 200:
+            resp_text = activate_resp_text
+            resp_code = activate_resp_code
+    else:
+        logger.debug("no need to activate disk")
 
     return resp_text, resp_code
 
