@@ -36,6 +36,7 @@ BuildArch:      noarch
 
 Obsoletes:      ceph-iscsi-config
 Obsoletes:      ceph-iscsi-cli
+Obsoletes:      ceph-iscsi-tools
 
 Requires:       tcmu-runner >= 1.4.0
 Requires:       ceph-common >= 10.2.2
