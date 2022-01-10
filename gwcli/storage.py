@@ -153,7 +153,7 @@ class Disks(UIGroup):
         for child in children:
             self.remove_child(child)
 
-    def ui_command_attach(self, pool=None, image=None, backstore=None, wwn=None):
+    def ui_command_attach(self, pool, image=None, backstore=None, wwn=None):
         """
         Assign a previously created RBD image to the gateway(s)
 
@@ -189,7 +189,7 @@ class Disks(UIGroup):
                           "image={}".format(pool, image))
         self.create_disk(pool=pool, image=image, create_image=False, backstore=backstore, wwn=wwn)
 
-    def ui_command_create(self, pool=None, image=None, size=None, backstore=None, wwn=None,
+    def ui_command_create(self, pool, image=None, size=None, backstore=None, wwn=None,
                           count=1):
         """
         Create a RBD image and assign to the gateway(s).
@@ -263,7 +263,7 @@ class Disks(UIGroup):
         self.create_disk(pool=pool, image=image, size=size, count=count, backstore=backstore,
                          wwn=wwn)
 
-    def _valid_pool(self, pool=None):
+    def _valid_pool(self, pool):
         """
         ensure the requested pool is ok to use. currently this is just a
         pool type check, but could also include checks against freespace in the
@@ -285,7 +285,7 @@ class Disks(UIGroup):
                           "be replicated".format(pool))
         return False
 
-    def create_disk(self, pool=None, image=None, size=None, count=1,
+    def create_disk(self, pool, image, size=None, count=1,
                     parent=None, create_image=True, backstore=None, wwn=None):
 
         rc = 0
