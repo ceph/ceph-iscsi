@@ -1,4 +1,3 @@
-import subprocess
 import netifaces
 
 from rtslib_fb.utils import RTSLibError
@@ -11,7 +10,7 @@ from ceph_iscsi_config.target import GWTarget
 from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient
 from ceph_iscsi_config.lio import LIO
-from ceph_iscsi_config.utils import this_host, CephiSCSIError
+from ceph_iscsi_config.utils import this_host, CephiSCSIError, run_shell_cmd
 
 __author__ = 'pcuzner@redhat.com'
 
@@ -26,15 +25,6 @@ class CephiSCSIGateway(object):
         else:
             self.hostname = this_host()
 
-    def _run_ceph_cmd(self, cmd, stderr=None, shell=True):
-        if not stderr:
-            stderr = subprocess.STDOUT
-        try:
-            result = subprocess.check_output(cmd, stderr=stderr, shell=shell)
-        except subprocess.CalledProcessError as err:
-            return None, err
-        return result, None
-
     def ceph_rm_blocklist(self, blocklisted_ip):
         """
         Issue a ceph osd blocklist rm command for a given IP on this host
@@ -46,13 +36,13 @@ class CephiSCSIGateway(object):
                          "{}".format(blocklisted_ip))
 
         conf = settings.config
-        result, err = self._run_ceph_cmd(
+        result, err = run_shell_cmd(
             "ceph -n {client_name} --conf {cephconf} osd blocklist rm "
             "{blocklisted_ip}".format(blocklisted_ip=blocklisted_ip,
                                       client_name=conf.cluster_client_name,
                                       cephconf=conf.cephconf))
         if err:
-            result, err = self._run_ceph_cmd(
+            result, err = run_shell_cmd(
                 "ceph -n {client_name} --conf {cephconf} osd blacklist rm "
                 "{blocklisted_ip}".format(blocklisted_ip=blocklisted_ip,
                                           client_name=conf.cluster_client_name,
@@ -86,13 +76,13 @@ class CephiSCSIGateway(object):
 
         # NB. Need to use the stderr override to catch the output from
         # the command
-        blocklist, err = self._run_ceph_cmd(
+        blocklist, err = run_shell_cmd(
             "ceph -n {client_name} --conf {cephconf} osd blocklist ls".
             format(client_name=conf.cluster_client_name,
                    cephconf=conf.cephconf))
 
         if err:
-            blocklist, err = self._run_ceph_cmd(
+            blocklist, err = run_shell_cmd(
                 "ceph -n {client_name} --conf {cephconf} osd blacklist ls".
                 format(client_name=conf.cluster_client_name,
                        cephconf=conf.cephconf))

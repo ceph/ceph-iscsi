@@ -1,3 +1,4 @@
+import json
 import rados
 import rbd
 import re
@@ -13,8 +14,8 @@ from ceph_iscsi_config.gateway_setting import TCMU_SETTINGS
 from ceph_iscsi_config.backstore import USER_RBD
 from ceph_iscsi_config.utils import (convert_2_bytes, gen_control_string,
                                      valid_size, get_pool_id, ip_addresses,
-                                     get_pools, get_rbd_size, this_host,
-                                     human_size, CephiSCSIError)
+                                     get_pools, get_rbd_size, run_shell_cmd,
+                                     human_size, CephiSCSIError, this_host)
 from ceph_iscsi_config.gateway_object import GWObject
 from ceph_iscsi_config.target import GWTarget
 from ceph_iscsi_config.client import GWClient, CHAP
@@ -46,13 +47,14 @@ class RBDDev(object):
         ]
     }
 
-    def __init__(self, image, size, backstore, pool=None):
+    def __init__(self, image, size, backstore, pool=None, datapool=None):
         self.image = image
         self.size_bytes = convert_2_bytes(size)
         self.backstore = backstore
         if pool is None:
             pool = settings.config.pool
         self.pool = pool
+        self.datapool = datapool
         self.pool_id = get_pool_id(pool_name=self.pool)
         self.error = False
         self.error_msg = ''
@@ -74,14 +76,14 @@ class RBDDev(object):
                                     self.image,
                                     self.size_bytes,
                                     features=RBDDev.default_features(self.backstore),
-                                    old_format=False)
+                                    old_format=False,
+                                    data_pool=self.datapool)
 
                 except (rbd.ImageExists, rbd.InvalidArgument) as err:
                     self.error = True
-                    self.error_msg = ("Failed to create rbd image {} in "
-                                      "pool {} : {}".format(self.image,
-                                                            self.pool,
-                                                            err))
+                    self.error_msg = ("Failed to create rbd image {} in pool {}, "
+                                      "datapool {} : {}".format(self.image, self.pool,
+                                                                self.datapool, err))
 
     def delete(self):
         """
@@ -289,11 +291,12 @@ class LUN(GWObject):
         USER_RBD: TCMU_SETTINGS
     }
 
-    def __init__(self, logger, pool, image, size, allocating_host,
+    def __init__(self, logger, pool, datapool, image, size, allocating_host,
                  backstore, backstore_object_name):
         self.logger = logger
         self.image = image
         self.pool = pool
+        self.datapool = datapool
         self.pool_id = 0
         self.size_bytes = convert_2_bytes(size)
         self.config_key = '{}/{}'.format(self.pool, self.image)
@@ -351,7 +354,7 @@ class LUN(GWObject):
             if self.error:
                 return
 
-        rbd_image = RBDDev(self.image, '0G', self.backstore, self.pool)
+        rbd_image = RBDDev(self.image, '0G', self.backstore, self.pool, self.datapool)
 
         if local_gw == self.allocating_host:
             # by using the allocating host we ensure the delete is not
@@ -574,6 +577,42 @@ class LUN(GWObject):
             if client_err:
                 raise CephiSCSIError(client_err)
 
+    def _erasure_pool_check(self):
+        # skip it and if no ecpool specified return True
+        if not self.datapool:
+            return True
+
+        # if the datapool is not erasure code pool return True
+        data, err = run_shell_cmd(
+            "ceph -n {name} --conf {conf} osd dump --format=json".
+            format(name=settings.config.cluster_client_name,
+                   conf=settings.config.cephconf))
+        if err:
+            self.logger.error("Cannot the pool type type for datapool")
+            return False
+        for _pool in json.loads(data)['pools']:
+            if _pool['pool_name'] == self.datapool:
+                if _pool['type'] == 3:
+                    break
+                else:
+                    self.logger.debug(f"datapool {self.datapool} is not erasure pool")
+                    return True
+
+        # check whether allow_ec_overwrites is enabled for erasure code pool
+        data, err = run_shell_cmd(
+            "ceph -n {name} --conf {conf} osd pool get {pool} allow_ec_overwrites -f json".
+            format(name=settings.config.cluster_client_name,
+                   conf=settings.config.cephconf, pool=self.datapool))
+        if err:
+            self.logger.error(f"Cannot get allow_ec_overwrites from pool ({self.pool})")
+            return False
+        result = json.loads(data)
+        if result['allow_ec_overwrites']:
+            self.logger.debug(f"erasure pool ({self.pool}) allow_ec_overwrites is enabled")
+            return True
+        self.logger.debug(f"erasure pool ({self.pool}) allow_ec_overwrites is disabled")
+        return False
+
     def allocate(self, keep_dev_in_lio=True, in_wwn=None):
         """
         Create image and add to LIO and config.
@@ -583,6 +622,9 @@ class LUN(GWObject):
         :return: LIO storage object if successful and keep_dev_in_lio=True
                  else None.
         """
+        if not self._erasure_pool_check():
+            return None
+
         self.logger.debug("LUN.allocate starting, listing rbd devices")
         disk_list = RBDDev.rbd_list(pool=self.pool)
         self.logger.debug("rados pool '{}' contains the following - "
@@ -593,7 +635,8 @@ class LUN(GWObject):
                           "allocations is {}".format(local_gw,
                                                      self.allocating_host))
 
-        rbd_image = RBDDev(self.image, self.size_bytes, self.backstore, self.pool)
+        rbd_image = RBDDev(self.image, self.size_bytes, self.backstore, self.pool,
+                           self.datapool)
         self.pool_id = rbd_image.pool_id
 
         # if the image required isn't defined, create it!
@@ -703,6 +746,7 @@ class LUN(GWObject):
                     disk_attr = {"wwn": wwn,
                                  "image": self.image,
                                  "pool": self.pool,
+                                 "datapool": self.datapool,
                                  "allocating_host": self.allocating_host,
                                  "pool_id": rbd_image.pool_id,
                                  "controls": self.controls,
@@ -963,7 +1007,10 @@ class LUN(GWObject):
 
         :param ceph_iscsi_config: Config object
         :param logger: logger object
-        :param image_id: (str) <pool>.<image> format
+        :param pool: (str) pool name
+        :param datapool: (str) datapool name
+        :param image: (str) image name
+        :param size: (str) size
         :return: (str) either 'ok' or an error description
         """
 
@@ -993,12 +1040,16 @@ class LUN(GWObject):
 
         config = ceph_iscsi_config.config
 
+        datapool = kwargs.get('datapool', None)
         disk_key = "{}/{}".format(kwargs['pool'], kwargs['image'])
 
         if mode in ['create', 'resize']:
 
-            if kwargs['pool'] not in get_pools():
-                return "pool name is invalid"
+            _pools = get_pools()
+            if kwargs['pool'] not in _pools:
+                return "pool '{}' doesn't exist".format(kwargs['pool'])
+            if datapool and datapool not in _pools:
+                return "datapool '{}' deosn't exist".format(datapool)
 
         if mode == 'create':
             if kwargs['size'] and not valid_size(kwargs['size']):
@@ -1010,6 +1061,8 @@ class LUN(GWObject):
             disk_regex = re.compile(r"^[a-zA-Z0-9\-_\.]+$")
             if not disk_regex.search(kwargs['pool']):
                 return "Invalid pool name (use alphanumeric, '_', '.', or '-' characters)"
+            if datapool and not disk_regex.search(datapool):
+                return "Invalid datapool name (use alphanumeric, '_', '.', or '-' characters)"
             if not disk_regex.search(kwargs['image']):
                 return "Invalid image name (use alphanumeric, '_', '.', or '-' characters)"
 
@@ -1040,9 +1093,7 @@ class LUN(GWObject):
         if mode in ["resize", "delete", "reconfigure"]:
             # disk must exist in the config
             if disk_key not in config['disks']:
-                return ("rbd {}/{} is not defined to the "
-                        "configuration".format(kwargs['pool'],
-                                               kwargs['image']))
+                return ("rbd {} is not defined to the configuration".format(disk_key))
 
         if mode == 'resize':
 
@@ -1231,13 +1282,15 @@ class LUN(GWObject):
                     for disk_key in pool_disks:
 
                         pool, image_name = disk_key.split('/')
+
                         with rbd.Image(ioctx, image_name) as rbd_image:
 
                             disk_config = config.config['disks'][disk_key]
+                            datapool = disk_config.get('datapool', None)
                             backstore = disk_config['backstore']
                             backstore_object_name = disk_config['backstore_object_name']
 
-                            lun = LUN(logger, pool, image_name,
+                            lun = LUN(logger, pool, datapool, image_name,
                                       rbd_image.size(), local_gw, backstore,
                                       backstore_object_name)
 
