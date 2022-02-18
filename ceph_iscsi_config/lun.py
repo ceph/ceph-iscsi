@@ -1234,38 +1234,42 @@ class LUN(GWObject):
                     for disk_key in pool_disks:
 
                         pool, image_name = disk_key.split('/')
-                        with rbd.Image(ioctx, image_name) as rbd_image:
+                        try:
+                            with rbd.Image(ioctx, image_name) as rbd_image:
 
-                            disk_config = config.config['disks'][disk_key]
-                            backstore = disk_config['backstore']
-                            backstore_object_name = disk_config['backstore_object_name']
+                                disk_config = config.config['disks'][disk_key]
+                                backstore = disk_config['backstore']
+                                backstore_object_name = disk_config['backstore_object_name']
 
-                            lun = LUN(logger, pool, image_name,
-                                      rbd_image.size(), local_gw, backstore,
-                                      backstore_object_name)
+                                lun = LUN(logger, pool, image_name,
+                                          rbd_image.size(), local_gw, backstore,
+                                          backstore_object_name)
 
-                            if lun.error:
-                                raise CephiSCSIError("Error defining rbd image {}"
-                                                     .format(disk_key))
+                                if lun.error:
+                                    raise CephiSCSIError("Error defining rbd image {}"
+                                                         .format(disk_key))
 
-                            so = lun.allocate()
-                            if lun.error:
-                                raise CephiSCSIError("Unable to register {} "
-                                                     "with LIO: {}"
-                                                     .format(disk_key,
-                                                             lun.error_msg))
+                                so = lun.allocate()
+                                if lun.error:
+                                    raise CephiSCSIError("Unable to register {} "
+                                                         "with LIO: {}"
+                                                         .format(disk_key,
+                                                                 lun.error_msg))
 
-                            # If not in use by another target on this gw
-                            # clean up stale locks.
-                            if so.status != 'activated':
-                                RBDDev.rbd_lock_cleanup(logger, ips,
-                                                        rbd_image)
+                                # If not in use by another target on this gw
+                                # clean up stale locks.
+                                if so.status != 'activated':
+                                    RBDDev.rbd_lock_cleanup(logger, ips,
+                                                            rbd_image)
 
-                            target._map_lun(config, so, target_disks[disk_key])
-                            if target.error:
-                                raise CephiSCSIError("Mapping for {} failed: {}"
-                                                     .format(disk_key,
-                                                             target.error_msg))
+                                target._map_lun(config, so, target_disks[disk_key])
+                                if target.error:
+                                    raise CephiSCSIError("Mapping for {} failed: {}"
+                                                         .format(disk_key,
+                                                                 target.error_msg))
+                        except rbd.ImageNotFound:
+                            logger.error("Error defining rbd image {}, not found"
+                                         .format(disk_key))
 
 
 def rados_pool(conf=None, pool=None):
