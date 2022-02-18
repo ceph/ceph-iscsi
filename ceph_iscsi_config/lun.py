@@ -1050,7 +1050,10 @@ class LUN(GWObject):
                 return "Size is invalid"
 
             size = kwargs['size'].upper()
-            current_size = get_rbd_size(kwargs['pool'], kwargs['image'])
+            try:
+                current_size = get_rbd_size(kwargs['pool'], kwargs['image'])
+            except Exception as err:
+                return "failed to get current size: {}".format(err)
             if convert_2_bytes(size) <= current_size:
                 return ("resize value must be larger than the "
                         "current size ({}/{})".format(human_size(current_size),
