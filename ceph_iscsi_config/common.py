@@ -4,9 +4,9 @@ import time
 import json
 import traceback
 
-from ceph_iscsi_config.backstore import USER_RBD
+from ceph_iscsi_config.backstore import USER_RBD, lookup_storage_object_by_disk
 import ceph_iscsi_config.settings as settings
-from ceph_iscsi_config.utils import encryption_available, get_time
+from ceph_iscsi_config.utils import encryption_available, get_time, get_rbd_size, this_host
 
 
 class ConfigTransaction(object):
@@ -189,8 +189,53 @@ class Config(object):
 
         return True
 
+    # if the 'recovery' are set, that means the image size
+    # have changed and we need to update the local LIO
+    # device size.
+    def try_to_update_lio_dev_size(self):
+        if self.config['version'] < 11:
+            return
+
+        now = get_time()
+        local_gw = this_host()
+        for disk_key, disk in self.config['disks'].items():
+            if disk.get('recovery', []) == []:
+                continue
+
+            if local_gw not in disk['recovery']:
+                continue
+
+            so = lookup_storage_object_by_disk(self, disk_key)
+            if not so:
+                continue
+
+            try:
+                size = get_rbd_size(disk['pool'], disk['image'])
+            except Exception as err:
+                self.logger.warn("Failed to get image size, "
+                                 "{}".format(self.config_key))
+                continue
+
+            # most likely
+            if so.size == size:
+                continue
+            elif so.size < size:
+                stg_object.set_attribute("dev_size", self.size_bytes)
+            else:
+                self.logger.warn("Image size({}) is smaller than LIO device size"
+                                 "({})".format(size, so.size))
+
+            # update the other items
+            disk['recovery'].remove(local_gw)
+            self.update_sub_item('disks', self.config_key,
+                                 'recovery', disk['recovery'])
+            self.update_sub_item('disks', self.config_key,
+                                 'updated', now)
+        self.commit("retain")
+
     def _upgrade_config(self):
         update_hostname = self.needs_hostname_update()
+        self.try_to_update_lio_dev_size()
 
         if self.config['version'] >= Config.seed_config['version'] and not update_hostname:
             return
