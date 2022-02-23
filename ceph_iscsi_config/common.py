@@ -11,14 +11,15 @@ from ceph_iscsi_config.utils import encryption_available, get_time
 
 class ConfigTransaction(object):
 
-    def __init__(self, cfg_type, element_name, txn_action='add', initial_value=None):
+    def __init__(self, cfg_type, element_name, item_name, txn_action='add', initial_value=None):
 
         self.type = cfg_type
         self.action = txn_action
-        self.item_name = element_name
+        self.element_name = element_name
+        self.item_name = item_name
 
         init_state = {} if initial_value is None else initial_value
-        self.item_content = init_state
+        self.content = init_state
 
     def __repr__(self):
         return str(self.__dict__)
@@ -527,7 +528,7 @@ class Config(object):
             if isinstance(init_state, str) and 'created' not in self.config[cfg_type]:
                 self.config[cfg_type]['created'] = now
                 # add a separate transaction to capture the creation date to the section
-                txn = ConfigTransaction(cfg_type, 'created', initial_value=now)
+                txn = ConfigTransaction(cfg_type, 'created', None, initial_value=now)
                 self.txn_list.append(txn)
 
         else:
@@ -540,7 +541,7 @@ class Config(object):
         self.logger.debug("(Config.add_item) config updated to {}".format(self.config))
         self.changed = True
 
-        txn = ConfigTransaction(cfg_type, element_name, initial_value=init_state)
+        txn = ConfigTransaction(cfg_type, element_name, None, initial_value=init_state)
         self.txn_list.append(txn)
 
     def del_item(self, cfg_type, element_name):
@@ -551,35 +552,40 @@ class Config(object):
             del self.config[cfg_type]
         self.logger.debug("(Config.del_item) config updated to {}".format(self.config))
 
-        txn = ConfigTransaction(cfg_type, element_name, 'delete')
+        txn = ConfigTransaction(cfg_type, element_name, None, 'delete')
         self.txn_list.append(txn)
 
-    def update_item(self, cfg_type, element_name, element_value):
+    def update_sub_item(self, cfg_type, element_name, item_name, value):
         now = get_time()
 
         if element_name:
-            current_values = self.config[cfg_type][element_name]
+            if item_name:
+                current_values = self.config[cfg_type][element_name][item_name]
+                self.config[cfg_type][element_name][item_name] = value
+            else:
+                current_values = self.config[cfg_type][element_name]
+                if isinstance(value, dict):
+                    merged = current_values.copy()
+                    new_dict = value
+                    new_dict['updated'] = now
+                    merged.update(new_dict)
+                    value = merged.copy()
+                self.config[cfg_type][element_name] = value
             self.logger.debug("prior to update, item contains {}".format(current_values))
-            if isinstance(element_value, dict):
-                merged = current_values.copy()
-                new_dict = element_value
-                new_dict['updated'] = now
-                merged.update(new_dict)
-                element_value = merged.copy()
-
-            self.config[cfg_type][element_name] = element_value
         else:
             # update to a root level config element, like version
-            self.config[cfg_type] = element_value
+            self.config[cfg_type] = value
 
         self.logger.debug("(Config.update_item) config is {}".format(self.config))
         self.changed = True
         self.logger.debug("update_item: type={}, item={}, update={}".format(
-            cfg_type, element_name, element_value))
+            cfg_type, element_name, value))
 
-        txn = ConfigTransaction(cfg_type, element_name, 'add')
-        txn.item_content = element_value
+        txn = ConfigTransaction(cfg_type, element_name, item_name, 'add', value)
         self.txn_list.append(txn)
+
+    def update_item(self, cfg_type, element_name, value):
+        self.update_sub_item(cfg_type, element_name, None, value)
 
     def set_item(self, cfg_type, element_name, element_value):
         self.logger.debug("(Config.update_item) config is {}".format(self.config))
@@ -587,8 +593,7 @@ class Config(object):
         self.logger.debug("update_item: type={}, item={}, update={}".format(
             cfg_type, element_name, element_value))
 
-        txn = ConfigTransaction(cfg_type, element_name, 'add')
-        txn.item_content = element_value
+        txn = ConfigTransaction(cfg_type, element_name, None, 'add', element_value)
         self.txn_list.append(txn)
 
     def _commit_rbd(self, post_action):
@@ -607,14 +612,23 @@ class Config(object):
 
             self.logger.debug("_commit_rbd transaction shows {}".format(txn))
             if txn.action == 'add':         # add's and updates
-                if txn.item_name:
-                    current_config[txn.type][txn.item_name] = txn.item_content
+                if txn.element_name:
+                    if txn.item_name:
+                        # for the 'update' item it's monotone increasing
+                        if txn.item_name == "updated":
+                            cur_time = current_config[txn.type][txn.element_name][txn.item_name]
+                            if cur_time < txn.content:
+                                current_config[txn.type][txn.element_name][txn.item_name] = txn.content
+                        else:
+                            current_config[txn.type][txn.element_name][txn.item_name] = txn.content
+                    else:
+                        current_config[txn.type][txn.element_name] = txn.content
                 else:
-                    current_config[txn.type] = txn.item_content
+                    current_config[txn.type] = txn.content
 
             elif txn.action == 'delete':
-                if txn.item_name:
-                    del current_config[txn.type][txn.item_name]
+                if txn.element_name:
+                    del current_config[txn.type][txn.element_name]
                 else:
                     del current_config[txn.type]
             else:
