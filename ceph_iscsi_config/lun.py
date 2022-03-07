@@ -574,6 +574,38 @@ class LUN(GWObject):
             if client_err:
                 raise CephiSCSIError(client_err)
 
+    def add_disk_item(self, wwn, pool_id, recovery=False):
+        # rbd image is OK to use, so ensure it's in the config
+        # object
+        if self.config_key not in self.config.config['disks']:
+            self.config.add_item('disks', self.config_key)
+
+        if recovery:
+            gateways = self.config.config['gateways'].keys()
+            recovery_count = [gw for gw in gateways if gw != this_host()]
+        else:
+            recovery_count = []
+
+        # update the other items
+        disk_attr = {"wwn": wwn,
+                     "image": self.image,
+                     "pool": self.pool,
+                     "allocating_host": self.allocating_host,
+                     "pool_id": pool_id,
+                     "controls": self.controls,
+                     "backstore": self.backstore,
+                     "backstore_object_name": self.backstore_object_name,
+                     "recovery": recovery_count}
+
+        self.config.update_item('disks',
+                                self.config_key,
+                                disk_attr)
+
+        self.logger.debug("(LUN.allocate) registered '{}' with "
+                          "wwn '{}' with the config "
+                          "object".format(self.image,
+                                          wwn))
+
     def allocate(self, keep_dev_in_lio=True, in_wwn=None):
         """
         Create image and add to LIO and config.
@@ -604,7 +636,6 @@ class LUN(GWObject):
                 rbd_image.create()
 
                 if not rbd_image.error:
-                    self.config.add_item('disks', self.config_key)
                     self.logger.info("(LUN.allocate) created {}/{} "
                                      "successfully".format(self.pool,
                                                            self.image))
@@ -630,13 +661,7 @@ class LUN(GWObject):
         else:
             # requested image is already defined to ceph
 
-            if rbd_image.valid:
-                # rbd image is OK to use, so ensure it's in the config
-                # object
-                if self.config_key not in self.config.config['disks']:
-                    self.config.add_item('disks', self.config_key)
-
-            else:
+            if not rbd_image.valid:
                 # rbd image is not valid for export, so abort
                 self.error = True
                 features = ','.join(RBDDev.unsupported_features_list[self.backstore])
@@ -700,23 +725,7 @@ class LUN(GWObject):
                         if self.error:
                             return None
 
-                    disk_attr = {"wwn": wwn,
-                                 "image": self.image,
-                                 "pool": self.pool,
-                                 "allocating_host": self.allocating_host,
-                                 "pool_id": rbd_image.pool_id,
-                                 "controls": self.controls,
-                                 "backstore": self.backstore,
-                                 "backstore_object_name": self.backstore_object_name}
-
-                    self.config.update_item('disks',
-                                            self.config_key,
-                                            disk_attr)
-
-                    self.logger.debug("(LUN.allocate) registered '{}' with "
-                                      "wwn '{}' with the config "
-                                      "object".format(self.image,
-                                                      wwn))
+                    self.add_disk_item(wwn, rbd_image.pool_id)
                     self.logger.info("(LUN.allocate) added '{}/{}' to LIO and"
                                      " config object".format(self.pool,
                                                              self.image))
@@ -780,8 +789,15 @@ class LUN(GWObject):
                 self.logger.critical(self.error_msg)
                 return None
 
+            # try to recovery the config from LIO
+            if local_gw == self.allocating_host:
+                # lun is now in LIO, time for some housekeeping :P
+                wwn = so._get_wwn()
+                self.add_disk_item(wwn, rbd_image.pool_id, True)
+                self.num_changes += 1
+
         self.logger.debug("config meta data for this disk is "
-                          "{}".format(self.config.config['disks'][self.config_key]))
+                          "{}".format(self.config.config['disks'].get(self.config_key)))
 
         # the owning host for an image is the only host that commits to the
         # config
