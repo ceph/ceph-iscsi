@@ -574,6 +574,30 @@ class LUN(GWObject):
             if client_err:
                 raise CephiSCSIError(client_err)
 
+    def add_disk_item(self, wwn, pool_id):
+        # rbd image is OK to use, so ensure it's in the config
+        # object
+        if self.config_key not in self.config.config['disks']:
+            self.config.add_item('disks', self.config_key)
+
+        # update the other items
+        disk_attr = {"wwn": wwn,
+                     "image": self.image,
+                     "pool": self.pool,
+                     "allocating_host": self.allocating_host,
+                     "pool_id": pool_id,
+                     "controls": self.controls,
+                     "backstore": self.backstore,
+                     "backstore_object_name": self.backstore_object_name}
+
+        self.config.update_item('disks',
+                                self.config_key,
+                                disk_attr)
+
+        self.logger.debug("(LUN.allocate) registered '{}/{}' with "
+                          "wwn '{}' with the config "
+                          "object".format(self.pool, self.image, wwn))
+
     def allocate(self, keep_dev_in_lio=True, in_wwn=None):
         """
         Create image and add to LIO and config.
@@ -604,7 +628,6 @@ class LUN(GWObject):
                 rbd_image.create()
 
                 if not rbd_image.error:
-                    self.config.add_item('disks', self.config_key)
                     self.logger.info("(LUN.allocate) created {}/{} "
                                      "successfully".format(self.pool,
                                                            self.image))
@@ -630,13 +653,7 @@ class LUN(GWObject):
         else:
             # requested image is already defined to ceph
 
-            if rbd_image.valid:
-                # rbd image is OK to use, so ensure it's in the config
-                # object
-                if self.config_key not in self.config.config['disks']:
-                    self.config.add_item('disks', self.config_key)
-
-            else:
+            if not rbd_image.valid:
                 # rbd image is not valid for export, so abort
                 self.error = True
                 features = ','.join(RBDDev.unsupported_features_list[self.backstore])
@@ -700,23 +717,7 @@ class LUN(GWObject):
                         if self.error:
                             return None
 
-                    disk_attr = {"wwn": wwn,
-                                 "image": self.image,
-                                 "pool": self.pool,
-                                 "allocating_host": self.allocating_host,
-                                 "pool_id": rbd_image.pool_id,
-                                 "controls": self.controls,
-                                 "backstore": self.backstore,
-                                 "backstore_object_name": self.backstore_object_name}
-
-                    self.config.update_item('disks',
-                                            self.config_key,
-                                            disk_attr)
-
-                    self.logger.debug("(LUN.allocate) registered '{}' with "
-                                      "wwn '{}' with the config "
-                                      "object".format(self.image,
-                                                      wwn))
+                    self.add_disk_item(wwn, rbd_image.pool_id)
                     self.logger.info("(LUN.allocate) added '{}/{}' to LIO and"
                                      " config object".format(self.pool,
                                                              self.image))
@@ -780,8 +781,19 @@ class LUN(GWObject):
                 self.logger.critical(self.error_msg)
                 return None
 
+            # wwn is empty means there disk config is empty and we need
+            # recover it and currently we do not support size changing
+            disk_config = self.config.config['disks'].get(self.config_key, None)
+            if disk_config is None and self.lio_size_ok(rbd_image, so, True):
+                # try to recovery the config from LIO
+                if local_gw == self.allocating_host:
+                    # lun is now in LIO, time for some housekeeping :P
+                    wwn = so._get_wwn()
+                    self.add_disk_item(wwn, rbd_image.pool_id)
+                    self.num_changes += 1
+
         self.logger.debug("config meta data for this disk is "
-                          "{}".format(self.config.config['disks'][self.config_key]))
+                          "{}".format(self.config.config['disks'].get(self.config_key, None)))
 
         # the owning host for an image is the only host that commits to the
         # config
@@ -797,7 +809,7 @@ class LUN(GWObject):
 
         return so
 
-    def lio_size_ok(self, rbd_object, stg_object):
+    def lio_size_ok(self, rbd_object, stg_object, equal_size=False):
         """
         Check that the SO in LIO matches the current size of the rbd. if the
         size requested < current size, just return. Downsizing an rbd is not
@@ -821,6 +833,8 @@ class LUN(GWObject):
 
         # we have the right size for the rbd - check that LIO dev size matches
         if rbd_size_ok:
+            if equal_size:
+                return stg_object.size == self.size_bytes
 
             # If the LIO size is not right, poke it with the new value
             if stg_object.size < self.size_bytes:
@@ -1050,7 +1064,10 @@ class LUN(GWObject):
                 return "Size is invalid"
 
             size = kwargs['size'].upper()
-            current_size = get_rbd_size(kwargs['pool'], kwargs['image'])
+            try:
+                current_size = get_rbd_size(kwargs['pool'], kwargs['image'])
+            except Exception as err:
+                return "failed to get current size: {}".format(err)
             if convert_2_bytes(size) <= current_size:
                 return ("resize value must be larger than the "
                         "current size ({}/{})".format(human_size(current_size),
@@ -1231,38 +1248,42 @@ class LUN(GWObject):
                     for disk_key in pool_disks:
 
                         pool, image_name = disk_key.split('/')
-                        with rbd.Image(ioctx, image_name) as rbd_image:
+                        try:
+                            with rbd.Image(ioctx, image_name) as rbd_image:
 
-                            disk_config = config.config['disks'][disk_key]
-                            backstore = disk_config['backstore']
-                            backstore_object_name = disk_config['backstore_object_name']
+                                disk_config = config.config['disks'][disk_key]
+                                backstore = disk_config['backstore']
+                                backstore_object_name = disk_config['backstore_object_name']
 
-                            lun = LUN(logger, pool, image_name,
-                                      rbd_image.size(), local_gw, backstore,
-                                      backstore_object_name)
+                                lun = LUN(logger, pool, image_name,
+                                          rbd_image.size(), local_gw, backstore,
+                                          backstore_object_name)
 
-                            if lun.error:
-                                raise CephiSCSIError("Error defining rbd image {}"
-                                                     .format(disk_key))
+                                if lun.error:
+                                    raise CephiSCSIError("Error defining rbd image {}"
+                                                         .format(disk_key))
 
-                            so = lun.allocate()
-                            if lun.error:
-                                raise CephiSCSIError("Unable to register {} "
-                                                     "with LIO: {}"
-                                                     .format(disk_key,
-                                                             lun.error_msg))
+                                so = lun.allocate()
+                                if lun.error:
+                                    raise CephiSCSIError("Unable to register {} "
+                                                         "with LIO: {}"
+                                                         .format(disk_key,
+                                                                 lun.error_msg))
 
-                            # If not in use by another target on this gw
-                            # clean up stale locks.
-                            if so.status != 'activated':
-                                RBDDev.rbd_lock_cleanup(logger, ips,
-                                                        rbd_image)
+                                # If not in use by another target on this gw
+                                # clean up stale locks.
+                                if so.status != 'activated':
+                                    RBDDev.rbd_lock_cleanup(logger, ips,
+                                                            rbd_image)
 
-                            target._map_lun(config, so, target_disks[disk_key])
-                            if target.error:
-                                raise CephiSCSIError("Mapping for {} failed: {}"
-                                                     .format(disk_key,
-                                                             target.error_msg))
+                                target._map_lun(config, so, target_disks[disk_key])
+                                if target.error:
+                                    raise CephiSCSIError("Mapping for {} failed: {}"
+                                                         .format(disk_key,
+                                                                 target.error_msg))
+                        except rbd.ImageNotFound:
+                            logger.error("Error defining rbd image {}, not found"
+                                         .format(disk_key))
 
 
 def rados_pool(conf=None, pool=None):
