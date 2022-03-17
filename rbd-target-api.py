@@ -2879,7 +2879,7 @@ def get_ssl_context():
             return None
 
     ver, rel, mod = werkzeug.__version__.split('.')
-    if int(rel) > 9:
+    if int(ver) > 0 or int(rel) > 9:
         logger.info("API server using TLSv1.2")
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
