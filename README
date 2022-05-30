@@ -12,7 +12,7 @@ configure multiple gateways concurrently.
 
 Here's an example of the shell interface the gwcli tool provides:
 
-[ceph-iscsi]$ gwcli ls
+$ gwcli ls
 o- / .................................................................................. [...]
   o- cluster .................................................................. [Clusters: 1]
   | o- ceph ..................................................................... [HEALTH_OK]
@@ -74,27 +74,49 @@ Curl Examples:
 If the UI is not your thing, curl probably is! Here's an example of using
 curl to create a gateway node.
 
-curl --user admin:admin -d ip_address=192.168.122.14 \
+$ curl --user admin:admin -d ip_address=192.168.122.14 \
      -X PUT http://192.168.122.14:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw1/rh7-gw2
 
 IPv6 Support:
 Make sure the IPv6 addresses used are global unicast ones, and then the
 URL link could be:
 
-curl --user admin:admin -d ip_address=2006:ac81::1104 \
+$ curl --user admin:admin -d ip_address=2006:ac81::1104 \
      -X PUT http://[2006:ac81::1104]:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw2/rh7-gw2
 
 And mixing the IPv4 and IPv6 addresses is also allowed as below:
 
-curl --user admin:admin -d ip_address=192.168.122.14 \
+$ curl --user admin:admin -d ip_address=192.168.122.14 \
      -X PUT http://[2006:ac81::1104]:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw1/rh7-gw2
 
-curl --user admin:admin -d ip_address=2006:ac81::1104 \
+$ curl --user admin:admin -d ip_address=2006:ac81::1104 \
      -X PUT http://192.168.122.14:5000/api/gateway/iqn.2003-01.com.redhat.iscsi-gw:ceph-gw2/rh7-gw2
 
 NOTE: please make sure both the IPv4 and IPv6 addresses are in the trusted
 ip list in iscsi-gateway.cfg.
 
+Mutual CHAP Authentication:
+
+In the initiator node, uncomment and set the following options in /etc/iscsi/iscsid.conf:
+
+node.session.auth.authmethod = CHAP
+node.session.auth.username = ${admin_username}
+node.session.auth.password = ${admin_password}
+node.session.auth.username_in = ${mutual_username}
+node.session.auth.password_in = ${mutual_password}
+
+In the ceph-iscsi target side, set the username/password and mutual_username/mutual_password for the
+corresponding hosts:
+
+$ gwcli iscsi-targets/iqn.2003-01.com.redhat.iscsi-gw:ceph-igw0/hosts/iqn.1994-05.com.redhat:client/ auth \
+      username=${admin_username} password=${admin_password} mutual_username=${mutual_username} \
+      mutual_password=${mutual_password}
+
+Note that after you set some setting in /etc/iscsi/iscsid.conf you have to re-run the discovery command
+so those settings are used for the targets/portals returned from the target.
+
+And also please be aware that do not use the same values for both admin username/password and mutual
+username/password, and the validate characters for the username/password are [0~9,A~Z,a~z,_-@/|].
 
 ## Installation
 ### Via RPM
