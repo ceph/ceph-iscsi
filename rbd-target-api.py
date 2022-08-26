@@ -43,6 +43,8 @@ from gwcli.utils import (APIRequest, valid_gateway, valid_client,
                          GatewayAPIError)
 
 app = Flask(__name__)
+# workaround for https://github.com/pallets/flask/issues/2549
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
 
 
 def requires_basic_auth(f):
