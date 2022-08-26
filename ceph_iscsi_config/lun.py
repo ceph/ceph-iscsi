@@ -1079,7 +1079,7 @@ class LUN(GWObject):
                 settings.Settings.normalize_controls(kwargs['controls'],
                                                      LUN.SETTINGS[backstore])
             except ValueError as err:
-                return(err)
+                return "Unexpected or invalid controls: {}".format(err)
 
         if mode == 'delete':
 
