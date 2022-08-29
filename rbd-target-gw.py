@@ -13,6 +13,8 @@ from ceph_iscsi_config.utils import CephiSCSIInval
 
 # Create a flask instance
 app = Flask(__name__)
+# workaround for https://github.com/pallets/flask/issues/2549
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
 
 
 @app.route("/", methods=["GET"])
