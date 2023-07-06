@@ -21,7 +21,7 @@
 
 Name:           ceph-iscsi
 Version:        3.6
-Release:        1%{?dist}
+Release:        2%{?dist}
 Group:          System/Filesystems
 Summary:        Python modules for Ceph iSCSI gateway configuration management
 %if 0%{?suse_version}
@@ -133,6 +133,13 @@ mkdir -p %{buildroot}%{_mandir}/man8
 install -m 0644 gwcli.8 %{buildroot}%{_mandir}/man8/
 gzip %{buildroot}%{_mandir}/man8/gwcli.8
 mkdir -p %{buildroot}%{_unitdir}/rbd-target-gw.service.d
+# When rtslib is fixed drop this and update the dep. Note that we add both
+# /etc and /var, because the kernel and userspace developers keep switching
+# the dir they want to use.
+mkdir -p %{buildroot}%{_sysconfdir}/target/pr
+mkdir -p %{buildroot}%{_sysconfdir}/target/alua
+mkdir -p %{buildroot}%{_localstatedir}/target/pr
+mkdir -p %{buildroot}%{_localstatedir}/target/alua
 %if 0%{?suse_version}
 mkdir -p %{buildroot}%{_sbindir}
 ln -s service %{buildroot}%{_sbindir}/rcrbd-target-gw
@@ -199,6 +206,12 @@ ln -s service %{buildroot}%{_sbindir}/rcrbd-target-api
 %attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-gw
 %attr(0770,root,root) %dir %{_localstatedir}/log/rbd-target-api
 %dir %{_unitdir}/rbd-target-gw.service.d
+%dir %{_sysconfdir}/target
+%dir %{_sysconfdir}/target/pr
+%dir %{_sysconfdir}/target/alua
+%dir %{_localstatedir}/target
+%dir %{_localstatedir}/target/pr
+%dir %{_localstatedir}/target/alua
 %if 0%{?suse_version}
 %{_sbindir}/rcrbd-target-gw
 %{_sbindir}/rcrbd-target-api
