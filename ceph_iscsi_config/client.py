@@ -517,8 +517,12 @@ class GWClient(GWObject):
         """
 
         r = lio_root.RTSRoot()
-        client_list = [client.node_wwn for client in r.node_acls]
-        return self.iqn in client_list
+        clients_path = [client.path for client in r.node_acls]
+        for client_path in clients_path:
+            if self.iqn in client_path and self.target_iqn in client_path:
+                return True
+
+        return False
 
     def seed_config(self, config):
         """
