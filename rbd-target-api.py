@@ -2777,8 +2777,8 @@ def pre_reqs_errors():
 
     if dist in valid_dists:
         if dist == 'rhel':
-            import platform
-            _, rel, _ = platform.linux_distribution(full_distribution_name=0)
+            import distro
+            rel = distro.version()
         # CentOS formats a release similar 7.4.1708
         rel = float(".".join(rel.split('.')[:2]))
         if rel < valid_dists[dist]:
