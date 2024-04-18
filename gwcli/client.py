@@ -259,7 +259,7 @@ class Clients(UIGroup):
                     status = False
                     break
 
-        return "Auth: {}, Hosts: {}".format(auth_stat_str, len(self.children)),\
+        return "Auth: {}, Hosts: {}".format(auth_stat_str, len(self.children)), \
             status
 
 

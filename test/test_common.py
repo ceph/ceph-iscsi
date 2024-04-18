@@ -41,7 +41,7 @@ class ChapTest(unittest.TestCase):
                 mock.patch.object(Config, '_read_config_object',
                                   return_value=current_config), \
                 mock.patch.object(Config, 'commit'), \
-                mock.patch("socket.gethostname", return_value='node2'),\
+                mock.patch("socket.gethostname", return_value='node2'), \
                 mock.patch("socket.getfqdn", return_value='node2.ceph.local'):
             config = Config(self.logger)
 

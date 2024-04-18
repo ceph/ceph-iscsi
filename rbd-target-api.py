@@ -2184,7 +2184,7 @@ def client(target_iqn, client_iqn):
                                         http_method='put',
                                         api_vars=api_vars)
 
-        return jsonify(message="client create/update {}".format(resp_text)),\
+        return jsonify(message="client create/update {}".format(resp_text)), \
             resp_code
 
     else:
