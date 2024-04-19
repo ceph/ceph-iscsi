@@ -43,6 +43,7 @@ Requires:       ceph-common >= 10.2.2
 %if 0%{?with_python2}
 BuildRequires:  python2-devel
 BuildRequires:  python2-setuptools
+Requires:       python2-distro
 Requires:       python-rados >= 10.2.2
 Requires:       python-rbd >= 10.2.2
 Requires:       python-netifaces >= 0.10.4
@@ -60,6 +61,7 @@ Requires:       python2-requests
 %else
 BuildRequires:  python3-devel
 BuildRequires:  python3-setuptools
+Requires:       python3-distro
 Requires:       python3-rados >= 10.2.2
 Requires:       python3-rbd >= 10.2.2
 Requires:       python3-netifaces >= 0.10.4

@@ -2184,7 +2184,7 @@ def client(target_iqn, client_iqn):
                                         http_method='put',
                                         api_vars=api_vars)
 
-        return jsonify(message="client create/update {}".format(resp_text)),\
+        return jsonify(message="client create/update {}".format(resp_text)), \
             resp_code
 
     else:
@@ -2777,8 +2777,8 @@ def pre_reqs_errors():
 
     if dist in valid_dists:
         if dist == 'rhel':
-            import platform
-            _, rel, _ = platform.linux_distribution(full_distribution_name=0)
+            import distro
+            rel = distro.version()
         # CentOS formats a release similar 7.4.1708
         rel = float(".".join(rel.split('.')[:2]))
         if rel < valid_dists[dist]:
