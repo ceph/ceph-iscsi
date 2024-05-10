@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
-import mock
 import tempfile
 import sys
 import unittest
+try:
+    from unittest import mock
+except ImportError:
+    import mock
+
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization, hashes
