@@ -250,7 +250,7 @@ def get_rbd_size(pool, image, conf=None):
 
     with rados.Rados(conffile=conf, name=settings.config.cluster_client_name) as cluster:
         with cluster.open_ioctx(pool) as ioctx:
-            with rbd.Image(ioctx, image) as rbd_image:
+            with rbd.Image(ioctx, image, read_only=True) as rbd_image:
                 size = rbd_image.size()
     return size
 

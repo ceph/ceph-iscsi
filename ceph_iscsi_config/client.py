@@ -662,6 +662,9 @@ class GWClient(GWObject):
 
                         # persist the config update
                         config_object.commit()
+                        if config_object.error:
+                            self.error = True
+                            self.error_msg = config_object.error_msg
 
         elif rqst_type == 'reconfigure':
             self.define_client()
@@ -684,6 +687,9 @@ class GWClient(GWObject):
                         target_config['clients'].pop(self.iqn)
                         config_object.update_item("targets", self.target_iqn, target_config)
                         config_object.commit()
+                        if config_object.error:
+                            self.error = True
+                            self.error_msg = config_object.error_msg
 
             else:
                 # desired state is absent, but the client does not exist
