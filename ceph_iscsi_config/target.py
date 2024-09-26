@@ -420,7 +420,6 @@ class GWTarget(GWObject):
 
         disk_config = [disk for _, disk in config.config['disks'].items()
                        if disk['backstore_object_name'] == stg_object.name][0]
-        owning_gw = disk_config['owner']
         tpg = lun.parent_tpg
 
         if not tpg_ip_address:
@@ -436,13 +435,15 @@ class GWTarget(GWObject):
         target_config = config.config["targets"][self.iqn]
 
         is_owner = False
-        gw_config = target_config['portals'].get(owning_gw, None)
-        # If the user has exported a disk through multiple targets but
-        # they do not have a common gw the owning gw may not exist here.
-        # The LUN will just have all ANO paths then.
-        if gw_config:
-            if tpg_ip_address in gw_config["portal_ip_addresses"]:
-                is_owner = True
+        owning_gw = disk_config.get('owner')
+        if owning_gw:
+            gw_config = target_config['portals'].get(owning_gw, None)
+            # If the user has exported a disk through multiple targets but
+            # they do not have a common gw the owning gw may not exist here.
+            # The LUN will just have all ANO paths then.
+            if gw_config:
+                if tpg_ip_address in gw_config["portal_ip_addresses"]:
+                    is_owner = True
 
         try:
             alua_tpg = alua_create_group(settings.config.alua_failover_type,
