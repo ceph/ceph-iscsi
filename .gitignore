@@ -23,6 +23,8 @@ var/
 .installed.cfg
 *.egg
 non-git/
+*.tar.gz
+*.rpm
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
