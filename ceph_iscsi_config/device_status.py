@@ -125,7 +125,6 @@ class DeviceStatusWatcher(threading.Thread):
             svc = json.loads(outb).get('tcmu-runner')
             if svc is None:
                 self.logger.warning("there is no tcmu-runner data available")
-                self.state = "Unknown"
                 continue
 
             image_names_dict = {}
@@ -158,6 +157,5 @@ class DeviceStatusWatcher(threading.Thread):
                         dev_status.changed_state = False
 
             # debugging info
-            dev_status = self.get_dev_status(image_name)
-            stats_dict = dev_status.get_status_dict()
-            self.logger.debug(stats_dict)
+            status_dict = {k: v.get_status_dict() for k, v in self.status_lookup.items()}
+            self.logger.debug("device status {}".format(status_dict))
