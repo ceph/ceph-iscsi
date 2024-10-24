@@ -6,7 +6,10 @@ import logging
 import sys
 import unittest
 
-import mock
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
 # We need to mock ceph libs python bindings because there's no
 # updated package in pypy
