@@ -135,3 +135,9 @@ here:
 http://docs.ceph.com/docs/master/rbd/iscsi-target-cli/
 
 can be used to create a iscsi-gateway.cfg and create a target.
+
+## Running Unit Tests
+
+The unit tests for ceph-isci can be run with:
+
+```tox -e py3```
