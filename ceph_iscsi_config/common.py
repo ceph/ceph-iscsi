@@ -484,13 +484,12 @@ class Config(object):
 
     def _seed_rbd_config(self):
 
-        ioctx = self._open_ioctx()
-
         self.lock()
         if self.error:
             return
 
         # if the config object is empty, seed it - if not just leave as is
+        ioctx = self._open_ioctx()
         cfg_data = self._read_config_object(ioctx)
         if not cfg_data:
             self.logger.debug("_seed_rbd_config found empty config object")
@@ -501,6 +500,7 @@ class Config(object):
             ioctx.set_xattr(self.config_name, "epoch", "0".encode('utf-8'))
             self.changed = True
 
+        ioctx.close()
         self.unlock()
 
     def refresh(self):
@@ -593,8 +593,6 @@ class Config(object):
 
     def _commit_rbd(self, post_action):
 
-        ioctx = self._open_ioctx()
-
         if not self.config_locked:
             self.lock()
             if self.error:
@@ -602,6 +600,7 @@ class Config(object):
 
         # reread the config to account for updates made by other systems
         # then apply this hosts update(s)
+        ioctx = self._open_ioctx()
         current_config = json.loads(self._read_config_object(ioctx))
         for txn in self.txn_list:
 
@@ -640,8 +639,8 @@ class Config(object):
                             str(current_config["epoch"]).encode('utf-8'))
             del self.txn_list[:]                # empty the list of transactions
 
-        self.unlock()
         ioctx.close()
+        self.unlock()
 
         if post_action == 'close':
             self.ceph.shutdown()
