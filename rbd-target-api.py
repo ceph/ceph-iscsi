@@ -2759,6 +2759,7 @@ def pre_reqs_errors():
 
     dist_translations = {
         "centos": "rhel",
+        "rocky": "rhel",
         "opensuse-leap": "suse"}
     valid_dists = {
         "rhel": 7.4,
