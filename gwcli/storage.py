@@ -76,7 +76,7 @@ class Disks(UIGroup):
                 disk_meta[rbd_name] = {}
                 with cluster_ioctx.open_ioctx(pool) as ioctx:
                     try:
-                        with rbd.Image(ioctx, image) as rbd_image:
+                        with rbd.Image(ioctx, image, read_only=True) as rbd_image:
                             size = rbd_image.size()
                             features = rbd_image.features()
                             snapshots = list(rbd_image.list_snaps())
@@ -802,7 +802,7 @@ class Disk(UINode):
                          name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
                 try:
-                    with rbd.Image(ioctx, self.image) as rbd_image:
+                    with rbd.Image(ioctx, self.image, read_only=True) as rbd_image:
                         self.exists = True
                         self.size = rbd_image.size()
                         self.size_h = human_size(self.size)

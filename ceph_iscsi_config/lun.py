@@ -167,7 +167,7 @@ class RBDDev(object):
         with rados.Rados(conffile=settings.config.cephconf,
                          name=settings.config.cluster_client_name) as cluster:
             with cluster.open_ioctx(self.pool) as ioctx:
-                with rbd.Image(ioctx, self.image) as rbd_image:
+                with rbd.Image(ioctx, self.image, read_only=True) as rbd_image:
                     image_size = rbd_image.size()
 
         return image_size
@@ -223,8 +223,7 @@ class RBDDev(object):
         with rados.Rados(conffile=settings.config.cephconf,
                          name=settings.config.cluster_client_name) as cluster:
             ioctx = cluster.open_ioctx(self.pool)
-            with rbd.Image(ioctx, self.image) as rbd_image:
-
+            with rbd.Image(ioctx, self.image, read_only=True) as rbd_image:
                 if rbd_image.features() & RBDDev.required_features(self.backstore) != \
                         RBDDev.required_features(self.backstore):
                     valid_state = False
@@ -367,6 +366,8 @@ class LUN(GWObject):
             self.config.del_item('disks', self.config_key)
 
             self.config.commit()
+            self.error = self.config.error
+            self.error_msg = self.config.error_msg
 
     def unmap_lun(self, target_iqn):
         local_gw = this_host()
@@ -425,6 +426,8 @@ class LUN(GWObject):
             self.config.update_item("disks", self.config_key, disk_metadata)
 
             self.config.commit()
+            self.error = self.config.error
+            self.error_msg = self.config.error_msg
 
     def _get_next_lun_id(self, target_disks):
         lun_ids_in_use = [t['lun_id'] for t in target_disks.values()]
